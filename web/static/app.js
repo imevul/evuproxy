@@ -15,7 +15,7 @@
   let peerOverviewFetchSeq = 0;
   let peerOverviewDebounceTimer = null;
 
-  const pages = ["overview", "settings", "token", "peers", "routes", "pending", "stats"];
+  const pages = ["overview", "settings", "token", "peers", "routes", "inbound", "pending", "stats"];
 
   let lastUIPrefs = {
     peer_tunnel_subnet_cidr: "",
@@ -139,6 +139,7 @@
     if (!pages.includes(name)) name = "overview";
     closeConfirmModal();
     if (name !== "routes") closeRouteEditor();
+    if (name !== "inbound") closeInboundEditor();
     if (name !== "peers") closePeerEditor();
     await ensureUIPrefs();
     document.querySelectorAll(".page").forEach((p) => {
@@ -157,6 +158,7 @@
     if (name === "token") refreshTokenPage();
     if (name === "peers") refreshPeersPage();
     if (name === "routes") refreshRoutesPage();
+    if (name === "inbound") refreshInboundPage();
     if (name === "pending") refreshPendingPage();
     if (name === "stats") refreshStatsPage();
     refreshPendingBadge();
@@ -689,6 +691,136 @@
     }
   }
 
+  /* ——— Inbound access (input_allows) ——— */
+  function setInboundMsg(text, isErr) {
+    const el = $("inbound-msg");
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("err", !!isErr);
+  }
+
+  function renderInboundTable(cfg) {
+    const wrap = $("inbound-table-wrap");
+    if (!wrap) return;
+    const rules = cfg.input_allows || [];
+
+    if (!rules.length) {
+      wrap.innerHTML =
+        "<p class=\"hint\">No extra INPUT rules. Add one for SSH, HTTP, or other host services (<code class=\"inline\">input_allows</code>).</p>";
+      return;
+    }
+    const rows = rules
+      .map(
+        (r, i) =>
+          `<tr><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td><td class="row-actions"><button type="button" data-inbound-edit="${i}">Edit</button> <button type="button" data-inbound-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+      )
+      .join("");
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Port(s)</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.querySelectorAll("[data-inbound-edit]").forEach((b) => {
+      b.addEventListener("click", () => openInboundEditor(+b.getAttribute("data-inbound-edit")));
+    });
+    wrap.querySelectorAll("[data-inbound-del]").forEach((b) => {
+      b.addEventListener("click", () => removeInboundRule(+b.getAttribute("data-inbound-del")));
+    });
+  }
+
+  function openInboundEditor(index) {
+    const cfg = lastConfig;
+    if (!cfg) return;
+    if (!cfg.input_allows) cfg.input_allows = [];
+    const protoSel = $("inbound-f-proto");
+    const dport = $("inbound-f-dport");
+    const note = $("inbound-f-note");
+    if (!protoSel || !dport || !note) return;
+
+    if (index === -1) {
+      $("inbound-edit-index").value = "";
+      $("inbound-editor-title").textContent = "Add rule";
+      protoSel.value = "tcp";
+      dport.value = "";
+      note.value = "";
+    } else {
+      const r = cfg.input_allows[index];
+      if (!r) return;
+      $("inbound-edit-index").value = String(index);
+      $("inbound-editor-title").textContent = "Edit rule";
+      const p = String(r.proto || "tcp").toLowerCase();
+      protoSel.value = p === "udp" ? "udp" : "tcp";
+      dport.value = r.dport || "";
+      note.value = r.note || "";
+    }
+    const modal = $("inbound-modal");
+    if (modal) {
+      modal.classList.remove("is-hidden");
+      requestAnimationFrame(() => dport.focus());
+    }
+  }
+
+  function closeInboundEditor() {
+    const modal = $("inbound-modal");
+    if (modal) modal.classList.add("is-hidden");
+  }
+
+  async function saveInboundEditor() {
+    const cfg = JSON.parse(JSON.stringify(lastConfig));
+    if (!cfg.input_allows) cfg.input_allows = [];
+    const proto = ($("inbound-f-proto").value || "tcp").toLowerCase();
+    const dport = $("inbound-f-dport").value.trim();
+    const note = $("inbound-f-note").value.trim();
+    if (proto !== "tcp" && proto !== "udp") {
+      setInboundMsg("Protocol must be tcp or udp.", true);
+      return;
+    }
+    if (!dport) {
+      setInboundMsg("Destination port is required.", true);
+      return;
+    }
+    const entry = { proto, dport };
+    if (note) entry.note = note;
+    const idxRaw = $("inbound-edit-index").value;
+    if (idxRaw === "") cfg.input_allows.push(entry);
+    else cfg.input_allows[+idxRaw] = entry;
+    try {
+      await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
+      lastConfig = cfg;
+      setInboundMsg("Saved. Open Pending changes to review nftables, then Apply to host.");
+      closeInboundEditor();
+      renderInboundTable(cfg);
+      setApiStatus(true);
+      refreshPendingBadge();
+    } catch (e) {
+      setInboundMsg(String(e.message || e), true);
+    }
+  }
+
+  async function removeInboundRule(index) {
+    const cfg = JSON.parse(JSON.stringify(lastConfig));
+    if (!cfg.input_allows) return;
+    cfg.input_allows.splice(index, 1);
+    try {
+      await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
+      lastConfig = cfg;
+      setInboundMsg("Rule removed. Apply on Pending changes when ready.");
+      renderInboundTable(cfg);
+      setApiStatus(true);
+      refreshPendingBadge();
+    } catch (e) {
+      setInboundMsg(String(e.message || e), true);
+    }
+  }
+
+  async function refreshInboundPage() {
+    setInboundMsg("");
+    try {
+      lastConfig = await api("/v1/config");
+      setApiStatus(true);
+      renderInboundTable(lastConfig);
+    } catch (e) {
+      setApiStatus(false, String(e.message || e));
+      setInboundMsg(String(e.message || e), true);
+    }
+  }
+
   function setPendingMsg(text, isErr) {
     const el = $("pending-msg");
     if (!el) return;
@@ -1104,6 +1236,16 @@
   });
   $("route-save").addEventListener("click", saveRouteEditor);
   $("route-cancel").addEventListener("click", closeRouteEditor);
+  $("inbound-refresh").addEventListener("click", refreshInboundPage);
+  $("inbound-add").addEventListener("click", () => {
+    if (!lastConfig) refreshInboundPage().then(() => openInboundEditor(-1));
+    else openInboundEditor(-1);
+  });
+  $("inbound-save").addEventListener("click", saveInboundEditor);
+  $("inbound-cancel").addEventListener("click", closeInboundEditor);
+  const inboundModal = $("inbound-modal");
+  const inboundBackdrop = inboundModal && inboundModal.querySelector(".modal-backdrop");
+  if (inboundBackdrop) inboundBackdrop.addEventListener("click", closeInboundEditor);
   const routeModal = $("route-modal");
   const routeBackdrop = routeModal && routeModal.querySelector(".modal-backdrop");
   if (routeBackdrop) routeBackdrop.addEventListener("click", closeRouteEditor);
@@ -1130,6 +1272,12 @@
     const rm = $("route-modal");
     if (rm && !rm.classList.contains("is-hidden")) {
       closeRouteEditor();
+      ev.preventDefault();
+      return;
+    }
+    const im = $("inbound-modal");
+    if (im && !im.classList.contains("is-hidden")) {
+      closeInboundEditor();
       ev.preventDefault();
       return;
     }

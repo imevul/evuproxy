@@ -25,6 +25,7 @@
         <a href="#/token" class="nav-link" data-route="token">API token</a>
         <a href="#/peers" class="nav-link" data-route="peers">Peers</a>
         <a href="#/routes" class="nav-link" data-route="routes">Routes</a>
+        <a href="#/inbound" class="nav-link" data-route="inbound">Inbound access</a>
         <a href="#/pending" class="nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span></a>
         <a href="#/stats" class="nav-link" data-route="stats">Stats</a>
       </nav>
@@ -233,10 +234,60 @@
         </div>
       </section>
 
+      <section id="page-inbound" class="page" hidden>
+        <h2 class="page-title">Inbound access</h2>
+        <p class="hint">
+          Extra nftables <strong>INPUT</strong> accept rules on the host (SSH, HTTP, etc.). Stored as <code class="inline">input_allows</code> in config.
+        </p>
+        <div class="card">
+          <div class="toolbar">
+            <button type="button" class="btn-primary" id="inbound-refresh">Refresh</button>
+            <button type="button" class="btn-quiet" id="inbound-add">Add rule</button>
+          </div>
+          <div id="inbound-table-wrap" class="table-wrap"></div>
+          <p id="inbound-msg" class="msg" aria-live="polite"></p>
+        </div>
+
+        <div
+          id="inbound-modal"
+          class="modal is-hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inbound-editor-title"
+        >
+          <button type="button" class="modal-backdrop" aria-label="Close dialog"></button>
+          <div class="modal-panel">
+            <div id="inbound-editor" class="route-editor">
+              <h3 id="inbound-editor-title">Edit rule</h3>
+              <input type="hidden" id="inbound-edit-index" value="" />
+              <div class="field">
+                <label for="inbound-f-proto">Protocol</label>
+                <select id="inbound-f-proto">
+                  <option value="tcp">TCP</option>
+                  <option value="udp">UDP</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="inbound-f-dport">Destination port <span class="meta">(single, range, or nft list e.g. <code class="inline">{ 80, 443 }</code>)</span></label>
+                <input type="text" id="inbound-f-dport" placeholder="22 or 80-443 or { 80, 443 }" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="inbound-f-note">Note <span class="meta">(optional)</span></label>
+                <input type="text" id="inbound-f-note" placeholder="e.g. public HTTPS" autocomplete="off" />
+              </div>
+              <div class="btn-row">
+                <button type="button" class="btn-primary" id="inbound-save">Save rule</button>
+                <button type="button" class="btn-quiet" id="inbound-cancel">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="page-pending" class="page" hidden>
         <h2 class="page-title">Pending changes</h2>
         <p class="hint">
-          Saving peers, routes, or peer profile output writes YAML on the server only.
+          Saving peers, routes, inbound rules, or peer profile output writes YAML on the server only.
           nftables and WireGuard reload after you review the generated rules and click Apply (or use
           Overview → Reload config).
         </p>
