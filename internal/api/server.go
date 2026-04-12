@@ -156,7 +156,12 @@ func (s *Server) handlePreferencesPut(w http.ResponseWriter, r *http.Request) {
 		s.jsonErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.jsonOK(w, p)
+	out, err := apply.LoadUIPreferences(s.Config)
+	if err != nil {
+		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonOK(w, out)
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

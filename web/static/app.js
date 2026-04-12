@@ -45,7 +45,7 @@
   async function fetchUIPrefsFromServer() {
     const p = await api("/v1/preferences");
     lastUIPrefs = {
-      peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim(),
+      peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr,
       wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
     };
     migrateFromLocalStorageIfEmpty();
@@ -234,7 +234,7 @@
       migrateFromLocalStorageIfEmpty();
     }
     const cidr = $("peer-subnet-cidr");
-    if (cidr) cidr.value = (lastUIPrefs.peer_tunnel_subnet_cidr || "").trim();
+    if (cidr) cidr.value = (lastUIPrefs.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr;
     const sep = $("settings-wg-endpoint");
     if (sep) sep.value = (lastUIPrefs.wireguard_server_endpoint || "").trim();
   }
@@ -1020,7 +1020,7 @@
         }),
       });
       lastUIPrefs = {
-        peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim(),
+        peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr,
         wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
       };
       if (msg) msg.textContent = "Preferences saved on server.";

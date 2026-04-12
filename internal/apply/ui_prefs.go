@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// DefaultPeerTunnelSubnetCIDR is used when ui-preferences.json omits or clears peer_tunnel_subnet_cidr.
+const DefaultPeerTunnelSubnetCIDR = "10.100.0.0/24"
 
 // UIPreferences holds admin UI settings stored beside the main config (not part of WireGuard YAML).
 type UIPreferences struct {
@@ -17,20 +21,28 @@ func uiPrefsPath(cfgPath string) string {
 	return filepath.Join(filepath.Dir(cfgPath), "ui-preferences.json")
 }
 
-// LoadUIPreferences reads ui-preferences.json; missing file returns zero values.
+// LoadUIPreferences reads ui-preferences.json; missing file or empty peer_tunnel_subnet_cidr
+// yields DefaultPeerTunnelSubnetCIDR for that field.
 func LoadUIPreferences(cfgPath string) (UIPreferences, error) {
 	var out UIPreferences
 	b, err := os.ReadFile(uiPrefsPath(cfgPath))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return out, nil
+			return normalizeUIPreferencesDefaults(out), nil
 		}
 		return out, err
 	}
 	if err := json.Unmarshal(b, &out); err != nil {
 		return out, fmt.Errorf("ui preferences: %w", err)
 	}
-	return out, nil
+	return normalizeUIPreferencesDefaults(out), nil
+}
+
+func normalizeUIPreferencesDefaults(p UIPreferences) UIPreferences {
+	if strings.TrimSpace(p.PeerTunnelSubnetCIDR) == "" {
+		p.PeerTunnelSubnetCIDR = DefaultPeerTunnelSubnetCIDR
+	}
+	return p
 }
 
 // SaveUIPreferences writes ui-preferences.json atomically.

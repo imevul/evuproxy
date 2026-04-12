@@ -52,7 +52,7 @@
         <div class="card">
           <h3>Peer tunnel subnet</h3>
           <p class="hint">
-            IPv4 CIDR used to pick the next free tunnel IP when you add a peer. Should match the WireGuard tunnel network (often <code>10.100.0.0/24</code>). If left empty, the UI still uses <code>10.100.0.0/24</code> for suggestions until you set a value here and save.
+            IPv4 CIDR used to pick the next free tunnel IP when you add a peer. Should match the WireGuard tunnel network. Server default is <code>10.100.0.0/24</code> when unset.
           </p>
           <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" />
           <h3 style="margin-top: 1rem">WireGuard server endpoint</h3>
