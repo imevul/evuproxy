@@ -159,6 +159,113 @@ body.app {
   border-left-color: #388bfd;
 }
 
+.nav-link.nav-disabled,
+.nav-link.nav-disabled:hover {
+  color: #484f58;
+  background: transparent;
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.overview-api-issue-card {
+  grid-column: 1 / -1;
+  max-width: 36rem;
+}
+
+.overview-api-issue-card a {
+  color: #58a6ff;
+}
+
+/* Settings: slide toggle (iOS-style) */
+.toggle-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.35rem;
+}
+
+.toggle-switch-text {
+  font-size: 0.95rem;
+  color: #c9d1d9;
+  font-weight: 500;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.toggle-switch-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.toggle-switch-track {
+  position: relative;
+  display: block;
+  width: 2.75rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: #30363d;
+  border: 1px solid #484f58;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.toggle-switch-thumb {
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1.125rem;
+  height: 1.125rem;
+  border-radius: 50%;
+  background: #f0f6fc;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease;
+}
+
+.toggle-switch-input:checked + .toggle-switch-track {
+  background: #1f6feb;
+  border-color: #388bfd;
+}
+
+.toggle-switch-input:checked + .toggle-switch-track .toggle-switch-thumb {
+  transform: translateX(calc(2.75rem - 1.125rem - 0.25rem));
+}
+
+.toggle-switch-input:focus-visible + .toggle-switch-track {
+  outline: 2px solid #388bfd;
+  outline-offset: 2px;
+}
+
+.geo-advanced-teaser {
+  margin: 0 0 0.65rem;
+}
+
+.geo-advanced-teaser a {
+  color: #58a6ff;
+}
+
+body.app .toggle-switch .toggle-switch-input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 0;
+  height: 0;
+  min-width: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  position: absolute;
+  opacity: 0;
+}
+
 .content {
   padding: 1.25rem;
   overflow: auto;
@@ -526,6 +633,40 @@ table.data th {
 table.data .mono {
   font-family: ui-monospace, monospace;
   font-size: 0.75rem;
+}
+
+table.data .peer-status {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid #30363d;
+  white-space: nowrap;
+}
+
+table.data .peer-status-on {
+  color: #3fb950;
+  border-color: #238636;
+}
+
+table.data .peer-status-off {
+  color: #f85149;
+  border-color: #da3633;
+}
+
+table.data .peer-status-unknown {
+  color: #d29922;
+  border-color: #9e6a03;
+}
+
+table.data .peer-status-na {
+  color: #8b949e;
+  border-color: #30363d;
+  font-weight: 500;
+  text-transform: none;
 }
 
 table.data .row-actions {

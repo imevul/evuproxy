@@ -43,6 +43,7 @@ type ForwardRoute struct {
 	Proto    string   `yaml:"proto" json:"proto"`         // tcp, udp, both, or comma/plus-separated e.g. tcp,udp
 	Ports    []string `yaml:"ports" json:"ports"`         // port/range/brace-list strings (nft dport set syntax)
 	TargetIP string   `yaml:"target_ip" json:"target_ip"` // IPv4, no CIDR
+	Disabled bool     `yaml:"disabled,omitempty" json:"disabled,omitempty"` // if true, omitted from generated nftables
 }
 
 type Geo struct {
@@ -236,6 +237,9 @@ func (c *Config) validateForwardingRoutes() error {
 		}
 	}
 	for i, r := range c.Forwarding.Routes {
+		if r.Disabled {
+			continue
+		}
 		if _, err := ParseRouteProtocols(r.Proto); err != nil {
 			return fmt.Errorf("forwarding.routes[%d]: %w", i, err)
 		}

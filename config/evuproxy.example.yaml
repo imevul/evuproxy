@@ -11,6 +11,7 @@ network:
   public_interface: eth0
 
 # Each target_ip must match a non-disabled peer tunnel_ip (host IPv4 only).
+# Set disabled: true on a route to keep it in config but omit it from nftables until re-enabled.
 # Start empty; add routes after you define peers.
 forwarding:
   routes: []

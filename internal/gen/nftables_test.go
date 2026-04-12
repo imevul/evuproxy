@@ -135,6 +135,36 @@ func TestNFTablesRoutesBothProtosOneRoute(t *testing.T) {
 	}
 }
 
+func TestNFTablesSkipsDisabledRoute(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		Forwarding: config.Forwarding{
+			Routes: []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"80"}, TargetIP: "10.100.0.2"},
+				{Proto: "tcp", Ports: []string{"9999"}, TargetIP: "10.100.0.2", Disabled: true},
+			},
+		},
+		Geo:   config.Geo{Enabled: false},
+		Peers: []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s, "9999") {
+		t.Fatalf("disabled route must not appear in nftables: %s", s)
+	}
+	if !strings.Contains(s, "tcp dport { 80 }") {
+		t.Fatalf("enabled route must appear: %s", s)
+	}
+}
+
 func TestNFTablesAdminTCPPortsExplicit(t *testing.T) {
 	c := &config.Config{
 		WireGuard: config.WireGuard{

@@ -52,6 +52,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | `proto` | string | `tcp`, `udp`, `both`, or several protocols separated by comma, `+`, or spaces (e.g. `tcp, udp`). `both` expands to TCP and UDP. |
 | `ports` | list of strings | Port expressions passed through to nftables. Each element is a single port, range, or brace list fragment. Examples: `25565`, `80-81`, `80/tcp`-style is not used—use `proto` and plain port tokens. See **Port list syntax** below. |
 | `target_ip` | string | **IPv4 host address only** (no `/mask`), e.g. `10.100.0.2`. Must match the **IPv4** of a **non-disabled** peer’s `tunnel_ip`. |
+| `disabled` | bool (optional) | If `true`, the route is kept in config but **omitted** from generated nftables (no DNAT/forward rules until re-enabled). Other fields are not validated while disabled. |
 
 ### Port list syntax
 
@@ -62,8 +63,8 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 ### Validation
 
 - `forwarding.routes` may be empty until you add peers and port forwards.
-- Each route must have a non-empty `proto`, at least one non-empty port string, and a valid IPv4 `target_ip`.
-- `target_ip` must equal the IPv4 derived from some peer’s `tunnel_ip` (peers whose `tunnel_ip` is not valid IPv4 CIDR/host are ignored for this check).
+- Each **enabled** route must have a non-empty `proto`, at least one non-empty port string, and a valid IPv4 `target_ip`.
+- `target_ip` must equal the IPv4 derived from some peer’s `tunnel_ip` (peers whose `tunnel_ip` is not valid IPv4 CIDR/host are ignored for this check). **Disabled** routes skip these checks.
 
 ---
 

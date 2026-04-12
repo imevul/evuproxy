@@ -92,6 +92,19 @@ func TestValidateRoutesBadTarget(t *testing.T) {
 	}
 }
 
+func TestValidateDisabledRouteSkipped(t *testing.T) {
+	c := sampleBase()
+	c.Forwarding = Forwarding{
+		Routes: []ForwardRoute{
+			{Proto: "tcp", Ports: []string{"80"}, TargetIP: "10.99.0.9", Disabled: true},
+		},
+	}
+	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func sampleBase() *Config {
 	return &Config{
 		WireGuard: WireGuard{

@@ -30,6 +30,9 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	var routes []formattedRoute
 	uniqTargets := map[string]struct{}{}
 	for _, r := range c.Forwarding.Routes {
+		if r.Disabled {
+			continue
+		}
 		expr, err := formatPortSets(r.Ports)
 		if err != nil {
 			return "", fmt.Errorf("forwarding.routes %s %s: %w", r.Proto, r.TargetIP, err)

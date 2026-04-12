@@ -47,7 +47,7 @@
       <section id="page-overview" class="page" hidden>
         <h2 class="page-title">Overview</h2>
         <div id="overview-cards" class="card-grid"></div>
-        <div class="card actions-card">
+        <div id="overview-actions-card" class="card actions-card">
           <h3>Apply</h3>
           <div class="btn-row">
             <button type="button" class="btn-primary" id="btn-reload">Reload config</button>
@@ -79,6 +79,25 @@
           <p id="settings-prefs-msg" class="msg" aria-live="polite"></p>
         </div>
         <div class="card">
+          <h3>Advanced settings</h3>
+          <p class="hint">
+            Enables advanced options across this admin UI. Stored only in this browser (<code class="inline">localStorage</code>).
+          </p>
+          <div class="toggle-switch-row">
+            <span class="toggle-switch-text" id="settings-advanced-toggle-desc">Advanced mode</span>
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                id="settings-advanced-toggle"
+                class="toggle-switch-input"
+                autocomplete="off"
+                aria-labelledby="settings-advanced-toggle-desc"
+              />
+              <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+            </label>
+          </div>
+        </div>
+        <div class="card">
           <h3>Diagnostics</h3>
           <p class="hint">Raw status from the host (WireGuard + nftables table).</p>
           <div class="btn-row">
@@ -93,6 +112,13 @@
         <div class="card">
           <p class="hint">Matches <code>/etc/evuproxy/api.token</code> on the host (mock dev: <code>dev</code>). Stored only in this browser.</p>
           <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
+          <div class="field" style="margin-top: 1rem">
+            <label for="api-base">API base URL <span class="meta">(optional)</span></label>
+            <p class="hint meta" style="margin: 0.25rem 0 0.35rem">
+              Defaults to this host’s <code class="inline">/api</code> (same origin). Set a full URL only if the UI is served from a different host than the EvuProxy API (no trailing slash).
+            </p>
+            <input type="text" id="api-base" placeholder="/api" autocomplete="off" spellcheck="false" />
+          </div>
           <div class="btn-row" style="margin-top: 0.5rem">
             <button type="button" id="save-token" class="btn-primary">Save in browser</button>
           </div>
@@ -102,7 +128,7 @@
 
       <section id="page-peers" class="page" hidden>
         <h2 class="page-title">Peers</h2>
-        <p class="hint">WireGuard peers (tunnel IPs and keys for each side). Changes are saved to config on the server; apply from Pending changes when ready.</p>
+        <p class="hint">WireGuard peers (tunnel IPs and keys for each side). Changes are saved to config on the server; apply from Pending changes when ready. The Status column uses WireGuard handshakes from the host: Online when the last handshake was within about three minutes; Unknown if stats are unavailable.</p>
         <div class="card">
           <div class="toolbar">
             <button type="button" class="btn-primary" id="peers-refresh">Refresh list</button>
@@ -199,7 +225,7 @@
 
       <section id="page-routes" class="page" hidden>
         <h2 class="page-title">Routes</h2>
-        <p class="hint">Map TCP/UDP ports to a peer tunnel IP (<code class="inline">forwarding.routes</code>).</p>
+        <p class="hint">Map TCP/UDP ports to a peer tunnel IP (<code class="inline">forwarding.routes</code>). Disabled routes stay in config but are left out of generated nftables until you enable them.</p>
         <div class="card">
           <div class="toolbar">
             <button type="button" class="btn-primary" id="routes-refresh">Refresh</button>
@@ -236,6 +262,9 @@
               <div class="field">
                 <label for="route-f-target">Target peer IP</label>
                 <select id="route-f-target"></select>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="route-f-disabled" /> Disabled (keep in config, omit from nftables until enabled)</label>
               </div>
               <div class="btn-row">
                 <button type="button" class="btn-primary" id="route-save">Save route</button>
@@ -332,15 +361,21 @@
             </div>
             <span class="meta" id="geo-countries-meta">At least one country when geoblocking is on.</span>
           </div>
-          <div class="field">
-            <label for="geo-f-set-name">nftables set name <span class="meta">(optional)</span></label>
-            <input type="text" id="geo-f-set-name" placeholder="geo_v4" autocomplete="off" />
+          <div id="geo-advanced-fields" class="geo-advanced-fields" hidden>
+            <div class="field">
+              <label for="geo-f-set-name">nftables set name <span class="meta">(optional)</span></label>
+              <input type="text" id="geo-f-set-name" placeholder="geo_v4" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="geo-f-zone-dir">Zone directory on host</label>
+              <input type="text" id="geo-f-zone-dir" placeholder="/etc/evuproxy/geo-zones" autocomplete="off" />
+              <span class="meta">Directory for <code class="inline">.zone</code> files (required when enabled).</span>
+            </div>
           </div>
-          <div class="field">
-            <label for="geo-f-zone-dir">Zone directory on host</label>
-            <input type="text" id="geo-f-zone-dir" placeholder="/etc/evuproxy/geo-zones" autocomplete="off" />
-            <span class="meta">Directory for <code class="inline">.zone</code> files (required when enabled).</span>
-          </div>
+          <p id="geo-advanced-fields-teaser" class="hint geo-advanced-teaser">
+            nftables set name and zone directory are hidden unless you need custom paths. Turn on Advanced mode in
+            <a href="#/settings">Settings</a> to edit them.
+          </p>
           <div class="btn-row">
             <button type="button" class="btn-primary" id="geo-save">Save</button>
             <button type="button" class="btn-quiet" id="geo-refresh">Refresh</button>

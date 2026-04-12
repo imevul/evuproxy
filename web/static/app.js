@@ -1,5 +1,30 @@
 (function () {
-  const apiBase = window.EVUPROXY_API || "/api";
+  const apiBaseKey = "evuproxy_api_base";
+
+  function normalizeApiBase(s) {
+    s = String(s).trim().replace(/\/+$/, "");
+    return s || "/api";
+  }
+
+  function getDefaultApiBase() {
+    if (typeof window.EVUPROXY_API === "string" && window.EVUPROXY_API.trim() !== "") {
+      return normalizeApiBase(window.EVUPROXY_API);
+    }
+    return "/api";
+  }
+
+  function getApiBase() {
+    try {
+      const saved = sessionStorage.getItem(apiBaseKey) || localStorage.getItem(apiBaseKey);
+      if (saved != null && String(saved).trim() !== "") {
+        return normalizeApiBase(saved);
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    return getDefaultApiBase();
+  }
+
   const peerInstallScriptUrl =
     window.EVUPROXY_PEER_INSTALL_SCRIPT_URL ||
     "https://raw.githubusercontent.com/imevul/evuproxy/main/scripts/peer-install.sh";
@@ -7,13 +32,20 @@
   const endpointKey = "evuproxy_onboard_endpoint";
   const peerSubnetKey = "evuproxy_peer_subnet_cidr";
   const defaultPeerSubnetCidr = "10.100.0.0/24";
+  const advancedSettingsKey = "evuproxy_advanced_settings";
 
   const $ = (id) => document.getElementById(id);
 
   let lastOverview = null;
   let lastConfig = null;
+  /** True only after a successful GET /v1/overview with the current token (or unset token → false). */
+  let apiConnectionOk = false;
+  /** Last /v1/stats response for peer online/offline column (null if unavailable). */
+  let lastPeerWgStats = null;
   let peerOverviewFetchSeq = 0;
   let peerOverviewDebounceTimer = null;
+  /** Ignores stale results when multiple refreshOverviewPage runs overlap (navigate + save-token, etc.). */
+  let overviewRefreshSeq = 0;
 
   const pages = [
     "overview",
@@ -93,8 +125,46 @@
     if (detail) el.title = detail;
   }
 
+  function applyNavRestriction() {
+    const restricted = !apiConnectionOk;
+    document.querySelectorAll(".nav-link").forEach((a) => {
+      const route = a.getAttribute("data-route");
+      const allowed = route === "overview" || route === "token";
+      const dis = restricted && !allowed;
+      a.classList.toggle("nav-disabled", dis);
+      if (dis) {
+        a.setAttribute("aria-disabled", "true");
+        a.setAttribute("tabindex", "-1");
+      } else {
+        a.removeAttribute("aria-disabled");
+        a.removeAttribute("tabindex");
+      }
+    });
+  }
+
+  /** Returns true when the API is reachable with the current token (also sets lastOverview on success). */
+  async function ensureApiGate() {
+    const t = token().trim();
+    if (!t) {
+      apiConnectionOk = false;
+      applyNavRestriction();
+      return false;
+    }
+    try {
+      const o = await api("/v1/overview");
+      lastOverview = o;
+      apiConnectionOk = true;
+      applyNavRestriction();
+      return true;
+    } catch {
+      apiConnectionOk = false;
+      applyNavRestriction();
+      return false;
+    }
+  }
+
   async function api(path, opts = {}) {
-    const r = await fetch(apiBase + path, {
+    const r = await fetch(getApiBase() + path, {
       ...opts,
       headers: { ...headers(), ...opts.headers },
     });
@@ -152,6 +222,11 @@
     if (name !== "routes") closeRouteEditor();
     if (name !== "inbound") closeInboundEditor();
     if (name !== "peers") closePeerEditor();
+    if (name !== "overview" && name !== "token") {
+      const ok = await ensureApiGate();
+      if (!ok) name = "overview";
+    }
+    applyNavRestriction();
     await ensureUIPrefs();
     document.querySelectorAll(".page").forEach((p) => {
       p.hidden = true;
@@ -164,13 +239,16 @@
     if (location.hash.replace(/^#\/?/, "") !== name) {
       location.hash = "#/" + name;
     }
-    if (name === "overview") refreshOverviewPage();
+    if (name === "overview") await refreshOverviewPage();
     if (name === "settings") await refreshSettingsPage();
-    if (name === "token") refreshTokenPage();
+    if (name === "token") {
+      refreshTokenPage();
+      await ensureApiGate();
+    }
     if (name === "peers") refreshPeersPage();
     if (name === "routes") refreshRoutesPage();
     if (name === "inbound") refreshInboundPage();
-    if (name === "geoblocking") refreshGeoblockingPage();
+    if (name === "geoblocking") await refreshGeoblockingPage();
     if (name === "pending") refreshPendingPage();
     if (name === "stats") refreshStatsPage();
     if (name === "logs") refreshLogsPage();
@@ -193,16 +271,60 @@
     return d;
   }
 
+  function overviewApiIssueCard(opts) {
+    const wrap = document.createElement("div");
+    wrap.className = "card overview-api-issue-card";
+    const p = document.createElement("p");
+    p.textContent = opts.message;
+    wrap.appendChild(p);
+    const linkP = document.createElement("p");
+    linkP.className = "hint";
+    linkP.style.marginTop = "0.75rem";
+    const a = document.createElement("a");
+    a.href = "#/token";
+    a.textContent = "Open API token";
+    linkP.appendChild(a);
+    linkP.appendChild(document.createTextNode(" to set the token and optional API base URL."));
+    wrap.appendChild(linkP);
+    if (opts.detail) {
+      const d = document.createElement("p");
+      d.className = "hint meta";
+      d.style.marginTop = "0.5rem";
+      d.textContent = opts.detail;
+      wrap.appendChild(d);
+    }
+    return wrap;
+  }
+
   async function refreshOverviewPage() {
+    const seq = ++overviewRefreshSeq;
     const grid = $("overview-cards");
     const msg = $("overview-action-msg");
+    const actionsCard = $("overview-actions-card");
     if (!grid) return;
     grid.innerHTML = "";
     msg.textContent = "";
+    if (!token().trim()) {
+      if (seq !== overviewRefreshSeq) return;
+      apiConnectionOk = false;
+      applyNavRestriction();
+      setApiStatus(false, "No API token");
+      grid.appendChild(
+        overviewApiIssueCard({
+          message: "There is a problem with the API: no token is configured in this browser.",
+        })
+      );
+      if (actionsCard) actionsCard.hidden = true;
+      return;
+    }
     try {
       const o = await api("/v1/overview");
+      if (seq !== overviewRefreshSeq) return;
       lastOverview = o;
+      apiConnectionOk = true;
+      applyNavRestriction();
       setApiStatus(true);
+      if (actionsCard) actionsCard.hidden = false;
       grid.appendChild(elStat("WireGuard", o.wireguard_interface + " · UDP " + o.wireguard_listen_port));
       grid.appendChild(elStat("Public NIC", o.public_interface));
       const n = (o.forwarding_routes && o.forwarding_routes.length) || 0;
@@ -218,8 +340,19 @@
       );
       grid.appendChild(elStat("Peers", String((o.peer_names || []).length)));
     } catch (e) {
-      setApiStatus(false, String(e.message || e));
-      grid.appendChild(elStat("Error", String(e.message || e)));
+      if (seq !== overviewRefreshSeq) return;
+      const errText = String(e.message || e);
+      apiConnectionOk = false;
+      applyNavRestriction();
+      setApiStatus(false, errText);
+      if (actionsCard) actionsCard.hidden = true;
+      grid.appendChild(
+        overviewApiIssueCard({
+          message:
+            "There is a problem with the API: the EvuProxy API could not be reached or rejected this browser’s request.",
+          detail: errText,
+        })
+      );
     }
   }
 
@@ -231,6 +364,39 @@
   }
 
   /* ——— Settings ——— */
+  function advancedSettingsEnabled() {
+    try {
+      return localStorage.getItem(advancedSettingsKey) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setAdvancedSettingsEnabled(on) {
+    try {
+      if (on) localStorage.setItem(advancedSettingsKey, "1");
+      else localStorage.removeItem(advancedSettingsKey);
+    } catch (e) {
+      /* ignore */
+    }
+    syncAdvancedSettingsToggle();
+  }
+
+  function syncAdvancedSettingsToggle() {
+    const cb = $("settings-advanced-toggle");
+    if (!cb) return;
+    cb.checked = advancedSettingsEnabled();
+  }
+
+  function syncGeoAdvancedFieldsVisibility() {
+    const adv = advancedSettingsEnabled();
+    const fields = $("geo-advanced-fields");
+    const teaser = $("geo-advanced-fields-teaser");
+    if (!fields || !teaser) return;
+    fields.hidden = !adv;
+    teaser.hidden = adv;
+  }
+
   function setAuthMsg(text, isErr) {
     const el = $("auth-msg");
     el.textContent = text;
@@ -260,12 +426,17 @@
     if (cidr) cidr.value = (lastUIPrefs.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr;
     const sep = $("settings-wg-endpoint");
     if (sep) sep.value = (lastUIPrefs.wireguard_server_endpoint || "").trim();
+    syncAdvancedSettingsToggle();
   }
 
   function refreshTokenPage() {
     const el = $("token");
-    if (!el) return;
-    el.value = sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey) || "";
+    if (el) el.value = sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey) || "";
+    const ab = $("api-base");
+    if (ab) {
+      const saved = sessionStorage.getItem(apiBaseKey) || localStorage.getItem(apiBaseKey);
+      ab.value = saved != null && String(saved).trim() !== "" ? String(saved).trim() : "";
+    }
   }
 
   function serverEndpointDisplay() {
@@ -356,19 +527,64 @@
     el.classList.toggle("err", !!isErr);
   }
 
-  function renderPeersTable(cfg) {
+  /** Handshake age at or below this (seconds) counts as "online". */
+  const PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC = 180;
+
+  function wgPeerPubKeyMap(st) {
+    const m = new Map();
+    if (!st || !Array.isArray(st.wireguard_peers)) return m;
+    for (const row of st.wireguard_peers) {
+      const k = String(row.public_key || "").trim();
+      if (k) m.set(k, row);
+    }
+    return m;
+  }
+
+  function peerConnectionStatusHtml(p, pubMap) {
+    if (p.disabled) {
+      return '<span class="peer-status peer-status-na" title="Peer disabled in config">—</span>';
+    }
+    const pk = String(p.public_key || "").trim();
+    const row = pubMap.get(pk);
+    if (!row) {
+      return (
+        '<span class="peer-status peer-status-unknown" title="No WireGuard stats for this key (interface down or mock)">Unknown</span>'
+      );
+    }
+    const h = row.latest_handshake_unix;
+    if (!h || h <= 0) {
+      return '<span class="peer-status peer-status-off" title="No handshake yet">Offline</span>';
+    }
+    const ago = Math.floor(Date.now() / 1000) - h;
+    let title = "Last handshake ";
+    if (ago < 60) title += ago + "s ago";
+    else if (ago < 3600) title += Math.floor(ago / 60) + " min ago";
+    else title += Math.floor(ago / 3600) + " h ago";
+    if (ago <= PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC) {
+      return (
+        '<span class="peer-status peer-status-on" title="' +
+        escapeHtml(title) +
+        '">Online</span>'
+      );
+    }
+    return '<span class="peer-status peer-status-off" title="' + escapeHtml(title) + '">Offline</span>';
+  }
+
+  function renderPeersTable(cfg, wgStats) {
     const wrap = $("peers-table-wrap");
+    if (wgStats === undefined) wgStats = lastPeerWgStats;
     if (!cfg || !cfg.peers) {
       wrap.innerHTML = "<p class=\"hint\">No peers.</p>";
       return;
     }
+    const pubMap = wgPeerPubKeyMap(wgStats);
     const rows = cfg.peers
       .map(
         (p, i) =>
-          `<tr><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${p.disabled ? "yes" : ""}</td><td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td><td>${p.disabled ? "yes" : ""}</td><td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
       )
       .join("");
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Status</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
       b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
     });
@@ -394,9 +610,14 @@
   async function refreshPeersPage() {
     setPeersMsg("");
     try {
-      lastConfig = await api("/v1/config");
+      const [cfgOut, stOut] = await Promise.allSettled([api("/v1/config"), api("/v1/stats")]);
+      if (cfgOut.status !== "fulfilled") {
+        throw cfgOut.reason;
+      }
+      lastConfig = cfgOut.value;
+      lastPeerWgStats = stOut.status === "fulfilled" ? stOut.value : null;
       setApiStatus(true);
-      renderPeersTable(lastConfig);
+      renderPeersTable(lastConfig, lastPeerWgStats);
     } catch (e) {
       setApiStatus(false, String(e.message || e));
       setPeersMsg(String(e.message || e), true);
@@ -600,10 +821,10 @@
     const rows = routes
       .map(
         (r, i) =>
-          `<tr><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td><td class="row-actions"><button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td><td>${r.disabled ? "yes" : ""}</td><td class="row-actions"><button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
       )
       .join("");
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-route-edit]").forEach((b) => {
       b.addEventListener("click", () => openRouteEditor(+b.getAttribute("data-route-edit")));
     });
@@ -617,6 +838,8 @@
     if (!cfg) return;
     if (!cfg.forwarding.routes) cfg.forwarding.routes = [];
     peerTunnelIPv4Options(cfg);
+    const dis = $("route-f-disabled");
+    if (dis) dis.checked = false;
     if (index === -1) {
       $("route-edit-index").value = "";
       $("route-editor-title").textContent = "Add route";
@@ -630,6 +853,7 @@
       setRouteProtoCheckboxes(r.proto);
       $("route-f-ports").value = (r.ports || []).join(", ");
       $("route-f-target").value = r.target_ip || "";
+      if (dis) dis.checked = !!r.disabled;
     }
     const modal = $("route-modal");
     if (modal) {
@@ -666,7 +890,7 @@
       setRoutesMsg("Ports and target are required.", true);
       return;
     }
-    const entry = { proto, ports, target_ip: target };
+    const entry = { proto, ports, target_ip: target, disabled: $("route-f-disabled") && $("route-f-disabled").checked };
     const idxRaw = $("route-edit-index").value;
     if (idxRaw === "") cfg.forwarding.routes.push(entry);
     else cfg.forwarding.routes[+idxRaw] = entry;
@@ -1078,6 +1302,7 @@
       setApiStatus(false, String(e.message || e));
       setGeoMsg(String(e.message || e), true);
     }
+    syncGeoAdvancedFieldsVisibility();
   }
 
   async function geoUpdateLists() {
@@ -1423,6 +1648,10 @@
   /* ——— Init wiring ——— */
   document.querySelectorAll(".nav-link").forEach((a) => {
     a.addEventListener("click", (ev) => {
+      if (a.classList.contains("nav-disabled")) {
+        ev.preventDefault();
+        return;
+      }
       ev.preventDefault();
       void navigate(a.getAttribute("data-route"));
     });
@@ -1431,13 +1660,39 @@
 
   const savedTok = localStorage.getItem(tokenKey);
   if (savedTok && $("token")) $("token").value = savedTok;
+  const savedApiBase = localStorage.getItem(apiBaseKey);
+  if ($("api-base") && savedApiBase != null && String(savedApiBase).trim() !== "") {
+    $("api-base").value = String(savedApiBase).trim();
+  }
+
+  const advToggle = $("settings-advanced-toggle");
+  if (advToggle) {
+    advToggle.addEventListener("change", () => setAdvancedSettingsEnabled(advToggle.checked));
+  }
+  syncAdvancedSettingsToggle();
 
   $("save-token").addEventListener("click", () => {
     const t = $("token").value.trim();
-    if (!t) return;
-    localStorage.setItem(tokenKey, t);
+    if (t) {
+      localStorage.setItem(tokenKey, t);
+    }
+    const ab = $("api-base");
+    if (ab) {
+      const b = ab.value.trim();
+      if (b) {
+        localStorage.setItem(apiBaseKey, normalizeApiBase(b));
+      } else {
+        localStorage.removeItem(apiBaseKey);
+        try {
+          sessionStorage.removeItem(apiBaseKey);
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    }
     invalidateUIPrefsCache();
-    setAuthMsg("Token saved in browser storage.");
+    setAuthMsg("Saved in browser storage.");
+    void refreshOverviewPage();
   });
 
   $("settings-save-prefs").addEventListener("click", async () => {
