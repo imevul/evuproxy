@@ -62,7 +62,7 @@ The admin UI is intended to run **in Docker only**. From the repo:
 docker compose up --build
 ```
 
-Browse `http://127.0.0.1:9080`. On a remote VPS, use an **SSH tunnel** instead of exposing the UI publicly. The container reaches the API via `host.docker.internal` (see [docker-compose.yml](docker-compose.yml)).
+Browse `http://127.0.0.1:9080`. On a remote VPS, use an **SSH tunnel** instead of exposing the UI publicly. The UI container uses **host networking** so nginx can proxy `/api` to **`127.0.0.1:9847`** without binding the API on `0.0.0.0`. Override **`EVUPROXY_UI_LISTEN`** (e.g. `0.0.0.0:9080`) only for temporary LAN tests. **Host network is Linux-oriented**; use the dev mock stack on other setups if needed.
 
 ### Local UI with mock API
 

@@ -102,7 +102,7 @@
             "Cannot reach EvuProxy on the host (HTTP " +
             r.status +
             "). Start the API: sudo systemctl start evuproxy-api.service — " +
-            "the UI container proxies /api to host:9847 (see docker-compose.yml).";
+            "the UI proxies /api to 127.0.0.1:9847 (see docker-compose.yml; host network).";
         } else {
           err = "HTTP " + r.status + ": unexpected HTML from server (check nginx/API upstream).";
         }

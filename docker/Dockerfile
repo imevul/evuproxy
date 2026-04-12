@@ -7,5 +7,5 @@ COPY web /usr/share/nginx/html
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 8080
+EXPOSE 9080
 ENTRYPOINT ["/entrypoint.sh"]

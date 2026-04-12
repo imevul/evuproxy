@@ -1,18 +1,17 @@
-# EvuProxy web UI — proxies /api to the host EvuProxy API.
-# Prerequisite on the host: evuproxy-api.service listening on 127.0.0.1:9847
+# EvuProxy web UI — host network so nginx can reach the API at 127.0.0.1:9847 (no 0.0.0.0 bind).
+# Prerequisite: evuproxy-api.service on 127.0.0.1:9847 (default install).
 #
 #   docker compose up --build
 #
-# Then open http://127.0.0.1:9080 — prefer SSH -L 9080:127.0.0.1:9080 for remote VPS.
+# UI: http://127.0.0.1:9080 — remote: SSH -L 9080:127.0.0.1:9080
+# LAN testing: EVUPROXY_UI_LISTEN=0.0.0.0:9080 docker compose up -d
 
 services:
   evuproxy-ui:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    ports:
-      - "127.0.0.1:9080:8080"
+    network_mode: host
     environment:
-      EVUPROXY_API_UPSTREAM: host.docker.internal:9847
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      EVUPROXY_API_UPSTREAM: 127.0.0.1:9847
+      EVUPROXY_UI_LISTEN: 127.0.0.1:9080
