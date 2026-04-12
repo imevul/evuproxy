@@ -14,6 +14,9 @@ import (
 
 const ipDenyCountryURL = "https://www.ipdeny.com/ipblocks/data/countries/%s.zone"
 
+// ipDenyRequestPause is the delay between successive zone downloads (IPDeny suggests 0.5–1s; see https://www.ipdeny.com/usagelimits.php).
+const ipDenyRequestPause = 750 * time.Millisecond
+
 // GeoLoaderNFT writes a file that flushes and repopulates geo sets in both inet and ip tables.
 func GeoLoaderNFT(c *config.Config, zoneDir string) (string, error) {
 	if !c.Geo.Enabled {
@@ -59,7 +62,7 @@ func DownloadZones(c *config.Config) error {
 		return err
 	}
 	client := &http.Client{Timeout: 2 * time.Minute}
-	for _, cc := range c.Geo.Countries {
+	for i, cc := range c.Geo.Countries {
 		cc = strings.ToLower(strings.TrimSpace(cc))
 		url := fmt.Sprintf(ipDenyCountryURL, cc)
 		req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -81,6 +84,9 @@ func DownloadZones(c *config.Config) error {
 		out := filepath.Join(c.Geo.ZoneDir, cc+".zone")
 		if err := os.WriteFile(out, body, 0o644); err != nil {
 			return err
+		}
+		if i < len(c.Geo.Countries)-1 {
+			time.Sleep(ipDenyRequestPause)
 		}
 	}
 	return nil
