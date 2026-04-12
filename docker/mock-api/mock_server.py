@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TOKEN = os.environ.get("MOCK_API_TOKEN", "dev")
 PORT = int(os.environ.get("PORT", "9847"))
+DEFAULT_PEER_TUNNEL_SUBNET_CIDR = "10.100.0.0/24"
 
 MOCK_CONFIG = {
     "wireguard": {
@@ -63,6 +64,17 @@ MOCK_PREFS: dict = {
     "peer_tunnel_subnet_cidr": "",
     "wireguard_server_endpoint": "",
 }
+
+
+def _normalize_prefs(d: dict) -> dict:
+    """Match apply.LoadUIPreferences: default tunnel subnet when unset."""
+    out = copy.deepcopy(d)
+    peer = (out.get("peer_tunnel_subnet_cidr") or "").strip()
+    if not peer:
+        peer = DEFAULT_PEER_TUNNEL_SUBNET_CIDR
+    out["peer_tunnel_subnet_cidr"] = peer
+    out["wireguard_server_endpoint"] = (out.get("wireguard_server_endpoint") or "").strip()
+    return out
 
 
 def _disk_config_sha() -> str:
@@ -216,7 +228,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
         if path == "/api/v1/preferences":
-            return self._send_json(200, copy.deepcopy(MOCK_PREFS))
+            return self._send_json(200, _normalize_prefs(MOCK_PREFS))
         return self._send_json(404, {"error": "not found"})
 
     def do_PUT(self) -> None:
@@ -242,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
                     body.get("wireguard_server_endpoint") or ""
                 ).strip(),
             }
-            return self._send_json(200, copy.deepcopy(MOCK_PREFS))
+            return self._send_json(200, _normalize_prefs(MOCK_PREFS))
         if path != "/api/v1/config":
             return self._send_json(404, {"error": "not found"})
         body = self._read_json_body()
