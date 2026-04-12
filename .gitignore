@@ -3,7 +3,5 @@
 .DS_Store
 
 # Private / local-only docs (not published in this repo)
-/old_docs/
-/SPEC.md
-/ROADMAP.md
-/TODO.md
+.cursor/
+local_docs/
