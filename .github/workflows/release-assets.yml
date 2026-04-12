@@ -1,3 +1,6 @@
+# Runs when a release is published (e.g. manually). Release Please–created releases
+# upload assets from .github/workflows/release-please.yml because GITHUB_TOKEN does not
+# trigger workflows on `release: published` for events it caused.
 name: Release assets
 
 on:
