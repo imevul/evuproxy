@@ -14,4 +14,5 @@ services:
     network_mode: host
     environment:
       EVUPROXY_API_UPSTREAM: 127.0.0.1:9847
-      EVUPROXY_UI_LISTEN: 127.0.0.1:9080
+      # Override from shell: EVUPROXY_UI_LISTEN=0.0.0.0:9080 docker compose up -d
+      EVUPROXY_UI_LISTEN: ${EVUPROXY_UI_LISTEN:-127.0.0.1:9080}
