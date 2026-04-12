@@ -144,6 +144,9 @@ func (c *Config) Validate() error {
 	if c.WireGuard.Interface == "" {
 		return fmt.Errorf("wireguard.interface is required")
 	}
+	if err := validLinuxIface(c.WireGuard.Interface); err != nil {
+		return fmt.Errorf("wireguard.interface: %w", err)
+	}
 	if c.WireGuard.ListenPort <= 0 || c.WireGuard.ListenPort > 65535 {
 		return fmt.Errorf("wireguard.listen_port must be between 1 and 65535")
 	}
@@ -155,6 +158,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Network.PublicInterface == "" {
 		return fmt.Errorf("network.public_interface is required")
+	}
+	if err := validLinuxIface(c.Network.PublicInterface); err != nil {
+		return fmt.Errorf("network.public_interface: %w", err)
+	}
+	for i, a := range c.InputAllows {
+		if err := ValidateInputAllowDport(a.DPort); err != nil {
+			return fmt.Errorf("input_allows[%d].dport: %w", i, err)
+		}
 	}
 	if c.Network.AdminTCPPorts != nil {
 		for _, p := range c.Network.AdminTCPPorts {
@@ -184,6 +195,14 @@ func (c *Config) Validate() error {
 		if c.Geo.ZoneDir == "" {
 			return fmt.Errorf("geo.zone_dir required when geo.enabled")
 		}
+		if err := validNFTSetName(c.Geo.SetName); err != nil {
+			return fmt.Errorf("geo.set_name: %w", err)
+		}
+		for _, cc := range c.Geo.Countries {
+			if err := validateGeoCountryCode(cc); err != nil {
+				return err
+			}
+		}
 	}
 	for _, p := range c.Peers {
 		if p.Disabled {
@@ -191,6 +210,9 @@ func (c *Config) Validate() error {
 		}
 		if p.Name == "" || p.PublicKey == "" || p.TunnelIP == "" {
 			return fmt.Errorf("peer %q: name, public_key, and tunnel_ip are required", p.Name)
+		}
+		if err := validPeerName(p.Name); err != nil {
+			return fmt.Errorf("peer %q: %w", p.Name, err)
 		}
 		tip := strings.TrimSpace(p.TunnelIP)
 		if _, _, err := net.ParseCIDR(tip); err != nil {

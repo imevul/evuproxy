@@ -220,7 +220,7 @@ func formatPortSets(ports []string) (string, error) {
 			continue
 		}
 		if strings.Contains(raw, "-") && !strings.Contains(raw, "{") {
-			parts = append(parts, strings.ReplaceAll(raw, "-", "-"))
+			parts = append(parts, raw)
 			continue
 		}
 		parts = append(parts, raw)

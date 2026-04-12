@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net"
@@ -23,18 +25,27 @@ type Server struct {
 	Version string
 }
 
+func tokenMatch(got, want string) bool {
+	if want == "" {
+		return false
+	}
+	g := sha256.Sum256([]byte(got))
+	w := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
+}
+
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.Token == "" {
-			http.Error(w, "API token not configured", http.StatusServiceUnavailable)
+			s.jsonErr(w, http.StatusServiceUnavailable, "API token not configured")
 			return
 		}
 		tok := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		if tok == "" {
 			tok = r.Header.Get("X-API-Token")
 		}
-		if tok != s.Token {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if !tokenMatch(tok, s.Token) {
+			s.jsonErr(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		next(w, r)
@@ -67,7 +78,8 @@ func (s *Server) Routes() http.Handler {
 
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	if err := apply.Reload(s.Config); err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("reload", err)
+		s.jsonErr(w, http.StatusInternalServerError, "reload failed")
 		return
 	}
 	s.jsonOK(w, map[string]string{"result": "reloaded"})
@@ -75,7 +87,8 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateGeo(w http.ResponseWriter, r *http.Request) {
 	if err := apply.UpdateGeo(s.Config); err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("update-geo", err)
+		s.jsonErr(w, http.StatusInternalServerError, "geo update failed")
 		return
 	}
 	s.jsonOK(w, map[string]string{"result": "geo_updated"})
@@ -84,7 +97,8 @@ func (s *Server) handleUpdateGeo(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	out, err := apply.Status(s.Config)
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("status", err)
+		s.jsonErr(w, http.StatusInternalServerError, "status unavailable")
 		return
 	}
 	s.jsonOK(w, map[string]string{"report": out})
@@ -93,7 +107,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	o, err := apply.OverviewFromConfig(s.Config)
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("overview", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not load overview")
 		return
 	}
 	s.jsonOK(w, o)
@@ -102,7 +117,8 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 	c, err := config.Load(s.Config)
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("config get", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not read configuration")
 		return
 	}
 	s.jsonOK(w, c)
@@ -126,7 +142,8 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
 	info, err := apply.PendingSummary(s.Config)
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("pending", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not compute pending state")
 		return
 	}
 	s.jsonOK(w, info)
@@ -135,7 +152,8 @@ func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePreferencesGet(w http.ResponseWriter, r *http.Request) {
 	p, err := apply.LoadUIPreferences(s.Config)
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("preferences get", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not load preferences")
 		return
 	}
 	s.jsonOK(w, p)
@@ -158,12 +176,14 @@ func (s *Server) handlePreferencesPut(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := apply.SaveUIPreferences(s.Config, &p); err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("preferences save", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not save preferences")
 		return
 	}
 	out, err := apply.LoadUIPreferences(s.Config)
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("preferences reload", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not load preferences")
 		return
 	}
 	s.jsonOK(w, out)
@@ -172,7 +192,8 @@ func (s *Server) handlePreferencesPut(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	st, err := apply.StatsFromHost(s.Config)
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("stats", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not collect stats")
 		return
 	}
 	s.jsonOK(w, st)
@@ -200,7 +221,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	lines, source, err := apply.FirewallDropLogs(ctx, limit)
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("logs", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not read firewall logs")
 		return
 	}
 	s.jsonOK(w, map[string]any{
@@ -212,7 +234,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fwd, err := exec.Command("nft", "list", "chain", "inet", "evuproxy", "forward").CombinedOutput()
 	if err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, string(fwd))
+		s.logErr("nft forward chain", err, "output", string(fwd))
+		s.jsonErr(w, http.StatusInternalServerError, "could not list nftables")
 		return
 	}
 	inp, _ := exec.Command("nft", "list", "chain", "inet", "evuproxy", "input").CombinedOutput()
@@ -228,7 +251,8 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 		path = "/var/backups/evuproxy-config.tgz"
 	}
 	if err := apply.Backup(s.Config, path); err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("backup", err)
+		s.jsonErr(w, http.StatusInternalServerError, "backup failed")
 		return
 	}
 	s.jsonOK(w, map[string]string{"archive": path})
@@ -241,7 +265,8 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := apply.Restore(s.Config, path); err != nil {
-		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		s.logErr("restore", err)
+		s.jsonErr(w, http.StatusInternalServerError, "restore failed")
 		return
 	}
 	s.jsonOK(w, map[string]string{"result": "restored", "hint": "run evuproxy reload"})
@@ -256,6 +281,14 @@ func (s *Server) jsonErr(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func (s *Server) logErr(msg string, err error, attrs ...any) {
+	if s.Logger == nil {
+		return
+	}
+	args := append([]any{"err", err}, attrs...)
+	s.Logger.Error(msg, args...)
 }
 
 func (s *Server) Run() error {
