@@ -15,7 +15,18 @@
   let peerOverviewFetchSeq = 0;
   let peerOverviewDebounceTimer = null;
 
-  const pages = ["overview", "settings", "token", "peers", "routes", "inbound", "pending", "stats"];
+  const pages = [
+    "overview",
+    "settings",
+    "token",
+    "peers",
+    "routes",
+    "inbound",
+    "geoblocking",
+    "pending",
+    "stats",
+    "logs",
+  ];
 
   let lastUIPrefs = {
     peer_tunnel_subnet_cidr: "",
@@ -159,9 +170,12 @@
     if (name === "peers") refreshPeersPage();
     if (name === "routes") refreshRoutesPage();
     if (name === "inbound") refreshInboundPage();
+    if (name === "geoblocking") refreshGeoblockingPage();
     if (name === "pending") refreshPendingPage();
     if (name === "stats") refreshStatsPage();
+    if (name === "logs") refreshLogsPage();
     refreshPendingBadge();
+    void refreshSidebarAbout();
   }
 
   async function onHash() {
@@ -194,7 +208,14 @@
       const n = (o.forwarding_routes && o.forwarding_routes.length) || 0;
       const fwd = n + " route(s)";
       grid.appendChild(elStat("Forwarding", fwd));
-      grid.appendChild(elStat("Geo", o.geo_enabled ? (o.geo_countries || []).join(", ") : "off"));
+      grid.appendChild(
+        elStat(
+          "Geo",
+          o.geo_enabled
+            ? (o.geo_mode === "block" ? "block " : "allow ") + (o.geo_countries || []).join(", ")
+            : "off"
+        )
+      );
       grid.appendChild(elStat("Peers", String((o.peer_names || []).length)));
     } catch (e) {
       setApiStatus(false, String(e.message || e));
@@ -821,6 +842,255 @@
     }
   }
 
+  /* ——— Geoblocking ——— */
+  let geoCountryCatalog = null;
+  /** @type {Map<string, { code: string, name: string }>} */
+  let geoCountryByCode = new Map();
+  let geoSelectedCodes = [];
+  /** @type {Set<string>} */
+  let geoModalDraft = new Set();
+
+  function setGeoMsg(text, isErr) {
+    const el = $("geo-msg");
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("err", !!isErr);
+  }
+
+  function countryFlagEmoji(code) {
+    const c = String(code || "")
+      .toUpperCase()
+      .replace(/[^A-Z]/g, "");
+    if (c.length !== 2) return "";
+    const cp = (ch) => 0x1f1e6 + (ch.charCodeAt(0) - 65);
+    return String.fromCodePoint(cp(c[0]), cp(c[1]));
+  }
+
+  async function loadGeoCountryCatalog() {
+    if (geoCountryCatalog) return;
+    const base = typeof window.EVUPROXY_STATIC === "string" ? window.EVUPROXY_STATIC : "/static";
+    const r = await fetch(base + "/geo-countries.json", { credentials: "same-origin" });
+    if (!r.ok) throw new Error("Could not load country list (" + r.status + ").");
+    const raw = await r.json();
+    geoCountryCatalog = raw
+      .map((x) => ({
+        code: String(x["alpha-2"] || "")
+          .trim()
+          .toLowerCase(),
+        name: String(x.name || "").trim() || String(x["alpha-2"] || ""),
+      }))
+      .filter((x) => x.code.length === 2);
+    geoCountryByCode = new Map(geoCountryCatalog.map((x) => [x.code, x]));
+    geoCountryCatalog.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function geoCountryName(code) {
+    const c = String(code || "").toLowerCase();
+    const row = geoCountryByCode.get(c);
+    return row ? row.name : c.toUpperCase();
+  }
+
+  function getGeoListMode() {
+    const allowBtn = $("geo-mode-allow");
+    return allowBtn && allowBtn.classList.contains("is-active") ? "allow" : "block";
+  }
+
+  function setGeoListMode(mode) {
+    const m = mode === "block" ? "block" : "allow";
+    const blockBtn = $("geo-mode-block");
+    const allowBtn = $("geo-mode-allow");
+    if (blockBtn) {
+      blockBtn.classList.toggle("is-active", m === "block");
+      blockBtn.setAttribute("aria-pressed", m === "block" ? "true" : "false");
+    }
+    if (allowBtn) {
+      allowBtn.classList.toggle("is-active", m === "allow");
+      allowBtn.setAttribute("aria-pressed", m === "allow" ? "true" : "false");
+    }
+    const ex = $("geo-mode-explainer");
+    if (ex) {
+      ex.textContent =
+        m === "allow"
+          ? "Listed countries may reach public ports; others are dropped (logged)."
+          : "Listed countries are blocked from public ports; others are allowed.";
+    }
+    const hint = $("geo-modal-hint");
+    if (hint && !hint.closest(".is-hidden")) {
+      hint.textContent =
+        m === "allow"
+          ? "Check countries to allow. Search filters the list."
+          : "Check countries to block. Search filters the list.";
+    }
+  }
+
+  function updateGeoTagsEditCount() {
+    const n = $("geo-tags-edit-count");
+    if (n) n.textContent = "(" + geoSelectedCodes.length + ")";
+  }
+
+  function renderGeoTags() {
+    const box = $("geo-tags-chips");
+    if (!box) return;
+    box.innerHTML = "";
+    const sorted = geoSelectedCodes.slice().sort((a, b) => geoCountryName(a).localeCompare(geoCountryName(b)));
+    for (const code of sorted) {
+      const fl = countryFlagEmoji(code);
+      const tag = document.createElement("span");
+      tag.className = "geo-tag";
+      tag.innerHTML =
+        '<span class="geo-tag-flag" aria-hidden="true">' +
+        escapeHtml(fl || "·") +
+        "</span>" +
+        '<span class="geo-tag-name">' +
+        escapeHtml(geoCountryName(code)) +
+        "</span>";
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "geo-tag-remove";
+      rm.setAttribute("aria-label", "Remove " + geoCountryName(code));
+      rm.textContent = "×";
+      rm.addEventListener("click", () => {
+        geoSelectedCodes = geoSelectedCodes.filter((c) => c !== code);
+        updateGeoTagsEditCount();
+        renderGeoTags();
+      });
+      tag.appendChild(rm);
+      box.appendChild(tag);
+    }
+    updateGeoTagsEditCount();
+  }
+
+  function geoFormFromConfig(cfg) {
+    const g = (cfg && cfg.geo) || {};
+    const en = $("geo-f-enabled");
+    const sn = $("geo-f-set-name");
+    const zd = $("geo-f-zone-dir");
+    if (en) en.checked = !!g.enabled;
+    if (sn) sn.value = g.set_name || "";
+    if (zd) zd.value = g.zone_dir || "";
+    const mode = String(g.mode || "allow").toLowerCase() === "block" ? "block" : "allow";
+    setGeoListMode(mode);
+    geoSelectedCodes = Array.isArray(g.countries)
+      ? g.countries.map((c) => String(c).trim().toLowerCase()).filter(Boolean)
+      : [];
+    renderGeoTags();
+  }
+
+  function openGeoCountryModal() {
+    const modal = $("geo-country-modal");
+    if (!modal) return;
+    geoModalDraft = new Set(geoSelectedCodes);
+    const hint = $("geo-modal-hint");
+    if (hint) {
+      hint.textContent =
+        getGeoListMode() === "allow"
+          ? "Check countries to allow. Search filters the list."
+          : "Check countries to block. Search filters the list.";
+    }
+    const search = $("geo-modal-search");
+    if (search) search.value = "";
+    renderGeoModalList("");
+    modal.classList.remove("is-hidden");
+    const edit = $("geo-tags-edit");
+    if (edit) {
+      edit.setAttribute("aria-expanded", "true");
+    }
+    if (search) requestAnimationFrame(() => search.focus());
+  }
+
+  function closeGeoCountryModal() {
+    const modal = $("geo-country-modal");
+    if (modal) modal.classList.add("is-hidden");
+    const edit = $("geo-tags-edit");
+    if (edit) edit.setAttribute("aria-expanded", "false");
+  }
+
+  function renderGeoModalList(filterRaw) {
+    const list = $("geo-modal-list");
+    if (!list || !geoCountryCatalog) return;
+    const q = String(filterRaw || "")
+      .trim()
+      .toLowerCase();
+    const rows = [];
+    for (const row of geoCountryCatalog) {
+      if (q) {
+        const hay = (row.code + " " + row.name).toLowerCase();
+        if (!hay.includes(q)) continue;
+      }
+      const checked = geoModalDraft.has(row.code);
+      const fl = countryFlagEmoji(row.code);
+      rows.push(
+        '<label class="geo-modal-row">' +
+          '<input type="checkbox" data-geo-code="' +
+          escapeHtml(row.code) +
+          '" ' +
+          (checked ? "checked " : "") +
+          "/>" +
+          '<span class="geo-modal-row-flag" aria-hidden="true">' +
+          escapeHtml(fl || "·") +
+          "</span>" +
+          '<span class="geo-modal-row-name">' +
+          escapeHtml(row.name) +
+          "</span>" +
+          "</label>"
+      );
+    }
+    list.innerHTML = rows.length ? rows.join("") : '<p class="hint meta" style="padding:0.75rem">No matches.</p>';
+    list.querySelectorAll('input[type="checkbox"][data-geo-code]').forEach((inp) => {
+      inp.addEventListener("change", () => {
+        const code = inp.getAttribute("data-geo-code");
+        if (!code) return;
+        if (inp.checked) geoModalDraft.add(code);
+        else geoModalDraft.delete(code);
+      });
+    });
+  }
+
+  async function saveGeoblocking() {
+    if (!lastConfig) return;
+    const cfg = JSON.parse(JSON.stringify(lastConfig));
+    if (!cfg.geo) cfg.geo = {};
+    const g = cfg.geo;
+    g.enabled = $("geo-f-enabled") && $("geo-f-enabled").checked;
+    g.mode = getGeoListMode();
+    g.countries = geoSelectedCodes.slice().map((c) => c.toLowerCase());
+    g.set_name = ($("geo-f-set-name") && $("geo-f-set-name").value.trim()) || "";
+    g.zone_dir = ($("geo-f-zone-dir") && $("geo-f-zone-dir").value.trim()) || "";
+    try {
+      await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
+      lastConfig = cfg;
+      setGeoMsg("Saved. Review Pending changes, then Apply to host.");
+      setApiStatus(true);
+      refreshPendingBadge();
+    } catch (e) {
+      setGeoMsg(String(e.message || e), true);
+    }
+  }
+
+  async function refreshGeoblockingPage() {
+    setGeoMsg("");
+    try {
+      await loadGeoCountryCatalog();
+      lastConfig = await api("/v1/config");
+      setApiStatus(true);
+      geoFormFromConfig(lastConfig);
+    } catch (e) {
+      setApiStatus(false, String(e.message || e));
+      setGeoMsg(String(e.message || e), true);
+    }
+  }
+
+  async function geoUpdateLists() {
+    setGeoMsg("…");
+    try {
+      await api("/v1/update-geo", { method: "POST" });
+      setGeoMsg("Geo lists updated on host.");
+      setApiStatus(true);
+    } catch (e) {
+      setGeoMsg(String(e.message || e), true);
+    }
+  }
+
   function setPendingMsg(text, isErr) {
     const el = $("pending-msg");
     if (!el) return;
@@ -916,6 +1186,48 @@
       setStatsMsg(String(e.message || e), true);
       wgW.innerHTML = "";
       nftW.innerHTML = "";
+    }
+  }
+
+  /* ——— Logs ——— */
+  function setLogsMsg(text, isErr) {
+    const el = $("logs-msg");
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("err", !!isErr);
+  }
+
+  async function refreshLogsPage() {
+    const pre = $("logs-pre");
+    const src = $("logs-source");
+    setLogsMsg("");
+    if (pre) pre.textContent = "";
+    if (src) src.textContent = "";
+    try {
+      const j = await api("/v1/logs?limit=500");
+      setApiStatus(true);
+      if (src) {
+        src.textContent = j.source ? "Source: " + j.source : "";
+      }
+      const lines = j.lines || [];
+      if (pre) {
+        pre.textContent = lines.length ? lines.join("\n") : "(no matching lines)";
+      }
+    } catch (e) {
+      setApiStatus(false, String(e.message || e));
+      setLogsMsg(String(e.message || e), true);
+    }
+  }
+
+  async function refreshSidebarAbout() {
+    const el = $("sidebar-version");
+    if (!el || el.dataset.loaded === "1") return;
+    try {
+      const a = await api("/v1/about");
+      el.textContent = a.version || "—";
+      el.dataset.loaded = "1";
+    } catch {
+      /* no token or API down */
     }
   }
 
@@ -1243,6 +1555,39 @@
   });
   $("inbound-save").addEventListener("click", saveInboundEditor);
   $("inbound-cancel").addEventListener("click", closeInboundEditor);
+  $("geo-save").addEventListener("click", saveGeoblocking);
+  $("geo-refresh").addEventListener("click", refreshGeoblockingPage);
+  $("geo-update-lists").addEventListener("click", geoUpdateLists);
+  const geoModeBlock = $("geo-mode-block");
+  const geoModeAllow = $("geo-mode-allow");
+  if (geoModeBlock) {
+    geoModeBlock.addEventListener("click", () => {
+      setGeoListMode("block");
+    });
+  }
+  if (geoModeAllow) {
+    geoModeAllow.addEventListener("click", () => {
+      setGeoListMode("allow");
+    });
+  }
+  const geoTagsEdit = $("geo-tags-edit");
+  if (geoTagsEdit) geoTagsEdit.addEventListener("click", openGeoCountryModal);
+  const geoModalBackdrop = $("geo-modal-backdrop");
+  if (geoModalBackdrop) geoModalBackdrop.addEventListener("click", closeGeoCountryModal);
+  const geoModalCancel = $("geo-modal-cancel");
+  if (geoModalCancel) geoModalCancel.addEventListener("click", closeGeoCountryModal);
+  const geoModalSave = $("geo-modal-save");
+  if (geoModalSave) {
+    geoModalSave.addEventListener("click", () => {
+      geoSelectedCodes = Array.from(geoModalDraft);
+      renderGeoTags();
+      closeGeoCountryModal();
+    });
+  }
+  const geoModalSearch = $("geo-modal-search");
+  if (geoModalSearch) {
+    geoModalSearch.addEventListener("input", () => renderGeoModalList(geoModalSearch.value));
+  }
   const inboundModal = $("inbound-modal");
   const inboundBackdrop = inboundModal && inboundModal.querySelector(".modal-backdrop");
   if (inboundBackdrop) inboundBackdrop.addEventListener("click", closeInboundEditor);
@@ -1263,6 +1608,12 @@
   });
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
+    const gm = $("geo-country-modal");
+    if (gm && !gm.classList.contains("is-hidden")) {
+      closeGeoCountryModal();
+      ev.preventDefault();
+      return;
+    }
     const cm = $("confirm-modal");
     if (cm && !cm.classList.contains("is-hidden")) {
       closeConfirmModal();
@@ -1289,6 +1640,7 @@
   });
 
   $("stats-refresh").addEventListener("click", refreshStatsPage);
+  $("logs-refresh").addEventListener("click", refreshLogsPage);
 
   $("onboard-client-priv-toggle").addEventListener("click", () => {
     const inp = $("onboard-client-priv");

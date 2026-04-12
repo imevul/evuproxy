@@ -26,9 +26,21 @@
         <a href="#/peers" class="nav-link" data-route="peers">Peers</a>
         <a href="#/routes" class="nav-link" data-route="routes">Routes</a>
         <a href="#/inbound" class="nav-link" data-route="inbound">Inbound access</a>
+        <a href="#/geoblocking" class="nav-link" data-route="geoblocking">Geoblocking</a>
         <a href="#/pending" class="nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span></a>
         <a href="#/stats" class="nav-link" data-route="stats">Stats</a>
+        <a href="#/logs" class="nav-link" data-route="logs">Logs</a>
       </nav>
+      <footer class="sidebar-footer">
+        <a
+          class="sidebar-footer-link"
+          href="https://github.com/imevul/evuproxy"
+          target="_blank"
+          rel="noopener noreferrer"
+          >EvuProxy on GitHub</a
+        >
+        <span class="sidebar-version" id="sidebar-version" title="API build version">—</span>
+      </footer>
     </aside>
 
     <main class="content">
@@ -284,10 +296,87 @@
         </div>
       </section>
 
+      <section id="page-geoblocking" class="page" hidden>
+        <h2 class="page-title">Geoblocking</h2>
+        <p class="hint" id="geo-page-hint">
+          When enabled, nftables restrict public forwarding and <code class="inline">input_allows</code> ports using
+          downloaded country zones. Choose whether the country list is an <strong>allow</strong> or <strong>block</strong>
+          list. Stored in <code class="inline">geo</code> in the main config. After saving, run
+          <strong>Update geo lists</strong> on this page or from Overview, then Apply on Pending changes.
+        </p>
+        <div class="card">
+          <div class="field">
+            <label class="check"><input type="checkbox" id="geo-f-enabled" /> Enable geoblocking</label>
+          </div>
+          <div class="field">
+            <span class="field-label">List mode</span>
+            <div class="geo-segmented" role="group" aria-label="Allow or block listed countries">
+              <button type="button" class="geo-seg-btn" id="geo-mode-block" data-geo-mode="block" aria-pressed="false">
+                Block
+              </button>
+              <button type="button" class="geo-seg-btn is-active" id="geo-mode-allow" data-geo-mode="allow" aria-pressed="true">
+                Allow
+              </button>
+            </div>
+            <span class="meta" id="geo-mode-explainer"
+              >Listed countries may reach public ports; others are dropped (logged).</span
+            >
+          </div>
+          <div class="field">
+            <span class="field-label" id="geo-tags-label">Countries</span>
+            <div id="geo-tags-wrap" class="geo-tags-wrap">
+              <div id="geo-tags-chips" class="geo-tags-chips" aria-labelledby="geo-tags-label"></div>
+              <button type="button" class="btn-quiet geo-tags-edit" id="geo-tags-edit" aria-expanded="false">
+                Edit <span class="geo-tags-edit-count" id="geo-tags-edit-count">(0)</span>
+              </button>
+            </div>
+            <span class="meta" id="geo-countries-meta">At least one country when geoblocking is on.</span>
+          </div>
+          <div class="field">
+            <label for="geo-f-set-name">nftables set name <span class="meta">(optional)</span></label>
+            <input type="text" id="geo-f-set-name" placeholder="geo_v4" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="geo-f-zone-dir">Zone directory on host</label>
+            <input type="text" id="geo-f-zone-dir" placeholder="/etc/evuproxy/geo-zones" autocomplete="off" />
+            <span class="meta">Directory for <code class="inline">.zone</code> files (required when enabled).</span>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="geo-save">Save</button>
+            <button type="button" class="btn-quiet" id="geo-refresh">Refresh</button>
+            <button type="button" class="btn-primary" id="geo-update-lists">Update geo lists</button>
+          </div>
+          <p id="geo-msg" class="msg" aria-live="polite"></p>
+        </div>
+
+        <div
+          id="geo-country-modal"
+          class="modal is-hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="geo-modal-title"
+        >
+          <button type="button" class="modal-backdrop" id="geo-modal-backdrop" aria-label="Close dialog"></button>
+          <div class="modal-panel modal-panel-wide geo-country-modal-panel">
+            <h3 id="geo-modal-title">Countries</h3>
+            <p class="hint meta geo-modal-hint" id="geo-modal-hint"></p>
+            <div class="geo-modal-search-wrap">
+              <label class="visually-hidden" for="geo-modal-search">Search countries</label>
+              <input type="search" id="geo-modal-search" class="geo-modal-search" placeholder="Search" autocomplete="off" />
+            </div>
+            <div id="geo-modal-list" class="geo-modal-list" role="listbox" aria-multiselectable="true"></div>
+            <div class="btn-row geo-modal-actions">
+              <button type="button" class="btn-quiet" id="geo-modal-cancel">Cancel</button>
+              <button type="button" class="btn-primary" id="geo-modal-save">Save</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="page-pending" class="page" hidden>
         <h2 class="page-title">Pending changes</h2>
         <p class="hint">
-          Saving peers, routes, inbound rules, or peer profile output writes YAML on the server only.
+          Saving peers, routes, inbound rules, geoblocking, or peer profile output writes YAML on the server only.
           nftables and WireGuard reload after you review the generated rules and click Apply (or use
           Overview → Reload config).
         </p>
@@ -316,6 +405,24 @@
           <h3>nftables counters</h3>
           <div id="stats-nft-wrap" class="table-wrap"></div>
           <p id="stats-msg" class="msg" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section id="page-logs" class="page" hidden>
+        <h2 class="page-title">Logs</h2>
+        <p class="hint">
+          Lines from nftables <code class="inline">log</code> rules with prefixes
+          <code class="inline">evuproxy-geo-block</code> (geoblocking drops) and
+          <code class="inline">evuproxy-forward-drop</code> (forward-chain drops). The API reads
+          <code class="inline">journalctl</code> (newest first) or falls back to <code class="inline">dmesg</code>.
+        </p>
+        <div class="card">
+          <div class="toolbar">
+            <button type="button" class="btn-primary" id="logs-refresh">Refresh</button>
+          </div>
+          <p id="logs-source" class="hint meta" aria-live="polite"></p>
+          <pre id="logs-pre" class="code-block logs-pre"></pre>
+          <p id="logs-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>
 

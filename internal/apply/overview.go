@@ -16,6 +16,7 @@ type Overview struct {
 	PublicInterface  string                `json:"public_interface"`
 	ForwardingRoutes []config.ForwardRoute `json:"forwarding_routes"`
 	GeoEnabled       bool                  `json:"geo_enabled"`
+	GeoMode          string                `json:"geo_mode,omitempty"` // allow or block
 	GeoCountries     []string              `json:"geo_countries,omitempty"`
 	PeerNames        []string              `json:"peer_names"`
 	// ServerPublicKey is derived with `wg pubkey` from wireguard.private_key_file (empty if unavailable).
@@ -35,6 +36,7 @@ func OverviewFromConfig(path string) (*Overview, error) {
 		PublicInterface:  c.Network.PublicInterface,
 		ForwardingRoutes: append([]config.ForwardRoute(nil), c.Forwarding.Routes...),
 		GeoEnabled:       c.Geo.Enabled,
+		GeoMode:          c.Geo.Mode,
 		GeoCountries:     append([]string(nil), c.Geo.Countries...),
 	}
 	for _, p := range c.Peers {

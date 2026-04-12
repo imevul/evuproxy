@@ -20,6 +20,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	if geoSet == "" {
 		geoSet = "geo_v4"
 	}
+	blockListed := c.Geo.Enabled && strings.EqualFold(strings.TrimSpace(c.Geo.Mode), "block")
 
 	type formattedRoute struct {
 		proto    string
@@ -76,7 +77,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	fmt.Fprintf(&b, "        udp dport %d accept\n", c.WireGuard.ListenPort)
 
 	for _, r := range routes {
-		writeInputForwardPorts(&b, c.Geo.Enabled, geoSet, r.proto, r.portExpr)
+		writeInputForwardPorts(&b, c.Geo.Enabled, blockListed, geoSet, r.proto, r.portExpr)
 	}
 
 	fmt.Fprintf(&b, `    }
@@ -107,7 +108,7 @@ table ip evuproxy {
 `)
 
 	for _, r := range routes {
-		writeDnatRule(&b, c.Geo.Enabled, geoSet, r.proto, r.portExpr, r.target)
+		writeDnatRule(&b, c.Geo.Enabled, blockListed, geoSet, r.proto, r.portExpr, r.target)
 	}
 
 	fmt.Fprintf(&b, `    }
@@ -159,27 +160,37 @@ func writeGeoSet(b *strings.Builder, geoSet string) {
 `, geoSet)
 }
 
-func writeInputForwardPorts(b *strings.Builder, geoEnabled bool, geoSet, proto, portExpr string) {
+func writeInputForwardPorts(b *strings.Builder, geoEnabled, blockListed bool, geoSet, proto, portExpr string) {
 	if portExpr == "" {
 		return
 	}
-	if geoEnabled {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", geoSet, proto, portExpr)
-		fmt.Fprintf(b, "        %s dport %s ip saddr != @%s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", proto, portExpr, geoSet)
-	} else {
+	if !geoEnabled {
 		fmt.Fprintf(b, "        %s dport %s accept\n", proto, portExpr)
+		return
 	}
+	if blockListed {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", geoSet, proto, portExpr)
+		fmt.Fprintf(b, "        %s dport %s accept\n", proto, portExpr)
+		return
+	}
+	fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", geoSet, proto, portExpr)
+	fmt.Fprintf(b, "        %s dport %s ip saddr != @%s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", proto, portExpr, geoSet)
 }
 
-func writeDnatRule(b *strings.Builder, geoEnabled bool, geoSet, proto, portExpr, target string) {
+func writeDnatRule(b *strings.Builder, geoEnabled, blockListed bool, geoSet, proto, portExpr, target string) {
 	if portExpr == "" {
 		return
 	}
-	if geoEnabled {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", geoSet, proto, portExpr, target)
-	} else {
+	if !geoEnabled {
 		fmt.Fprintf(b, "        %s dport %s dnat to %s\n", proto, portExpr, target)
+		return
 	}
+	if blockListed {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", geoSet, proto, portExpr)
+		fmt.Fprintf(b, "        %s dport %s dnat to %s\n", proto, portExpr, target)
+		return
+	}
+	fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", geoSet, proto, portExpr, target)
 }
 
 func allowRuleLine(a config.AllowRule) (string, error) {

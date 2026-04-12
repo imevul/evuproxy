@@ -38,11 +38,45 @@ func TestNFTablesRoutesGeo(t *testing.T) {
 	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport") {
 		t.Fatal("expected geo-wrapped tcp input")
 	}
+	if strings.Contains(s, "ip saddr @geo_v4 tcp dport { 25565 } limit rate") {
+		t.Fatal("did not expect block-style geo on allow mode")
+	}
 	if !strings.Contains(s, "ip daddr 10.100.0.2 tcp dport") {
 		t.Fatal("expected forward tcp rule")
 	}
 	if !strings.Contains(s, "ip daddr 10.100.0.3 masquerade") {
 		t.Fatal("expected masquerade for second target")
+	}
+}
+
+func TestNFTablesRoutesGeoBlockMode(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		Forwarding: config.Forwarding{
+			Routes: []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+			},
+		},
+		Geo: config.Geo{Enabled: true, Mode: "block", SetName: "geo_v4", Countries: []string{"ru"}, ZoneDir: "/z"},
+		Peers: []config.Peer{
+			{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"},
+		},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport { 25565 } drop") {
+		t.Fatalf("expected block-first geo drop before dnat: %s", s)
+	}
+	if !strings.Contains(s, "tcp dport { 25565 } dnat to 10.100.0.2") {
+		t.Fatal("expected dnat after block rule")
 	}
 }
 

@@ -47,6 +47,7 @@ type ForwardRoute struct {
 
 type Geo struct {
 	Enabled   bool     `yaml:"enabled" json:"enabled"`
+	Mode      string   `yaml:"mode,omitempty" json:"mode,omitempty"` // allow (default) or block — listed countries are allowed or blocked
 	SetName   string   `yaml:"set_name" json:"set_name"`
 	Countries []string `yaml:"countries" json:"countries"`
 	ZoneDir   string   `yaml:"zone_dir" json:"zone_dir"`
@@ -169,6 +170,14 @@ func (c *Config) Validate() error {
 		if c.Geo.SetName == "" {
 			c.Geo.SetName = "geo_v4"
 		}
+		mode := strings.ToLower(strings.TrimSpace(c.Geo.Mode))
+		if mode == "" {
+			mode = "allow"
+		}
+		if mode != "allow" && mode != "block" {
+			return fmt.Errorf("geo.mode must be allow or block")
+		}
+		c.Geo.Mode = mode
 		if len(c.Geo.Countries) == 0 {
 			return fmt.Errorf("geo.countries required when geo.enabled")
 		}

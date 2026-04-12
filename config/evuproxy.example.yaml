@@ -17,6 +17,7 @@ forwarding:
 
 geo:
   enabled: true
+  mode: allow # allow = only listed countries may reach public ports; block = listed countries are denied
   set_name: geo_v4
   countries:
     - "no"
