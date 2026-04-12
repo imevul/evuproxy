@@ -9,18 +9,11 @@ wireguard:
 
 network:
   public_interface: eth0
-  # admin_tcp_ports: [9080]   # optional; omitted = default [9080] for Docker UI on INPUT
-  # admin_tcp_ports: []       # disable default — use only if UI is loopback-only
 
 # Each target_ip must match a non-disabled peer tunnel_ip (host IPv4 only).
+# Start empty; add routes after you define peers.
 forwarding:
-  routes:
-    - proto: tcp
-      ports: ["25565", "80-81"]
-      target_ip: 10.100.0.2
-    - proto: udp
-      ports: ["19132-19133"]
-      target_ip: 10.100.0.2
+  routes: []
 
 geo:
   enabled: true
@@ -30,15 +23,16 @@ geo:
     - "se"
   zone_dir: /etc/evuproxy/geo-zones
 
+# Host INPUT allows (SSH, web, EvuProxy UI). Remove or edit entries you do not want (e.g. 9080 if UI is loopback-only).
 input_allows:
   - proto: tcp
     dport: "22"
     note: SSH
   - proto: tcp
     dport: "{ 80, 443 }"
-    note: optional HTTP(S)
+    note: HTTP(S)
+  - proto: tcp
+    dport: "9080"
+    note: EvuProxy admin UI (Docker)
 
-peers:
-  - name: backend-home
-    public_key: REPLACE_WITH_PEER_PUBLIC_KEY_BASE64
-    tunnel_ip: 10.100.0.2/32
+peers: []

@@ -35,7 +35,7 @@ An annotated example lives at [`config/evuproxy.example.yaml`](../config/evuprox
 | Field | Type | Description |
 |-------|------|-------------|
 | `public_interface` | string | Host interface name that faces the Internet (e.g. `eth0`). Used for nftables and NAT. |
-| `admin_tcp_ports` | list of int | Optional. Extra **INPUT** `accept` rules for TCP ports used by **host services** (not forwarded peer ports). If the key is **omitted**, EvuProxy defaults to **`[9080]`** so the Docker admin UI stays reachable when the `inet evuproxy` input chain has `policy drop`. Set **`admin_tcp_ports: []`** explicitly to disable that default (e.g. UI bound to loopback only). |
+| `admin_tcp_ports` | list of int | Optional. Extra **INPUT** `accept` rules for TCP ports used by **host services** (not forwarded peer ports). Omitted or **`[]`** adds none. Typical SSH / HTTP(S) / admin UI (**9080**) rules belong in **`input_allows`** so you can edit them in one place (see the example config). |
 
 The EvuProxy API (`evuproxy serve` on `127.0.0.1:9847`) is reached via **loopback** and does not need a rule here.
 
@@ -61,7 +61,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 
 ### Validation
 
-- At least one route is required.
+- `forwarding.routes` may be empty until you add peers and port forwards.
 - Each route must have a non-empty `proto`, at least one non-empty port string, and a valid IPv4 `target_ip`.
 - `target_ip` must equal the IPv4 derived from some peer’s `tunnel_ip` (peers whose `tunnel_ip` is not valid IPv4 CIDR/host are ignored for this check).
 
@@ -84,7 +84,7 @@ When `geo.enabled` is true, `evuproxy reload` / `update-geo` expect zone files u
 
 ## `input_allows`
 
-Optional rules appended to the `inet evuproxy` **input** chain so the host remains reachable (SSH, HTTP, etc.).
+Rules appended to the `inet evuproxy` **input** chain so the host remains reachable (SSH, HTTP, admin UI, etc.). The shipped example seeds **TCP 22**, **80/443**, and **9080** (Docker admin UI); remove **9080** here if you only reach the UI via SSH tunnel / loopback.
 
 | Field | Type | Description |
 |-------|------|-------------|

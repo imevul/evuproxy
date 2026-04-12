@@ -20,20 +20,7 @@ MOCK_CONFIG = {
         "address": "10.100.0.1/24",
     },
     "network": {"public_interface": "eth0"},
-    "forwarding": {
-        "routes": [
-            {
-                "proto": "tcp",
-                "ports": ["25565", "80-81"],
-                "target_ip": "10.100.0.2",
-            },
-            {
-                "proto": "udp",
-                "ports": ["19132-19133"],
-                "target_ip": "10.100.0.2",
-            },
-        ],
-    },
+    "forwarding": {"routes": []},
     "geo": {
         "enabled": True,
         "set_name": "geo_v4",
@@ -43,19 +30,9 @@ MOCK_CONFIG = {
     "input_allows": [
         {"proto": "tcp", "dport": "22", "note": "SSH"},
         {"proto": "tcp", "dport": "{ 80, 443 }", "note": "HTTP(S)"},
+        {"proto": "tcp", "dport": "9080", "note": "EvuProxy admin UI (Docker)"},
     ],
-    "peers": [
-        {
-            "name": "home-lab",
-            "public_key": "aN1ZvFJyNFsFtXZjMKtQRGQB+YWY6NxcCX79QbRhP0k=",
-            "tunnel_ip": "10.100.0.2/32",
-        },
-        {
-            "name": "mock-peer",
-            "public_key": "bP2ZwGKzNGtGuYZjNLtRSGRC/ZXZ7OydDY8+QcSiQ1l=",
-            "tunnel_ip": "10.100.0.3/32",
-        },
-    ],
+    "peers": [],
 }
 
 MOCK_APPLIED_SHA: str | None = None
@@ -102,32 +79,8 @@ def _mock_nft_preview() -> str:
 
 MOCK_STATS = {
     "wireguard_interface": "evuproxy0",
-    "wireguard_peers": [
-        {
-            "public_key": "aN1ZvFJyNFsFtXZjMKtQRGQB+YWY6NxcCX79QbRhP0k=",
-            "endpoint": "192.0.2.88:51820",
-            "allowed_ips": "10.100.0.2/32",
-            "latest_handshake_unix": 1710000000,
-            "transfer_rx": 4096,
-            "transfer_tx": 8192,
-        }
-    ],
-    "nftables_counters": [
-        {
-            "family": "inet",
-            "table": "evuproxy",
-            "line": "tcp dport 25565 counter packets 42 bytes 9000 accept",
-            "packets": 42,
-            "bytes": 9000,
-        },
-        {
-            "family": "ip",
-            "table": "evuproxy",
-            "line": "udp dport 19132 counter packets 7 bytes 1400 dnat to 10.100.0.2",
-            "packets": 7,
-            "bytes": 1400,
-        },
-    ],
+    "wireguard_peers": [],
+    "nftables_counters": [],
 }
 
 

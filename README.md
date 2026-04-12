@@ -22,7 +22,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 
    If **Go 1.22+** is installed, the script builds `evuproxy` into `/usr/local/bin`. Otherwise copy a prebuilt binary to that path (see **Prerequisites**).
 
-2. Edit `/etc/evuproxy/config.yaml` (seeded from [config/evuproxy.example.yaml](config/evuproxy.example.yaml)): set `network.public_interface`, peer `public_key`, and **`forwarding.routes`** (per-protocol port lists; each `target_ip` must match a peer’s tunnel address).
+2. Edit `/etc/evuproxy/config.yaml` (seeded from [config/evuproxy.example.yaml](config/evuproxy.example.yaml)): set `network.public_interface`, add **peers** (public keys, tunnel IPs), then **`forwarding.routes`** (each `target_ip` must match a peer’s tunnel address). Adjust **`input_allows`** if you do not want the default SSH / web / UI ports.
 
 3. Apply:
 
@@ -78,7 +78,7 @@ Open `http://127.0.0.1:9080` and enter API token **`dev`** (default), or set `MO
 
 ## Security notes
 
-- After `reload`, nftables **INPUT** is restrictive; by default **TCP 9080** is allowed for the Docker UI (`network.admin_tcp_ports`, default `[9080]`). Narrow or disable that if you only use SSH tunnels to the UI.
+- After `reload`, nftables **INPUT** is restrictive; the example seed allows **TCP 22**, **80/443**, and **9080** (Docker UI) via **`input_allows`**. Remove **9080** there if you only use SSH tunnels to the UI.
 - Do not expose the API on `0.0.0.0` without TLS and strong auth.
 - Geo data is approximate; VPN users bypass country filters.
 - If geo sets are **empty** while geo is enabled, traffic may be blocked — check `journalctl` and run `evuproxy update-geo`.

@@ -130,11 +130,11 @@ table ip evuproxy {
 	return b.String(), nil
 }
 
-// adminTCPPortsForInput returns TCP ports to allow on INPUT for host admin services (e.g. Docker UI).
-// If network.admin_tcp_ports is omitted (nil), defaults to [9080]. An explicit empty list [] disables.
+// adminTCPPortsForInput returns extra TCP ports to allow on INPUT for host admin services.
+// Omitted or empty means none — use input_allows in config for SSH, HTTP(S), UI (9080), etc.
 func adminTCPPortsForInput(c *config.Config) []int {
 	if c.Network.AdminTCPPorts == nil {
-		return []int{9080}
+		return nil
 	}
 	seen := make(map[int]struct{})
 	var out []int
