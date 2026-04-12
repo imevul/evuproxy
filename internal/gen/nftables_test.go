@@ -165,6 +165,42 @@ func TestNFTablesSkipsDisabledRoute(t *testing.T) {
 	}
 }
 
+func TestNFTablesForwardAllowDockerBridges(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{
+			PublicInterface:           "eth0",
+			ForwardAllowDockerBridges: true,
+			ForwardExtraLocalCIDRs:    []string{"10.89.0.0/24"},
+		},
+		Forwarding: config.Forwarding{
+			Routes: []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"80"}, TargetIP: "10.100.0.2"},
+			},
+		},
+		Geo:   config.Geo{Enabled: false},
+		Peers: []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "ip saddr 172.16.0.0/12 oifname \"eth0\" accept") {
+		t.Fatalf("expected docker bridge forward allow: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr 192.168.0.0/16 oifname \"eth0\" accept") {
+		t.Fatalf("expected 192.168 forward allow: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr 10.89.0.0/24 oifname \"eth0\" accept") {
+		t.Fatalf("expected extra CIDR forward allow: %s", s)
+	}
+}
+
 func TestNFTablesAdminTCPPortsExplicit(t *testing.T) {
 	c := &config.Config{
 		WireGuard: config.WireGuard{

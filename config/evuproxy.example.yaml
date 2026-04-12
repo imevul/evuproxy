@@ -9,6 +9,9 @@ wireguard:
 
 network:
   public_interface: eth0
+  # When running Docker (or other bridges) on the same host, allow container egress to the internet:
+  # forward_allow_docker_bridges: true
+  # Optional extra IPv4 CIDRs (e.g. Docker networks on 10.x): forward_extra_local_cidrs: [ "10.89.0.0/24" ]
 
 # Each target_ip must match a non-disabled peer tunnel_ip (host IPv4 only).
 # Set disabled: true on a route to keep it in config but omit it from nftables until re-enabled.

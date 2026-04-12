@@ -32,6 +32,13 @@ type Network struct {
 	// AdminTCPPorts are optional extra INPUT allows for host services (TCP only).
 	// Omitted or [] adds none; use input_allows for typical SSH / HTTP / admin UI rules.
 	AdminTCPPorts []int `yaml:"admin_tcp_ports,omitempty" json:"admin_tcp_ports,omitempty"`
+	// ForwardAllowDockerBridges adds FORWARD allows for traffic from typical Docker IPv4
+	// ranges (172.16/12, 192.168/16) to public_interface so containers can reach the internet.
+	// WireGuard peers normally use 10.x tunnel IPs and are unaffected.
+	ForwardAllowDockerBridges bool `yaml:"forward_allow_docker_bridges,omitempty" json:"forward_allow_docker_bridges,omitempty"`
+	// ForwardExtraLocalCIDRs adds extra ip saddr ... oifname public accept rules (IPv4 CIDRs).
+	// Use for Docker networks on 10.x (e.g. 10.89.0.0/24) when forward_allow_docker_bridges is true.
+	ForwardExtraLocalCIDRs []string `yaml:"forward_extra_local_cidrs,omitempty" json:"forward_extra_local_cidrs,omitempty"`
 }
 
 type Forwarding struct {
@@ -40,9 +47,9 @@ type Forwarding struct {
 
 // ForwardRoute maps public TCP or UDP ports to a peer tunnel IPv4 (must match a peer's tunnel_ip).
 type ForwardRoute struct {
-	Proto    string   `yaml:"proto" json:"proto"`         // tcp, udp, both, or comma/plus-separated e.g. tcp,udp
-	Ports    []string `yaml:"ports" json:"ports"`         // port/range/brace-list strings (nft dport set syntax)
-	TargetIP string   `yaml:"target_ip" json:"target_ip"` // IPv4, no CIDR
+	Proto    string   `yaml:"proto" json:"proto"`                           // tcp, udp, both, or comma/plus-separated e.g. tcp,udp
+	Ports    []string `yaml:"ports" json:"ports"`                           // port/range/brace-list strings (nft dport set syntax)
+	TargetIP string   `yaml:"target_ip" json:"target_ip"`                   // IPv4, no CIDR
 	Disabled bool     `yaml:"disabled,omitempty" json:"disabled,omitempty"` // if true, omitted from generated nftables
 }
 
@@ -173,6 +180,19 @@ func (c *Config) Validate() error {
 			if p <= 0 || p > 65535 {
 				return fmt.Errorf("network.admin_tcp_ports: invalid port %d", p)
 			}
+		}
+	}
+	for i, cidr := range c.Network.ForwardExtraLocalCIDRs {
+		s := strings.TrimSpace(cidr)
+		if s == "" {
+			return fmt.Errorf("network.forward_extra_local_cidrs[%d]: empty", i)
+		}
+		ip, _, err := net.ParseCIDR(s)
+		if err != nil {
+			return fmt.Errorf("network.forward_extra_local_cidrs[%d]: %w", i, err)
+		}
+		if ip.To4() == nil {
+			return fmt.Errorf("network.forward_extra_local_cidrs[%d]: IPv4 CIDR required", i)
 		}
 	}
 	if err := c.validateForwardingRoutes(); err != nil {

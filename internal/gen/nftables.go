@@ -91,6 +91,10 @@ func nftablesRoutes(c *config.Config) (string, error) {
         ct state established,related accept
 `)
 
+	for _, cidr := range forwardAllowLocalCIDRs(c) {
+		fmt.Fprintf(&b, "        ip saddr %s oifname %q accept\n", cidr, pub)
+	}
+
 	for _, r := range routes {
 		fmt.Fprintf(&b, "        iifname %q oifname %q ip daddr %s %s dport %s accept\n", pub, wg, r.target, r.proto, r.portExpr)
 	}
@@ -132,6 +136,32 @@ table ip evuproxy {
 `)
 
 	return b.String(), nil
+}
+
+// forwardAllowLocalCIDRs returns IPv4 CIDRs for which we allow NEW forward traffic
+// from local/Docker ranges to the public interface (container egress, etc.).
+func forwardAllowLocalCIDRs(c *config.Config) []string {
+	var out []string
+	if c.Network.ForwardAllowDockerBridges {
+		out = append(out, "172.16.0.0/12", "192.168.0.0/16")
+	}
+	for _, s := range c.Network.ForwardExtraLocalCIDRs {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	seen := make(map[string]struct{}, len(out))
+	dedup := make([]string, 0, len(out))
+	for _, cidr := range out {
+		if _, ok := seen[cidr]; ok {
+			continue
+		}
+		seen[cidr] = struct{}{}
+		dedup = append(dedup, cidr)
+	}
+	return dedup
 }
 
 // adminTCPPortsForInput returns extra TCP ports to allow on INPUT for host admin services.
