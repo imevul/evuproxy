@@ -85,7 +85,7 @@ func cmdStatus() *cobra.Command {
 }
 
 func cmdServe() *cobra.Command {
-	var listen, tokenFile string
+	var listen, tokenFile, corsOrigins string
 	c := &cobra.Command{
 		Use:   "serve",
 		Short: "Run local HTTP API (bind127.0.0.1 by default)",
@@ -99,17 +99,19 @@ func cmdServe() *cobra.Command {
 				tok = strings.TrimSpace(string(b))
 			}
 			s := &api.Server{
-				Listen:  listen,
-				Token:   tok,
-				Config:  cfgPath,
-				Logger:  slog.Default(),
-				Version: version,
+				Listen:      listen,
+				Token:       tok,
+				Config:      cfgPath,
+				Logger:      slog.Default(),
+				Version:     version,
+				CORSOrigins: corsOrigins,
 			}
 			return s.Run()
 		},
 	}
 	c.Flags().StringVar(&listen, "listen", "127.0.0.1:9847", "listen address")
 	c.Flags().StringVar(&tokenFile, "token-file", "/etc/evuproxy/api.token", "file containing API bearer token")
+	c.Flags().StringVar(&corsOrigins, "cors-origins", "", "comma-separated allowed Origin values for cross-origin browser UIs, or * for any (token auth still required)")
 	return c
 }
 

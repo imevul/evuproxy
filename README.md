@@ -48,6 +48,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 ## Local API
 
 - **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment `**EVUPROXY_API_TOKEN`** or `**serve --token-file**` (default `/etc/evuproxy/api.token`).
+- **Cross-origin UI:** If the admin UI is opened from another origin (different scheme/host/port than the API), the browser needs CORS. Enable with `**evuproxy serve --cors-origins**`: a comma-separated list of exact `Origin` values (for example `https://myui.example.com,http://10.0.0.2:9080`), or `*` to allow any origin. The API remains protected by the bearer token; prefer an explicit list over `*` when the API is reachable from untrusted networks.
 - **Auth:** `Authorization: Bearer …` or `X-API-Token` on `**/api/v1/*`** routes. `**GET /healthz**` is unauthenticated (for probes).
 
 **Endpoints (all under `/api/v1` unless noted):**

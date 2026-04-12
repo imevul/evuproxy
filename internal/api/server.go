@@ -23,6 +23,9 @@ type Server struct {
 	Config  string
 	Logger  *slog.Logger
 	Version string
+	// CORSOrigins is a comma-separated list of allowed browser Origin values, or "*" for any.
+	// Used when the web UI is served from a different host than the API.
+	CORSOrigins string
 }
 
 func tokenMatch(got, want string) bool {
@@ -298,9 +301,13 @@ func (s *Server) Run() error {
 	if err := apply.EnsureApplyStateFromDisk(s.Config); err != nil {
 		s.Logger.Warn("apply state bootstrap", "err", err)
 	}
+	handler := http.Handler(s.Routes())
+	if cors := parseCORSOrigins(s.CORSOrigins); cors != nil {
+		handler = cors.wrap(handler)
+	}
 	srv := &http.Server{
 		Addr:              s.Listen,
-		Handler:           s.Routes(),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.Logger.Info("evuproxy API listening", "addr", s.Listen)
