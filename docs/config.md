@@ -35,6 +35,9 @@ An annotated example lives at [`config/evuproxy.example.yaml`](../config/evuprox
 | Field | Type | Description |
 |-------|------|-------------|
 | `public_interface` | string | Host interface name that faces the Internet (e.g. `eth0`). Used for nftables and NAT. |
+| `admin_tcp_ports` | list of int | Optional. Extra **INPUT** `accept` rules for TCP ports used by **host services** (not forwarded peer ports). If the key is **omitted**, EvuProxy defaults to **`[9080]`** so the Docker admin UI stays reachable when the `inet evuproxy` input chain has `policy drop`. Set **`admin_tcp_ports: []`** explicitly to disable that default (e.g. UI bound to loopback only). |
+
+The EvuProxy API (`evuproxy serve` on `127.0.0.1:9847`) is reached via **loopback** and does not need a rule here.
 
 ---
 

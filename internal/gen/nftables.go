@@ -69,6 +69,10 @@ func nftablesRoutes(c *config.Config) (string, error) {
 		fmt.Fprintf(&b, "        %s\n", line)
 	}
 
+	for _, port := range adminTCPPortsForInput(c) {
+		fmt.Fprintf(&b, "        tcp dport %d accept\n", port)
+	}
+
 	fmt.Fprintf(&b, "        udp dport %d accept\n", c.WireGuard.ListenPort)
 
 	for _, r := range routes {
@@ -124,6 +128,25 @@ table ip evuproxy {
 `)
 
 	return b.String(), nil
+}
+
+// adminTCPPortsForInput returns TCP ports to allow on INPUT for host admin services (e.g. Docker UI).
+// If network.admin_tcp_ports is omitted (nil), defaults to [9080]. An explicit empty list [] disables.
+func adminTCPPortsForInput(c *config.Config) []int {
+	if c.Network.AdminTCPPorts == nil {
+		return []int{9080}
+	}
+	seen := make(map[int]struct{})
+	var out []int
+	for _, p := range c.Network.AdminTCPPorts {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	sort.Ints(out)
+	return out
 }
 
 func writeGeoSet(b *strings.Builder, geoSet string) {

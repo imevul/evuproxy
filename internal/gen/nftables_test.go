@@ -44,6 +44,35 @@ func TestNFTablesRoutesGeo(t *testing.T) {
 	if !strings.Contains(s, "ip daddr 10.100.0.3 masquerade") {
 		t.Fatal("expected masquerade for second target")
 	}
+	if !strings.Contains(s, "tcp dport 9080 accept") {
+		t.Fatal("expected default admin UI INPUT allow on tcp/9080")
+	}
+}
+
+func TestNFTablesAdminTCPPortsDisabled(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0", AdminTCPPorts: []int{}},
+		Forwarding: config.Forwarding{
+			Routes: []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"80"}, TargetIP: "10.100.0.2"},
+			},
+		},
+		Geo:   config.Geo{Enabled: false},
+		Peers: []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s, "tcp dport 9080 accept") {
+		t.Fatalf("expected no default admin port when admin_tcp_ports is empty: %s", s)
+	}
 }
 
 func TestNFTablesRoutesBothProtosOneRoute(t *testing.T) {
@@ -72,5 +101,8 @@ func TestNFTablesRoutesBothProtosOneRoute(t *testing.T) {
 	}
 	if !strings.Contains(s, "udp dport { 19132 } dnat to 10.100.0.2") {
 		t.Fatalf("missing udp dnat: %s", s)
+	}
+	if !strings.Contains(s, "tcp dport 9080 accept") {
+		t.Fatal("expected default admin UI INPUT allow on tcp/9080")
 	}
 }

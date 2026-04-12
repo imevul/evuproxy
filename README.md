@@ -78,6 +78,7 @@ Open `http://127.0.0.1:9080` and enter API token **`dev`** (default), or set `MO
 
 ## Security notes
 
+- After `reload`, nftables **INPUT** is restrictive; by default **TCP 9080** is allowed for the Docker UI (`network.admin_tcp_ports`, default `[9080]`). Narrow or disable that if you only use SSH tunnels to the UI.
 - Do not expose the API on `0.0.0.0` without TLS and strong auth.
 - Geo data is approximate; VPN users bypass country filters.
 - If geo sets are **empty** while geo is enabled, traffic may be blocked — check `journalctl` and run `evuproxy update-geo`.

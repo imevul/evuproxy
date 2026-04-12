@@ -9,6 +9,8 @@ wireguard:
 
 network:
   public_interface: eth0
+  # admin_tcp_ports: [9080]   # optional; omitted = default [9080] for Docker UI on INPUT
+  # admin_tcp_ports: []       # disable default — use only if UI is loopback-only
 
 # Each target_ip must match a non-disabled peer tunnel_ip (host IPv4 only).
 forwarding:

@@ -29,6 +29,9 @@ type WireGuard struct {
 
 type Network struct {
 	PublicInterface string `yaml:"public_interface" json:"public_interface"`
+	// AdminTCPPorts are extra INPUT allows for host services (e.g. Docker admin UI on TCP).
+	// If nil (YAML key omitted), EvuProxy defaults to [9080]. Use [] to disable that default.
+	AdminTCPPorts []int `yaml:"admin_tcp_ports,omitempty" json:"admin_tcp_ports,omitempty"`
 }
 
 type Forwarding struct {
@@ -151,6 +154,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Network.PublicInterface == "" {
 		return fmt.Errorf("network.public_interface is required")
+	}
+	if c.Network.AdminTCPPorts != nil {
+		for _, p := range c.Network.AdminTCPPorts {
+			if p <= 0 || p > 65535 {
+				return fmt.Errorf("network.admin_tcp_ports: invalid port %d", p)
+			}
+		}
 	}
 	if len(c.Forwarding.Routes) == 0 {
 		return fmt.Errorf("forwarding.routes must contain at least one route")
