@@ -97,10 +97,11 @@ func cmdServe() *cobra.Command {
 				tok = strings.TrimSpace(string(b))
 			}
 			s := &api.Server{
-				Listen: listen,
-				Token:  tok,
-				Config: cfgPath,
-				Logger: slog.Default(),
+				Listen:  listen,
+				Token:   tok,
+				Config:  cfgPath,
+				Logger:  slog.Default(),
+				Version: version,
 			}
 			return s.Run()
 		},

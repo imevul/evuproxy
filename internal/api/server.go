@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net"
 	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,10 +16,11 @@ import (
 )
 
 type Server struct {
-	Listen string
-	Token  string
-	Config string
-	Logger *slog.Logger
+	Listen  string
+	Token   string
+	Config  string
+	Logger  *slog.Logger
+	Version string
 }
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
@@ -55,6 +58,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
 	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
 	mux.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
+	mux.HandleFunc("GET /api/v1/about", s.auth(s.handleAbout))
+	mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleLogs))
 	mux.HandleFunc("POST /api/v1/backup", s.auth(s.handleBackup))
 	mux.HandleFunc("POST /api/v1/restore", s.auth(s.handleRestore))
 	return mux
@@ -171,6 +176,37 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jsonOK(w, st)
+}
+
+func (s *Server) handleAbout(w http.ResponseWriter, r *http.Request) {
+	v := strings.TrimSpace(s.Version)
+	if v == "" {
+		v = "dev"
+	}
+	s.jsonOK(w, map[string]string{
+		"version":  v,
+		"repo_url": "https://github.com/imevul/evuproxy",
+	})
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	limit := 200
+	if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	lines, source, err := apply.FirewallDropLogs(ctx, limit)
+	if err != nil {
+		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonOK(w, map[string]any{
+		"lines":  lines,
+		"source": source,
+	})
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {

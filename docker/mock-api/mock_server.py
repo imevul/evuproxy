@@ -23,6 +23,7 @@ MOCK_CONFIG = {
     "forwarding": {"routes": []},
     "geo": {
         "enabled": True,
+        "mode": "allow",
         "set_name": "geo_v4",
         "countries": ["se", "no"],
         "zone_dir": "/etc/evuproxy/geo-zones",
@@ -83,6 +84,11 @@ MOCK_STATS = {
     "nftables_counters": [],
 }
 
+MOCK_LOGS = [
+    "2026-01-15T10:00:01+00:00 host kernel: evuproxy-geo-block: IN=eth0 OUT= MAC= SRC=198.51.100.2 DST=…",
+    "2026-01-15T10:00:02+00:00 host kernel: evuproxy-forward-drop: IN=eth0 …",
+]
+
 
 def _overview_from_config(cfg: dict) -> dict:
     wg = cfg["wireguard"]
@@ -94,6 +100,7 @@ def _overview_from_config(cfg: dict) -> dict:
         "public_interface": cfg["network"]["public_interface"],
         "forwarding_routes": routes,
         "geo_enabled": cfg["geo"]["enabled"],
+        "geo_mode": (cfg["geo"].get("mode") or "allow"),
         "geo_countries": list(cfg["geo"].get("countries") or []),
         "peer_names": peer_names,
         "server_public_key": "aN1ZvFJyNFsFtXZjMKtQRGQB+YWY6NxcCX79QbRhP0k=",
@@ -182,6 +189,19 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/v1/preferences":
             return self._send_json(200, _normalize_prefs(MOCK_PREFS))
+        if path == "/api/v1/about":
+            return self._send_json(
+                200,
+                {
+                    "version": "mock",
+                    "repo_url": "https://github.com/imevul/evuproxy",
+                },
+            )
+        if path == "/api/v1/logs":
+            return self._send_json(
+                200,
+                {"lines": list(MOCK_LOGS), "source": "mock"},
+            )
         return self._send_json(404, {"error": "not found"})
 
     def do_PUT(self) -> None:
