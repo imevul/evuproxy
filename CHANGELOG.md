@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/imevul/evuproxy/compare/v0.2.0...v0.3.0) (2026-04-12)
+
+
+### Features
+
+* **api:** add optional CORS for cross-origin web UI ([e4fe086](https://github.com/imevul/evuproxy/commit/e4fe086f045b230febcf36b37680daba7f522564))
+* **nftables:** optional forward allows for Docker bridge egress ([f1c1db0](https://github.com/imevul/evuproxy/commit/f1c1db09bf7c5df531d65879abb65a7a926c3920))
+
+
+### Bug Fixes
+
+* **nftables:** allow Docker ingress when forward_allow_docker_bridges ([d0f6170](https://github.com/imevul/evuproxy/commit/d0f61708f8512c847ba30754a4fdbc82a2f8e2ab))
+
 ## [0.2.0](https://github.com/imevul/evuproxy/compare/v0.1.0...v0.2.0) (2026-04-12)
 
 
