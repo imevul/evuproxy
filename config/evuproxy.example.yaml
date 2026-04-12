@@ -10,12 +10,15 @@ wireguard:
 network:
   public_interface: eth0
 
+# Each target_ip must match a non-disabled peer tunnel_ip (host IPv4 only).
 forwarding:
-  tcp_ports:
-    - "20000-40000"
-  udp_ports:
-    - "20000-40000"
-  target_ip: 10.100.0.2
+  routes:
+    - proto: tcp
+      ports: ["25565", "80-81"]
+      target_ip: 10.100.0.2
+    - proto: udp
+      ports: ["19132-19133"]
+      target_ip: 10.100.0.2
 
 geo:
   enabled: true

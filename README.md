@@ -22,7 +22,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 
    If **Go 1.22+** is installed, the script builds `evuproxy` into `/usr/local/bin`. Otherwise copy a prebuilt binary to that path (see **Prerequisites**).
 
-2. Edit `/etc/evuproxy/config.yaml` (seeded from [config/evuproxy.example.yaml](config/evuproxy.example.yaml)): set `network.public_interface`, peer `public_key`, `forwarding.target_ip`, and port lists.
+2. Edit `/etc/evuproxy/config.yaml` (seeded from [config/evuproxy.example.yaml](config/evuproxy.example.yaml)): set `network.public_interface`, peer `public_key`, and **`forwarding.routes`** (per-protocol port lists; each `target_ip` must match a peer’s tunnel address).
 
 3. Apply:
 
@@ -33,6 +33,8 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 4. On boot, `evuproxy.service` reapplies the same. Geo zones refresh via `evuproxy-geo.timer`. With **geo enabled**, the first `reload` attempts to download country zones if files are missing; ensure outbound HTTPS is allowed.
 
 5. **WireGuard on the backend peer**: use a **narrow `AllowedIPs`** (tunnel subnet only, not `0.0.0.0/0`) so local LAN routing stays direct.
+
+6. **Peer (client) install (Linux):** [scripts/peer-install.sh](scripts/peer-install.sh) installs `wireguard-tools`, writes `/etc/wireguard/<iface>.conf`, and enables `wg-quick`. The admin UI **Add peer** modal generates the matching one-liner (`export … && curl … | sudo -E bash`). Forks or pinned releases can set `window.EVUPROXY_PEER_INSTALL_SCRIPT_URL` before loading the UI to use another raw script URL.
 
 ## CLI
 
@@ -48,8 +50,9 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 ## Local API
 
 - Default bind: `127.0.0.1:9847` — set `EVUPROXY_API_TOKEN` or use `--token-file`.
-- Endpoints: `POST /api/v1/reload`, `POST /api/v1/update-geo`, `GET /api/v1/status`, `GET /api/v1/overview`, `GET /api/v1/metrics`, `POST /api/v1/backup?path=...`, `POST /api/v1/restore?path=...`.
+- Endpoints: `GET /api/v1/config`, `PUT /api/v1/config` (JSON body → YAML on disk, validate, **reload**), `GET /api/v1/stats` (WireGuard `dump` + nft counter lines), `POST /api/v1/reload`, `POST /api/v1/update-geo`, `GET /api/v1/status`, `GET /api/v1/overview`, `GET /api/v1/metrics`, `POST /api/v1/backup?path=...`, `POST /api/v1/restore?path=...`.
 - Authenticate with header `X-API-Token` or `Authorization: Bearer …`.
+- **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; comments or unknown keys in the previous file are **not** preserved.
 
 ## Web UI (Docker)
 
@@ -60,6 +63,18 @@ docker compose up --build
 ```
 
 Browse `http://127.0.0.1:9080`. On a remote VPS, use an **SSH tunnel** instead of exposing the UI publicly. The container reaches the API via `host.docker.internal` (see [docker-compose.yml](docker-compose.yml)).
+
+### Local UI with mock API
+
+To try the admin UI **without** `evuproxy serve` on the host (no WireGuard or nftables changes), use the dev stack: a stub API in Docker plus the same UI image, wired on the compose network.
+
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+Open `http://127.0.0.1:9080` and enter API token **`dev`** (default), or set `MOCK_API_TOKEN` when starting compose and use that value in the UI. The mock implements the same HTTP paths and JSON shapes as the real API; config is kept **in memory** on `PUT`.
+
+**Live UI edits:** [docker-compose.dev.yml](docker-compose.dev.yml) bind-mounts [`web/`](web/) into the nginx container and [`docker/mock-api/mock_server.py`](docker/mock-api/mock_server.py) into the mock container. Edit static files or the mock script on the host, **reload the browser** for UI changes, or run `docker compose -f docker-compose.dev.yml restart mock-api` after Python edits. Rebuild images only when [docker/Dockerfile](docker/Dockerfile), [docker/nginx.conf](docker/nginx.conf), or [docker/entrypoint.sh](docker/entrypoint.sh) change. Dev nginx uses [docker/nginx.dev.conf](docker/nginx.dev.conf) (`Cache-Control: no-store`, fixed upstream to `mock-api`).
 
 ## Security notes
 

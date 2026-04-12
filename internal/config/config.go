@@ -4,55 +4,62 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	WireGuard   WireGuard   `yaml:"wireguard"`
-	Network     Network     `yaml:"network"`
-	Forwarding  Forwarding  `yaml:"forwarding"`
-	Geo         Geo         `yaml:"geo"`
-	InputAllows []AllowRule `yaml:"input_allows"`
-	Peers       []Peer      `yaml:"peers"`
+	WireGuard   WireGuard   `yaml:"wireguard" json:"wireguard"`
+	Network     Network     `yaml:"network" json:"network"`
+	Forwarding  Forwarding  `yaml:"forwarding" json:"forwarding"`
+	Geo         Geo         `yaml:"geo" json:"geo"`
+	InputAllows []AllowRule `yaml:"input_allows" json:"input_allows"`
+	Peers       []Peer      `yaml:"peers" json:"peers"`
 }
 
 type WireGuard struct {
-	Interface      string `yaml:"interface"`
-	ListenPort     int    `yaml:"listen_port"`
-	PrivateKeyFile string `yaml:"private_key_file"`
-	Address        string `yaml:"address"` // e.g. 10.100.0.1/24
+	Interface      string `yaml:"interface" json:"interface"`
+	ListenPort     int    `yaml:"listen_port" json:"listen_port"`
+	PrivateKeyFile string `yaml:"private_key_file" json:"private_key_file"`
+	Address        string `yaml:"address" json:"address"` // e.g. 10.100.0.1/24
 }
 
 type Network struct {
-	PublicInterface string `yaml:"public_interface"`
+	PublicInterface string `yaml:"public_interface" json:"public_interface"`
 }
 
 type Forwarding struct {
-	TCPPorts []string `yaml:"tcp_ports"`
-	UDPPorts []string `yaml:"udp_ports"`
-	TargetIP string   `yaml:"target_ip"` // peer tunnel IP for DNAT (no CIDR)
+	Routes []ForwardRoute `yaml:"routes" json:"routes"`
+}
+
+// ForwardRoute maps public TCP or UDP ports to a peer tunnel IPv4 (must match a peer's tunnel_ip).
+type ForwardRoute struct {
+	Proto    string   `yaml:"proto" json:"proto"`         // tcp, udp, both, or comma/plus-separated e.g. tcp,udp
+	Ports    []string `yaml:"ports" json:"ports"`         // port/range/brace-list strings (nft dport set syntax)
+	TargetIP string   `yaml:"target_ip" json:"target_ip"` // IPv4, no CIDR
 }
 
 type Geo struct {
-	Enabled   bool     `yaml:"enabled"`
-	SetName   string   `yaml:"set_name"`
-	Countries []string `yaml:"countries"`
-	ZoneDir   string   `yaml:"zone_dir"`
+	Enabled   bool     `yaml:"enabled" json:"enabled"`
+	SetName   string   `yaml:"set_name" json:"set_name"`
+	Countries []string `yaml:"countries" json:"countries"`
+	ZoneDir   string   `yaml:"zone_dir" json:"zone_dir"`
 }
 
 type AllowRule struct {
-	Proto string `yaml:"proto"`
-	DPort string `yaml:"dport"` // single port, range, or brace list e.g. "{80,443}"
-	Note  string `yaml:"note,omitempty"`
+	Proto string `yaml:"proto" json:"proto"`
+	DPort string `yaml:"dport" json:"dport"` // single port, range, or brace list e.g. "{80,443}"
+	Note  string `yaml:"note,omitempty" json:"note,omitempty"`
 }
 
 type Peer struct {
-	Name      string `yaml:"name"`
-	PublicKey string `yaml:"public_key"`
-	TunnelIP  string `yaml:"tunnel_ip"` // e.g. 10.100.0.2/32
-	Disabled  bool   `yaml:"disabled,omitempty"`
+	Name      string `yaml:"name" json:"name"`
+	PublicKey string `yaml:"public_key" json:"public_key"`
+	TunnelIP  string `yaml:"tunnel_ip" json:"tunnel_ip"` // e.g. 10.100.0.2/32
+	Disabled  bool   `yaml:"disabled,omitempty" json:"disabled,omitempty"`
 }
 
 func Load(path string) (*Config, error) {
@@ -68,6 +75,65 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// PeerTunnelIPv4 returns the IPv4 address string for a peer tunnel_ip value, or "" if invalid.
+func PeerTunnelIPv4(tunnelIP string) string {
+	s := strings.TrimSpace(tunnelIP)
+	if s == "" {
+		return ""
+	}
+	if ip, _, err := net.ParseCIDR(s); err == nil && ip != nil {
+		ip4 := ip.To4()
+		if ip4 == nil {
+			return ""
+		}
+		return ip4.String()
+	}
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return ""
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return ""
+	}
+	return ip4.String()
+}
+
+// ParseRouteProtocols parses forwarding.routes proto values into distinct "tcp" and/or "udp".
+// Accepts a single protocol, "both", or multiple tokens separated by comma, plus, or Unicode spaces.
+func ParseRouteProtocols(s string) ([]string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return nil, fmt.Errorf("proto is required")
+	}
+	if s == "both" {
+		return []string{"tcp", "udp"}, nil
+	}
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == '+' || unicode.IsSpace(r)
+	})
+	seen := map[string]struct{}{}
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if p != "tcp" && p != "udp" {
+			return nil, fmt.Errorf("invalid proto %q (want tcp, udp, or both)", p)
+		}
+		if _, ok := seen[p]; !ok {
+			seen[p] = struct{}{}
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("proto is required")
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (c *Config) Validate() error {
@@ -86,14 +152,11 @@ func (c *Config) Validate() error {
 	if c.Network.PublicInterface == "" {
 		return fmt.Errorf("network.public_interface is required")
 	}
-	if c.Forwarding.TargetIP == "" {
-		return fmt.Errorf("forwarding.target_ip is required")
+	if len(c.Forwarding.Routes) == 0 {
+		return fmt.Errorf("forwarding.routes must contain at least one route")
 	}
-	if len(c.Forwarding.TCPPorts) == 0 && len(c.Forwarding.UDPPorts) == 0 {
-		return fmt.Errorf("forwarding: at least one of tcp_ports or udp_ports is required")
-	}
-	if net.ParseIP(c.Forwarding.TargetIP) == nil {
-		return fmt.Errorf("forwarding.target_ip must be a valid IPv4 address")
+	if err := c.validateForwardingRoutes(); err != nil {
+		return err
 	}
 	if c.Geo.Enabled {
 		if c.Geo.SetName == "" {
@@ -118,6 +181,45 @@ func (c *Config) Validate() error {
 			if net.ParseIP(tip) == nil {
 				return fmt.Errorf("peer %s: invalid tunnel_ip", p.Name)
 			}
+		}
+	}
+	return nil
+}
+
+func (c *Config) validateForwardingRoutes() error {
+	allowed := map[string]struct{}{}
+	for _, p := range c.Peers {
+		if p.Disabled {
+			continue
+		}
+		ip := PeerTunnelIPv4(p.TunnelIP)
+		if ip != "" {
+			allowed[ip] = struct{}{}
+		}
+	}
+	for i, r := range c.Forwarding.Routes {
+		if _, err := ParseRouteProtocols(r.Proto); err != nil {
+			return fmt.Errorf("forwarding.routes[%d]: %w", i, err)
+		}
+		if len(r.Ports) == 0 {
+			return fmt.Errorf("forwarding.routes[%d]: ports is required", i)
+		}
+		hasPort := false
+		for _, port := range r.Ports {
+			if strings.TrimSpace(port) != "" {
+				hasPort = true
+				break
+			}
+		}
+		if !hasPort {
+			return fmt.Errorf("forwarding.routes[%d]: at least one non-empty port entry is required", i)
+		}
+		tip := strings.TrimSpace(r.TargetIP)
+		if net.ParseIP(tip) == nil {
+			return fmt.Errorf("forwarding.routes[%d]: target_ip must be a valid IPv4 address", i)
+		}
+		if _, ok := allowed[tip]; !ok {
+			return fmt.Errorf("forwarding.routes[%d]: target_ip %s must match a non-disabled peer tunnel_ip", i, tip)
 		}
 	}
 	return nil

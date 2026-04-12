@@ -1,0 +1,32 @@
+# Local UI + mock API — no evuproxy on the host, no WireGuard/nftables changes.
+#
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# Open http://127.0.0.1:9080 — use API token "dev" (or set MOCK_API_TOKEN).
+#
+# UI and mock script are bind-mounted: edit web/* or mock_server.py, reload browser
+# or `docker compose -f docker-compose.dev.yml restart mock-api` — no rebuild.
+
+services:
+  mock-api:
+    build:
+      context: ./docker/mock-api
+      dockerfile: Dockerfile
+    environment:
+      MOCK_API_TOKEN: ${MOCK_API_TOKEN:-dev}
+    volumes:
+      - ./docker/mock-api/mock_server.py:/app/mock_server.py:ro
+
+  evuproxy-ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:9080:8080"
+    depends_on:
+      - mock-api
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./docker/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro
+    entrypoint: ["/docker-entrypoint.sh"]
+    command: ["nginx", "-g", "daemon off;"]

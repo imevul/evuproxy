@@ -3,12 +3,14 @@ package api
 import (
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/imevul/evuproxy/internal/apply"
+	"github.com/imevul/evuproxy/internal/config"
 )
 
 type Server struct {
@@ -47,6 +49,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/status", s.auth(s.handleStatus))
 	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.handleMetrics))
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.handleOverview))
+	mux.HandleFunc("GET /api/v1/config", s.auth(s.handleConfigGet))
+	mux.HandleFunc("PUT /api/v1/config", s.auth(s.handleConfigPut))
+	mux.HandleFunc("GET /api/v1/pending", s.auth(s.handlePending))
+	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
+	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
+	mux.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
 	mux.HandleFunc("POST /api/v1/backup", s.auth(s.handleBackup))
 	mux.HandleFunc("POST /api/v1/restore", s.auth(s.handleRestore))
 	return mux
@@ -84,6 +92,80 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jsonOK(w, o)
+}
+
+func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
+	c, err := config.Load(s.Config)
+	if err != nil {
+		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonOK(w, c)
+}
+
+func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+	defer r.Body.Close()
+	var c config.Config
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		s.jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := apply.SaveConfigYAML(s.Config, &c); err != nil {
+		s.jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.jsonOK(w, map[string]string{"result": "saved", "hint": "Review and apply from GET /api/v1/pending or POST /api/v1/reload"})
+}
+
+func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {
+	info, err := apply.PendingSummary(s.Config)
+	if err != nil {
+		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonOK(w, info)
+}
+
+func (s *Server) handlePreferencesGet(w http.ResponseWriter, r *http.Request) {
+	p, err := apply.LoadUIPreferences(s.Config)
+	if err != nil {
+		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonOK(w, p)
+}
+
+func (s *Server) handlePreferencesPut(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<14)
+	defer r.Body.Close()
+	var p apply.UIPreferences
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		s.jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	p.PeerTunnelSubnetCIDR = strings.TrimSpace(p.PeerTunnelSubnetCIDR)
+	p.WireGuardServerEndpoint = strings.TrimSpace(p.WireGuardServerEndpoint)
+	if p.PeerTunnelSubnetCIDR != "" {
+		if _, _, err := net.ParseCIDR(p.PeerTunnelSubnetCIDR); err != nil {
+			s.jsonErr(w, http.StatusBadRequest, "invalid peer_tunnel_subnet_cidr: "+err.Error())
+			return
+		}
+	}
+	if err := apply.SaveUIPreferences(s.Config, &p); err != nil {
+		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonOK(w, p)
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	st, err := apply.StatsFromHost(s.Config)
+	if err != nil {
+		s.jsonErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.jsonOK(w, st)
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +220,9 @@ func (s *Server) jsonErr(w http.ResponseWriter, code int, msg string) {
 func (s *Server) Run() error {
 	if s.Logger == nil {
 		s.Logger = slog.Default()
+	}
+	if err := apply.EnsureApplyStateFromDisk(s.Config); err != nil {
+		s.Logger.Warn("apply state bootstrap", "err", err)
 	}
 	srv := &http.Server{
 		Addr:              s.Listen,

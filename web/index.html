@@ -6,39 +6,288 @@
   <title>EvuProxy Admin</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
-  <header class="top">
-    <h1>EvuProxy</h1>
-    <p class="sub">Local admin UI — use only over SSH tunnel or trusted network.</p>
+<body class="app">
+  <header class="app-header">
+    <div class="brand">
+      <h1>EvuProxy</h1>
+      <p class="tagline">Admin — use only over SSH tunnel or trusted network.</p>
+    </div>
+    <div class="header-meta">
+      <span id="api-status" class="pill pill-muted" aria-live="polite">API</span>
+    </div>
   </header>
 
-  <main class="grid">
-    <section class="card" id="auth-panel">
-      <h2>API token</h2>
-      <p class="hint">Token matches <code>/etc/evuproxy/api.token</code> on the host.</p>
-      <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
-      <button type="button" id="save-token">Save in browser</button>
-    </section>
+  <div class="app-body">
+    <aside class="sidebar" aria-label="Sections">
+      <nav class="nav">
+        <a href="#/overview" class="nav-link" data-route="overview">Overview</a>
+        <a href="#/settings" class="nav-link" data-route="settings">Settings</a>
+        <a href="#/token" class="nav-link" data-route="token">API token</a>
+        <a href="#/peers" class="nav-link" data-route="peers">Peers</a>
+        <a href="#/routes" class="nav-link" data-route="routes">Routes</a>
+        <a href="#/pending" class="nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span></a>
+        <a href="#/stats" class="nav-link" data-route="stats">Stats</a>
+      </nav>
+    </aside>
 
-    <section class="card">
-      <h2>Actions</h2>
-      <div class="row">
-        <button type="button" data-action="reload">Reload config</button>
-        <button type="button" data-action="geo">Update geo</button>
-      </div>
-      <div class="row">
-        <button type="button" data-action="status">Refresh status</button>
-        <button type="button" data-action="overview">Config overview</button>
-        <button type="button" data-action="metrics">Load nft counters</button>
-      </div>
-      <p id="action-msg" class="msg" aria-live="polite"></p>
-    </section>
+    <main class="content">
+      <section id="page-overview" class="page" hidden>
+        <h2 class="page-title">Overview</h2>
+        <div id="overview-cards" class="card-grid"></div>
+        <div class="card actions-card">
+          <h3>Apply</h3>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="btn-reload">Reload config</button>
+            <button type="button" class="btn-primary" id="btn-geo">Update geo lists</button>
+          </div>
+          <p id="overview-action-msg" class="msg" aria-live="polite"></p>
+        </div>
+      </section>
 
-    <section class="card wide">
-      <h2>Output</h2>
-      <pre id="out"></pre>
-    </section>
-  </main>
+      <section id="page-settings" class="page" hidden>
+        <h2 class="page-title">Settings</h2>
+        <p class="hint">
+          Preferences below are stored on the EvuProxy host as <code class="inline">ui-preferences.json</code> next to the main config (not in WireGuard YAML). The API token is on the sidebar page “API token” and stays in the browser only.
+        </p>
+        <div class="card">
+          <h3>Peer tunnel subnet</h3>
+          <p class="hint">
+            IPv4 CIDR used to pick the next free tunnel IP when you add a peer. Should match the WireGuard tunnel network (often <code>10.100.0.0/24</code>). If left empty, the UI still uses <code>10.100.0.0/24</code> for suggestions until you set a value here and save.
+          </p>
+          <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" />
+          <h3 style="margin-top: 1rem">WireGuard server endpoint</h3>
+          <p class="hint">
+            Public address peers use to reach this VPN (<code>host:port</code> or <code>hostname:port</code>). Pre-filled in the peer form; port can be omitted if it matches the server listen port after you refresh server details.
+          </p>
+          <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+          <div class="btn-row" style="margin-top: 1rem">
+            <button type="button" class="btn-primary" id="settings-save-prefs">Save preferences</button>
+          </div>
+          <p id="settings-prefs-msg" class="msg" aria-live="polite"></p>
+        </div>
+        <div class="card">
+          <h3>Diagnostics</h3>
+          <p class="hint">Raw status from the host (WireGuard + nftables table).</p>
+          <div class="btn-row">
+            <button type="button" class="btn-quiet" id="btn-status">Fetch status</button>
+          </div>
+          <pre id="settings-status-out" class="code-block is-collapsed"></pre>
+        </div>
+      </section>
+
+      <section id="page-token" class="page" hidden>
+        <h2 class="page-title">API token</h2>
+        <div class="card">
+          <p class="hint">Matches <code>/etc/evuproxy/api.token</code> on the host (mock dev: <code>dev</code>). Stored only in this browser.</p>
+          <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
+          <div class="btn-row" style="margin-top: 0.5rem">
+            <button type="button" id="save-token" class="btn-primary">Save in browser</button>
+          </div>
+          <p id="auth-msg" class="msg" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section id="page-peers" class="page" hidden>
+        <h2 class="page-title">Peers</h2>
+        <p class="hint">WireGuard peers (tunnel IPs and keys for each side). Changes are saved to config on the server; apply from Pending changes when ready.</p>
+        <div class="card">
+          <div class="toolbar">
+            <button type="button" class="btn-primary" id="peers-refresh">Refresh list</button>
+            <button type="button" class="btn-quiet" id="peers-add-start">Add peer</button>
+          </div>
+          <div id="peers-table-wrap" class="table-wrap"></div>
+          <p id="peers-msg" class="msg" aria-live="polite"></p>
+        </div>
+
+        <div
+          id="peer-modal"
+          class="modal is-hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="peer-editor-title"
+        >
+          <button type="button" class="modal-backdrop" aria-label="Close dialog"></button>
+          <div class="modal-panel modal-panel-wide">
+            <div id="peer-editor" class="peer-editor">
+              <h3 id="peer-editor-title">Edit peer</h3>
+              <input type="hidden" id="peer-edit-index" value="" />
+              <div class="field">
+                <label for="peer-f-name">Name</label>
+                <input type="text" id="peer-f-name" placeholder="e.g. laptop" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="peer-f-tunnel">Tunnel IP <span class="meta">(e.g. 10.100.0.5/32)</span></label>
+                <input type="text" id="peer-f-tunnel" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="peer-f-pub">Public key</label>
+                <input type="text" id="peer-f-pub" class="mono" spellcheck="false" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label><input type="checkbox" id="peer-f-disabled" /> Disabled</label>
+              </div>
+              <div class="btn-row">
+                <button type="button" class="btn-primary" id="peer-save">Save</button>
+                <button type="button" class="btn-quiet" id="peer-cancel">Cancel</button>
+              </div>
+
+              <div id="onboard-panel" class="peer-onboard-section">
+                <h4 class="peer-section-title">WireGuard profile</h4>
+                <p class="hint">
+                  Server endpoint and keys below are used to build the YAML snippet and WireGuard config for this peer. Use narrow <code>AllowedIPs</code> (tunnel subnet only). Many setups save the <code>[Interface]</code> / <code>[Peer]</code> block as <code>client.conf</code>. New peers get a keypair automatically; you can clear and regenerate while adding.
+                </p>
+                <div class="field">
+                  <label for="onboard-endpoint">Server endpoint</label>
+                  <input type="text" id="onboard-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+                </div>
+                <div class="onboard-toolbar">
+                  <button type="button" id="onboard-clear-keys" class="btn-quiet">Clear / regenerate keys</button>
+                </div>
+                <p id="onboard-server-hint" class="hint onboard-hint is-hidden" aria-live="polite"></p>
+                <div class="field">
+                  <label for="onboard-client-priv">Peer private key <span class="warn-label">— browser only</span></label>
+                  <div class="input-reveal-wrap">
+                    <input
+                      type="password"
+                      id="onboard-client-priv"
+                      class="mono input-reveal-field"
+                      spellcheck="false"
+                      autocomplete="off"
+                    />
+                    <button
+                      type="button"
+                      class="input-reveal-toggle"
+                      id="onboard-client-priv-toggle"
+                      aria-label="Show private key"
+                      aria-pressed="false"
+                    >
+                      Show
+                    </button>
+                  </div>
+                </div>
+                <h4 class="peer-section-title" style="margin-top: 1rem">Install on Linux (systemd)</h4>
+                <p class="hint">
+                  One-line install on the peer: installs <code>wireguard-tools</code>, writes <code>/etc/wireguard/</code>, and enables <code>wg-quick@…</code>. Server public key and listen port load from the API when you change any field in this dialog. The command contains your <strong>private key</strong> — avoid shared terminals and shell history on untrusted hosts. <code>curl | bash</code> trusts this script’s source; pin a tag or commit in the URL if you prefer.
+                </p>
+                <div class="onboard-toolbar">
+                  <button type="button" id="onboard-install-copy" class="btn-quiet">Copy install command</button>
+                </div>
+                <pre id="onboard-install-cmd" class="code-block onboard-install-cmd" aria-live="polite"></pre>
+                <div class="onboard-toolbar">
+                  <button type="button" id="onboard-build" class="btn-primary">Build YAML + WireGuard config</button>
+                </div>
+                <p id="onboard-msg" class="msg" aria-live="polite"></p>
+                <pre id="onboard-out" class="code-block is-collapsed"></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-routes" class="page" hidden>
+        <h2 class="page-title">Routes</h2>
+        <p class="hint">Map TCP/UDP ports to a peer tunnel IP (<code class="inline">forwarding.routes</code>).</p>
+        <div class="card">
+          <div class="toolbar">
+            <button type="button" class="btn-primary" id="routes-refresh">Refresh</button>
+            <button type="button" class="btn-quiet" id="routes-add">Add route</button>
+          </div>
+          <div id="routes-table-wrap" class="table-wrap"></div>
+          <p id="routes-msg" class="msg" aria-live="polite"></p>
+        </div>
+
+        <div
+          id="route-modal"
+          class="modal is-hidden"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="route-editor-title"
+        >
+          <button type="button" class="modal-backdrop" aria-label="Close dialog"></button>
+          <div class="modal-panel">
+            <div id="route-editor" class="route-editor">
+              <h3 id="route-editor-title">Edit route</h3>
+              <input type="hidden" id="route-edit-index" value="" />
+              <div class="field">
+                <span class="field-label" id="route-proto-label">Protocol</span>
+                <div class="proto-checks" role="group" aria-labelledby="route-proto-label">
+                  <label class="check"><input type="checkbox" id="route-f-proto-tcp" checked /> TCP</label>
+                  <label class="check"><input type="checkbox" id="route-f-proto-udp" /> UDP</label>
+                </div>
+                <span class="meta">Choose one or both. Both is saved as <code class="inline">tcp,udp</code> in config.</span>
+              </div>
+              <div class="field">
+                <label for="route-f-ports">Ports <span class="meta">(comma-separated, same as YAML)</span></label>
+                <input type="text" id="route-f-ports" placeholder="25565, 27015-27020" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="route-f-target">Target peer IP</label>
+                <select id="route-f-target"></select>
+              </div>
+              <div class="btn-row">
+                <button type="button" class="btn-primary" id="route-save">Save route</button>
+                <button type="button" class="btn-quiet" id="route-cancel">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="page-pending" class="page" hidden>
+        <h2 class="page-title">Pending changes</h2>
+        <p class="hint">
+          Saving peers, routes, or peer profile output writes YAML on the server only.
+          nftables and WireGuard reload after you review the generated rules and click Apply (or use
+          Overview → Reload config).
+        </p>
+        <div class="card">
+          <p id="pending-status" class="pending-banner" aria-live="polite"></p>
+          <div class="btn-row pending-toolbar">
+            <button type="button" class="btn-primary" id="pending-apply">Apply to host</button>
+            <button type="button" class="btn-quiet" id="pending-refresh">Refresh preview</button>
+          </div>
+          <h3>Generated nftables</h3>
+          <p class="hint meta">From the current saved config (same as written to <code class="inline">generated/nftables.nft</code> on apply).</p>
+          <pre id="pending-nft" class="code-block pending-nft-pre"></pre>
+          <p id="pending-msg" class="msg" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section id="page-stats" class="page" hidden>
+        <h2 class="page-title">Stats</h2>
+        <p class="hint">WireGuard transfer/handshake and nftables counter lines (when available on the host).</p>
+        <div class="card">
+          <div class="toolbar">
+            <button type="button" class="btn-primary" id="stats-refresh">Refresh</button>
+          </div>
+          <h3>WireGuard peers</h3>
+          <div id="stats-wg-wrap" class="table-wrap"></div>
+          <h3>nftables counters</h3>
+          <div id="stats-nft-wrap" class="table-wrap"></div>
+          <p id="stats-msg" class="msg" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <div
+        id="confirm-modal"
+        class="modal is-hidden"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-modal-title"
+        aria-describedby="confirm-modal-desc"
+      >
+        <button type="button" class="modal-backdrop" aria-label="Cancel"></button>
+        <div class="modal-panel">
+          <h3 id="confirm-modal-title">Confirm</h3>
+          <p id="confirm-modal-desc" class="confirm-modal-body"></p>
+          <div class="btn-row confirm-modal-actions">
+            <button type="button" class="btn-primary" id="confirm-modal-ok">OK</button>
+            <button type="button" class="btn-quiet" id="confirm-modal-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>
