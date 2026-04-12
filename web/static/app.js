@@ -95,7 +95,18 @@
       body = { raw: text };
     }
     if (!r.ok) {
-      const err = body.error || body.raw || r.statusText;
+      let err = body.error || body.raw || r.statusText;
+      if (typeof err === "string" && err.trimStart().startsWith("<")) {
+        if (r.status === 502 || /502|Bad Gateway|504|Gateway Time-?out/i.test(err)) {
+          err =
+            "Cannot reach EvuProxy on the host (HTTP " +
+            r.status +
+            "). Start the API: sudo systemctl start evuproxy-api.service — " +
+            "the UI container proxies /api to host:9847 (see docker-compose.yml).";
+        } else {
+          err = "HTTP " + r.status + ": unexpected HTML from server (check nginx/API upstream).";
+        }
+      }
       throw new Error(err);
     }
     return body;
