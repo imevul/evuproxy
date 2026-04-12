@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EvuProxy Admin</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="top">
+    <h1>EvuProxy</h1>
+    <p class="sub">Local admin UI — use only over SSH tunnel or trusted network.</p>
+  </header>
+
+  <main class="grid">
+    <section class="card" id="auth-panel">
+      <h2>API token</h2>
+      <p class="hint">Token matches <code>/etc/evuproxy/api.token</code> on the host.</p>
+      <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
+      <button type="button" id="save-token">Save in browser</button>
+    </section>
+
+    <section class="card">
+      <h2>Actions</h2>
+      <div class="row">
+        <button type="button" data-action="reload">Reload config</button>
+        <button type="button" data-action="geo">Update geo</button>
+      </div>
+      <div class="row">
+        <button type="button" data-action="status">Refresh status</button>
+        <button type="button" data-action="overview">Config overview</button>
+        <button type="button" data-action="metrics">Load nft counters</button>
+      </div>
+      <p id="action-msg" class="msg" aria-live="polite"></p>
+    </section>
+
+    <section class="card wide">
+      <h2>Output</h2>
+      <pre id="out"></pre>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

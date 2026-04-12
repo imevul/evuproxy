@@ -1,0 +1,11 @@
+[Unit]
+Description=EvuProxy geo IP refresh (oneshot)
+After=network-online.target nftables.service evuproxy.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/evuproxy update-geo --config /etc/evuproxy/config.yaml
+
+[Install]
+WantedBy=multi-user.target

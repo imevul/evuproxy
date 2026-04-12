@@ -1,0 +1,39 @@
+# Example EvuProxy config — copy to /etc/evuproxy/config.yaml and edit.
+# See README.md for field semantics.
+
+wireguard:
+  interface: evuproxy0
+  listen_port: 51830
+  private_key_file: /etc/evuproxy/wg-private.key
+  address: 10.100.0.1/24
+
+network:
+  public_interface: eth0
+
+forwarding:
+  tcp_ports:
+    - "20000-40000"
+  udp_ports:
+    - "20000-40000"
+  target_ip: 10.100.0.2
+
+geo:
+  enabled: true
+  set_name: geo_v4
+  countries:
+    - "no"
+    - "se"
+  zone_dir: /etc/evuproxy/geo-zones
+
+input_allows:
+  - proto: tcp
+    dport: "22"
+    note: SSH
+  - proto: tcp
+    dport: "{ 80, 443 }"
+    note: optional HTTP(S)
+
+peers:
+  - name: backend-home
+    public_key: REPLACE_WITH_PEER_PUBLIC_KEY_BASE64
+    tunnel_ip: 10.100.0.2/32

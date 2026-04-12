@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply EvuProxy configuration (nftables + WireGuard)
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/evuproxy reload --config /etc/evuproxy/config.yaml
+
+[Install]
+WantedBy=multi-user.target

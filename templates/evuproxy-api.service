@@ -1,0 +1,11 @@
+[Unit]
+Description=EvuProxy local admin API
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/evuproxy serve --config /etc/evuproxy/config.yaml --listen 127.0.0.1:9847 --token-file /etc/evuproxy/api.token
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
