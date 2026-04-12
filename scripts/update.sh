@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Pull latest sources, rebuild evuproxy, and restart services that use it.
-# From repo root: ./update.sh
+# From repo root: ./scripts/update.sh
 #
 # - Builds with scripts/rebuild.sh (see that script for PREFIX / OUT).
 # - If EvuProxy systemd units are installed under /etc/systemd/system/, installs
@@ -11,7 +11,7 @@ set -euo pipefail
 #   recreates those containers.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 git pull
@@ -23,12 +23,12 @@ fi
 
 if [[ "$SYSTEMD_UNITS" -eq 1 ]]; then
   if [[ "$(id -u)" -eq 0 ]]; then
-    ./scripts/rebuild.sh --install
+    "$SCRIPT_DIR/rebuild.sh" --install
   else
-    sudo ./scripts/rebuild.sh --install
+    sudo "$SCRIPT_DIR/rebuild.sh" --install
   fi
 else
-  ./scripts/rebuild.sh
+  "$SCRIPT_DIR/rebuild.sh"
 fi
 
 if [[ "$SYSTEMD_UNITS" -eq 1 ]] && command -v systemctl >/dev/null 2>&1; then
