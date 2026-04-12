@@ -92,6 +92,9 @@ func nftablesRoutes(c *config.Config) (string, error) {
 `)
 
 	for _, cidr := range forwardAllowLocalCIDRs(c) {
+		// Inbound to published container ports (DNAT): saddr is WAN, daddr is bridge range.
+		fmt.Fprintf(&b, "        iifname %q oifname != %q ip daddr %s accept\n", pub, wg, cidr)
+		// Container egress to internet.
 		fmt.Fprintf(&b, "        ip saddr %s oifname %q accept\n", cidr, pub)
 	}
 
@@ -138,8 +141,8 @@ table ip evuproxy {
 	return b.String(), nil
 }
 
-// forwardAllowLocalCIDRs returns IPv4 CIDRs for which we allow NEW forward traffic
-// from local/Docker ranges to the public interface (container egress, etc.).
+// forwardAllowLocalCIDRs returns IPv4 CIDRs for which we allow Docker-related FORWARD
+// traffic: ingress WAN→bridge (iif pub, oif not wg, daddr in CIDR) and egress (saddr in CIDR, oif pub).
 func forwardAllowLocalCIDRs(c *config.Config) []string {
 	var out []string
 	if c.Network.ForwardAllowDockerBridges {

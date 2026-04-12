@@ -36,8 +36,8 @@ An annotated example lives at [`config/evuproxy.example.yaml`](../config/evuprox
 |-------|------|-------------|
 | `public_interface` | string | Host interface name that faces the Internet (e.g. `eth0`). Used for nftables and NAT. |
 | `admin_tcp_ports` | list of int | Optional. Extra **INPUT** `accept` rules for TCP ports used by **host services** (not forwarded peer ports). Omitted or **`[]`** adds none. Typical SSH / HTTP(S) / admin UI (**9080**) rules belong in **`input_allows`** so you can edit them in one place (see the example config). |
-| `forward_allow_docker_bridges` | bool | Optional, default `false`. If `true`, adds **FORWARD** `accept` rules so traffic from typical **Docker IPv4** ranges (**`172.16.0.0/12`**, **`192.168.0.0/16`**) to `public_interface` is allowed. Without this, EvuProxy’s default **forward** policy (`drop`) blocks **container egress** (DNS, HTTPS, etc.). WireGuard peer tunnel IPs are usually **`10.x`** and are not covered by those ranges. |
-| `forward_extra_local_cidrs` | list of strings | Optional IPv4 CIDRs (e.g. **`10.89.0.0/24`**) for extra **FORWARD** allows to `public_interface`, e.g. when Docker uses a **`10.x`** network. Validated on load. |
+| `forward_allow_docker_bridges` | bool | Optional, default `false`. If `true`, adds **FORWARD** `accept` rules for typical **Docker IPv4** ranges (**`172.16.0.0/12`**, **`192.168.0.0/16`**): **egress** (container → internet via `public_interface`) and **ingress** (WAN → published container ports after DNAT; `oifname` is not the WireGuard interface). Without these, EvuProxy’s default **forward** policy (`drop`) blocks both **container egress** and **inbound** traffic to Docker. WireGuard peer tunnel IPs are usually **`10.x`** and are not covered by those ranges. |
+| `forward_extra_local_cidrs` | list of strings | Optional IPv4 CIDRs (e.g. **`10.89.0.0/24`**) for extra **FORWARD** ingress/egress (same semantics as above), e.g. when Docker uses a **`10.x`** network. Validated on load. |
 
 The EvuProxy API (`evuproxy serve` on `127.0.0.1:9847`) is reached via **loopback** and does not need a rule here.
 

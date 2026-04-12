@@ -190,14 +190,23 @@ func TestNFTablesForwardAllowDockerBridges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(s, "iifname \"eth0\" oifname != \"wg0\" ip daddr 172.16.0.0/12 accept") {
+		t.Fatalf("expected docker bridge ingress allow: %s", s)
+	}
+	if !strings.Contains(s, "iifname \"eth0\" oifname != \"wg0\" ip daddr 192.168.0.0/16 accept") {
+		t.Fatalf("expected 192.168 ingress allow: %s", s)
+	}
+	if !strings.Contains(s, "iifname \"eth0\" oifname != \"wg0\" ip daddr 10.89.0.0/24 accept") {
+		t.Fatalf("expected extra CIDR ingress allow: %s", s)
+	}
 	if !strings.Contains(s, "ip saddr 172.16.0.0/12 oifname \"eth0\" accept") {
-		t.Fatalf("expected docker bridge forward allow: %s", s)
+		t.Fatalf("expected docker bridge egress allow: %s", s)
 	}
 	if !strings.Contains(s, "ip saddr 192.168.0.0/16 oifname \"eth0\" accept") {
-		t.Fatalf("expected 192.168 forward allow: %s", s)
+		t.Fatalf("expected 192.168 egress allow: %s", s)
 	}
 	if !strings.Contains(s, "ip saddr 10.89.0.0/24 oifname \"eth0\" accept") {
-		t.Fatalf("expected extra CIDR forward allow: %s", s)
+		t.Fatalf("expected extra CIDR egress allow: %s", s)
 	}
 }
 

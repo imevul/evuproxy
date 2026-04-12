@@ -9,7 +9,7 @@ wireguard:
 
 network:
   public_interface: eth0
-  # When running Docker (or other bridges) on the same host, allow container egress to the internet:
+  # When running Docker on the same host, allow container egress and WAN→published ports (ingress):
   # forward_allow_docker_bridges: true
   # Optional extra IPv4 CIDRs (e.g. Docker networks on 10.x): forward_extra_local_cidrs: [ "10.89.0.0/24" ]
 
