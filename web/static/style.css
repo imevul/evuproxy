@@ -1249,6 +1249,10 @@ table.data.logs-data .logs-col-ip {
   white-space: nowrap;
 }
 
+table.data .geo-zones-col-country {
+  white-space: nowrap;
+}
+
 .confirm-modal-body {
   margin: 0 0 1rem;
   color: #c9d1d9;

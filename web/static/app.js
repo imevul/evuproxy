@@ -227,9 +227,15 @@
       const rows = (s.countries || [])
         .map((c) => {
           const miss = c.zone_missing ? " <span class=\"meta\">(zone file missing)</span>" : "";
+          const codeRaw = String(c.code || "").trim();
+          const fl = countryFlagEmoji(codeRaw);
+          const flagHtml = fl
+            ? '<span class="logs-ip-flag" title="' + escapeHtml(codeRaw.toUpperCase()) + '">' + fl + "</span> "
+            : "";
           return (
-            "<tr><td class=\"mono\">" +
-            escapeHtml(c.code) +
+            "<tr><td class=\"mono geo-zones-col-country\">" +
+            flagHtml +
+            escapeHtml(codeRaw) +
             "</td><td>" +
             escapeHtml(String(c.cidr_lines)) +
             "</td><td>" +
