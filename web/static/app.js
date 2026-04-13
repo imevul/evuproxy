@@ -47,6 +47,13 @@
   /** Ignores stale results when multiple refreshOverviewPage runs overlap (navigate + save-token, etc.). */
   let overviewRefreshSeq = 0;
 
+  /** Parsed firewall log lines from last successful GET /v1/logs (client-side filter/table). */
+  let lastFirewallLogEntries = [];
+  let logsViewMode = "table";
+  let logsSearchDebounceTimer = null;
+  /** Ignores stale responses when multiple refreshLogsPage calls overlap. */
+  let logsRefreshSeq = 0;
+
   const pages = [
     "overview",
     "settings",
@@ -1928,6 +1935,229 @@
   }
 
   /* ——— Logs ——— */
+  const LOG_PREFIX_GEO = "evuproxy-geo-block";
+  const LOG_PREFIX_FWD = "evuproxy-forward-drop";
+
+  /** journalctl: "TIME HOST kernel: …"; dmesg / fallback: prefix may appear without the " kernel: " marker. */
+  function parseFirewallLogLine(raw) {
+    const line = String(raw || "");
+    let tsDisplay = null;
+    let body = line;
+    const kMarker = " kernel: ";
+    const kIdx = line.indexOf(kMarker);
+    if (kIdx >= 0) {
+      const journalMeta = line.slice(0, kIdx).trim();
+      const metaParts = journalMeta.split(/\s+/);
+      if (metaParts.length >= 1) tsDisplay = metaParts[0];
+      body = line.slice(kIdx + kMarker.length);
+    }
+    let kind = "unknown";
+    let rest = body.trim();
+    const geoNeedle = LOG_PREFIX_GEO + ":";
+    const fwdNeedle = LOG_PREFIX_FWD + ":";
+    const gi = body.indexOf(geoNeedle);
+    const fi = body.indexOf(fwdNeedle);
+    if (gi >= 0 && (fi < 0 || gi <= fi)) {
+      kind = "geo";
+      rest = body.slice(gi + geoNeedle.length).trim();
+    } else if (fi >= 0) {
+      kind = "forward";
+      rest = body.slice(fi + fwdNeedle.length).trim();
+    }
+    const kv = {};
+    const flags = [];
+    const tokens = rest.split(/\s+/).filter(Boolean);
+    const kvRe = /^([A-Z][A-Z0-9]*)=(.*)$/;
+    for (const t of tokens) {
+      const m = t.match(kvRe);
+      if (m) {
+        const key = m[1];
+        const val = m[2];
+        if (!kv[key]) kv[key] = [];
+        kv[key].push(val);
+      } else {
+        flags.push(t);
+      }
+    }
+    function first(key) {
+      const a = kv[key];
+      return a && a[0] !== undefined ? a[0] : "";
+    }
+    const lenVals = kv.LEN || [];
+    let lenCol = "—";
+    if (lenVals.length === 1) lenCol = lenVals[0];
+    else if (lenVals.length > 1) lenCol = lenVals.join(" / ");
+    const kvFlat = Object.keys(kv)
+      .sort()
+      .flatMap((key) => kv[key].map((v) => key + "=" + v))
+      .join(" ");
+    const searchBlob = (
+      line +
+      " " +
+      kvFlat +
+      " " +
+      flags.join(" ")
+    ).toLowerCase();
+    return {
+      raw: line,
+      tsDisplay,
+      kind,
+      kv,
+      flags,
+      searchBlob,
+      src: first("SRC"),
+      dst: first("DST"),
+      proto: first("PROTO"),
+      spt: first("SPT"),
+      dpt: first("DPT"),
+      inn: first("IN"),
+      out: first("OUT"),
+      lenCol,
+      flagsStr: flags.length ? flags.join(" ") : "—",
+    };
+  }
+
+  function filterFirewallLogEntries(entries, typeFilter, needle) {
+    return entries.filter((e) => {
+      if (typeFilter === "geo" && e.kind !== "geo") return false;
+      if (typeFilter === "forward" && e.kind !== "forward") return false;
+      if (needle && !e.searchBlob.includes(needle)) return false;
+      return true;
+    });
+  }
+
+  function firewallLogKindLabel(kind) {
+    if (kind === "geo") return "Geoblock";
+    if (kind === "forward") return "Forward drop";
+    return "—";
+  }
+
+  function setLogsViewMode(mode) {
+    logsViewMode = mode === "raw" ? "raw" : "table";
+    const bTable = $("logs-view-table");
+    const bRaw = $("logs-view-raw");
+    if (bTable) {
+      bTable.classList.toggle("is-active", logsViewMode === "table");
+      bTable.setAttribute("aria-pressed", logsViewMode === "table" ? "true" : "false");
+    }
+    if (bRaw) {
+      bRaw.classList.toggle("is-active", logsViewMode === "raw");
+      bRaw.setAttribute("aria-pressed", logsViewMode === "raw" ? "true" : "false");
+    }
+    renderLogsView();
+  }
+
+  function clearLogsFilters() {
+    clearTimeout(logsSearchDebounceTimer);
+    logsSearchDebounceTimer = null;
+    const typeSel = $("logs-filter-type");
+    const searchInp = $("logs-search");
+    if (typeSel) typeSel.value = "";
+    if (searchInp) searchInp.value = "";
+    renderLogsView();
+  }
+
+  function renderLogsView() {
+    const typeSel = $("logs-filter-type");
+    const searchInp = $("logs-search");
+    const wrap = $("logs-table-wrap");
+    const pre = $("logs-pre");
+    const countEl = $("logs-count");
+    const typeF = typeSel ? String(typeSel.value || "") : "";
+    const needle = (searchInp && searchInp.value.trim().toLowerCase()) || "";
+    const filtered = filterFirewallLogEntries(lastFirewallLogEntries, typeF, needle);
+    const total = lastFirewallLogEntries.length;
+    if (countEl) {
+      if (!total) countEl.textContent = "";
+      else {
+        countEl.textContent =
+          "Showing " +
+          filtered.length +
+          " of " +
+          total +
+          " entr" +
+          (total === 1 ? "y" : "ies");
+      }
+    }
+    const rawMode = logsViewMode === "raw";
+    if (wrap) wrap.hidden = rawMode;
+    if (pre) pre.hidden = !rawMode;
+    if (rawMode) {
+      if (pre) {
+        if (!total) pre.textContent = "No log lines returned from the host.";
+        else
+          pre.textContent = filtered.length
+            ? filtered.map((e) => e.raw).join("\n")
+            : "No lines match the current filters.";
+      }
+      return;
+    }
+    if (!wrap) return;
+    if (!total) {
+      wrap.innerHTML = "<p class=\"hint\">No log lines returned from the host.</p>";
+      return;
+    }
+    if (!filtered.length) {
+      wrap.innerHTML = "<p class=\"hint\">No lines match the current filters.</p>";
+      return;
+    }
+    const rows = filtered
+      .map((e) => {
+        const tlabel = firewallLogKindLabel(e.kind);
+        const ts = e.tsDisplay || "—";
+        const cell = (v) => (v === "" ? "—" : escapeHtml(v));
+        const flagsDisp = e.flagsStr === "—" ? "—" : escapeHtml(trunc(e.flagsStr, 80));
+        const flagsTitle =
+          e.flagsStr === "—" ? "" : escapeHtml(trunc(e.flagsStr, 400));
+        return (
+          "<tr>" +
+          '<td class="mono">' +
+          escapeHtml(ts) +
+          "</td>" +
+          '<td class="logs-col-type">' +
+          escapeHtml(tlabel) +
+          "</td>" +
+          '<td class="mono">' +
+          cell(e.src) +
+          "</td>" +
+          '<td class="mono">' +
+          cell(e.dst) +
+          "</td>" +
+          "<td>" +
+          cell(e.proto) +
+          "</td>" +
+          '<td class="mono">' +
+          cell(e.spt) +
+          "</td>" +
+          '<td class="mono">' +
+          cell(e.dpt) +
+          "</td>" +
+          "<td>" +
+          cell(e.inn) +
+          "</td>" +
+          "<td>" +
+          cell(e.out) +
+          "</td>" +
+          '<td class="mono">' +
+          cell(e.lenCol) +
+          "</td>" +
+          '<td class="mono logs-col-flags" title="' +
+          flagsTitle +
+          '">' +
+          flagsDisp +
+          "</td>" +
+          "</tr>"
+        );
+      })
+      .join("");
+    wrap.innerHTML =
+      '<table class="data logs-data" aria-describedby="logs-count"><thead><tr>' +
+      "<th>Time</th><th>Type</th><th>SRC</th><th>DST</th><th>Proto</th><th>SPT</th><th>DPT</th><th>IN</th><th>OUT</th><th>LEN</th><th>Flags</th>" +
+      "</tr></thead><tbody>" +
+      rows +
+      "</tbody></table>";
+  }
+
   function setLogsMsg(text, isErr) {
     const el = $("logs-msg");
     if (!el) return;
@@ -1936,24 +2166,41 @@
   }
 
   async function refreshLogsPage() {
+    const seq = ++logsRefreshSeq;
     const pre = $("logs-pre");
+    const wrap = $("logs-table-wrap");
     const src = $("logs-source");
+    const countEl = $("logs-count");
     setLogsMsg("");
     if (pre) pre.textContent = "";
+    if (wrap) wrap.innerHTML = "";
+    if (countEl) countEl.textContent = "";
     if (src) src.textContent = "";
+    lastFirewallLogEntries = [];
     try {
-      const j = await api("/v1/logs?limit=500");
+      const j = await api("/v1/logs?limit=1000");
+      if (seq !== logsRefreshSeq) return;
       setApiStatus(true);
       if (src) {
         src.textContent = j.source ? "Source: " + j.source : "";
       }
       const lines = j.lines || [];
-      if (pre) {
-        pre.textContent = lines.length ? lines.join("\n") : "(no matching lines)";
-      }
+      lastFirewallLogEntries = lines.map(parseFirewallLogLine);
+      renderLogsView();
     } catch (e) {
+      if (seq !== logsRefreshSeq) return;
       setApiStatus(false, String(e.message || e));
       setLogsMsg(String(e.message || e), true);
+      lastFirewallLogEntries = [];
+      if (wrap) {
+        wrap.innerHTML = "";
+        wrap.hidden = logsViewMode === "raw";
+      }
+      if (pre) {
+        pre.textContent = "";
+        pre.hidden = logsViewMode !== "raw";
+      }
+      if (countEl) countEl.textContent = "";
     }
   }
 
@@ -2409,6 +2656,21 @@
 
   $("stats-refresh").addEventListener("click", refreshStatsPage);
   $("logs-refresh").addEventListener("click", refreshLogsPage);
+  const logsFilterType = $("logs-filter-type");
+  if (logsFilterType) logsFilterType.addEventListener("change", () => renderLogsView());
+  const logsSearch = $("logs-search");
+  if (logsSearch) {
+    logsSearch.addEventListener("input", () => {
+      clearTimeout(logsSearchDebounceTimer);
+      logsSearchDebounceTimer = setTimeout(() => renderLogsView(), 220);
+    });
+  }
+  const logsFilterClear = $("logs-filter-clear");
+  if (logsFilterClear) logsFilterClear.addEventListener("click", () => clearLogsFilters());
+  const logsViewTable = $("logs-view-table");
+  const logsViewRaw = $("logs-view-raw");
+  if (logsViewTable) logsViewTable.addEventListener("click", () => setLogsViewMode("table"));
+  if (logsViewRaw) logsViewRaw.addEventListener("click", () => setLogsViewMode("raw"));
 
   $("onboard-client-priv-toggle").addEventListener("click", () => {
     const inp = $("onboard-client-priv");

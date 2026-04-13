@@ -315,7 +315,8 @@ MOCK_STATS = {
 
 MOCK_LOGS = [
     "2026-01-15T10:00:01+00:00 host kernel: evuproxy-geo-block: IN=eth0 OUT= MAC= SRC=198.51.100.2 DST=…",
-    "2026-01-15T10:00:02+00:00 host kernel: evuproxy-forward-drop: IN=eth0 …",
+    "2026-01-15T10:00:02+00:00 host kernel: evuproxy-forward-drop: IN=eth0 OUT=docker0 SRC=10.0.0.5 DST=172.17.0.2 LEN=60 PROTO=TCP SPT=45678 DPT=443 SYN",
+    "2026-01-15T10:00:03+00:00 host kernel: evuproxy-geo-block: IN=eth0 OUT= MAC=ab:cd SRC=203.0.113.1 DST=198.51.100.1 LEN=97 PROTO=UDP SPT=30301 DPT=30301 LEN=77",
 ]
 
 

@@ -1086,6 +1086,74 @@ table.data button {
   word-break: break-word;
 }
 
+.logs-toolbar {
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+.logs-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+.logs-field-grow {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+
+.logs-field-label {
+  line-height: 1.2;
+}
+
+.logs-field select,
+.logs-search-input {
+  font: inherit;
+  font-size: 0.9rem;
+  color: #e6edf3;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+}
+
+.logs-search-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.logs-view-mode {
+  margin-left: auto;
+}
+
+.logs-count {
+  margin-top: 0.25rem;
+  margin-bottom: 0;
+}
+
+.logs-table-wrap {
+  max-height: min(60vh, 36rem);
+  margin-top: 0.35rem;
+  overflow: auto;
+}
+
+table.data.logs-data th,
+table.data.logs-data td {
+  vertical-align: top;
+}
+
+table.data.logs-data .logs-col-flags {
+  max-width: 14rem;
+  word-break: break-word;
+}
+
+table.data.logs-data .logs-col-type {
+  white-space: nowrap;
+}
+
 .confirm-modal-body {
   margin: 0 0 1rem;
   color: #c9d1d9;
