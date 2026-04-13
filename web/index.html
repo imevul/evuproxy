@@ -165,7 +165,7 @@
               <div class="field">
                 <div class="toggle-switch-row">
                   <span class="toggle-switch-text" id="peer-f-disabled-desc"
-                    >Disabled (keep in config, omit from WireGuard until enabled)</span
+                    >Enabled (off = keep in config, omit from WireGuard until turned on again)</span
                   >
                   <label class="toggle-switch">
                     <input
@@ -239,7 +239,7 @@
 
       <section id="page-routes" class="page" hidden>
         <h2 class="page-title">Routes</h2>
-        <p class="hint">Map TCP/UDP ports to a peer tunnel IP (<code class="inline">forwarding.routes</code>). Disabled routes stay in config but are left out of generated nftables until you enable them.</p>
+        <p class="hint">Map TCP/UDP ports to a peer tunnel IP (<code class="inline">forwarding.routes</code>). Turn off <strong>Enabled</strong> to keep a route in config but leave it out of generated nftables until you turn it on again.</p>
         <div class="card">
           <div class="toolbar">
             <button type="button" class="btn-primary" id="routes-refresh">Refresh</button>
@@ -280,7 +280,7 @@
               <div class="field">
                 <div class="toggle-switch-row">
                   <span class="toggle-switch-text" id="route-f-disabled-desc"
-                    >Disabled (keep in config, omit from nftables until enabled)</span
+                    >Enabled (off = keep in config, omit from nftables until turned on again)</span
                   >
                   <label class="toggle-switch">
                     <input
@@ -306,8 +306,8 @@
       <section id="page-inbound" class="page" hidden>
         <h2 class="page-title">Inbound access</h2>
         <p class="hint">
-          Extra nftables <strong>INPUT</strong> accept rules on the host (SSH, HTTP, etc.). Stored as <code class="inline">input_allows</code> in config. Use the
-          <strong>Disabled</strong> toggle to keep a rule in config but leave it out of generated nftables until you enable it again.
+          Extra nftables <strong>INPUT</strong> accept rules on the host (SSH, HTTP, etc.). Stored as <code class="inline">input_allows</code> in config.           Use the
+          <strong>Enabled</strong> toggle (off = keep in config, omit from generated nftables until you turn it on again).
         </p>
         <div class="card">
           <div class="toolbar">
@@ -348,7 +348,7 @@
               <div class="field">
                 <div class="toggle-switch-row">
                   <span class="toggle-switch-text" id="inbound-f-disabled-desc"
-                    >Disabled (keep in config, omit from nftables until enabled)</span
+                    >Enabled (off = keep in config, omit from nftables until turned on again)</span
                   >
                   <label class="toggle-switch">
                     <input
@@ -381,7 +381,19 @@
         </p>
         <div class="card">
           <div class="field">
-            <label class="check"><input type="checkbox" id="geo-f-enabled" /> Enable geoblocking</label>
+            <div class="toggle-switch-row">
+              <span class="toggle-switch-text" id="geo-f-enabled-desc">Enable geoblocking</span>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  id="geo-f-enabled"
+                  class="toggle-switch-input"
+                  autocomplete="off"
+                  aria-labelledby="geo-f-enabled-desc"
+                />
+                <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+              </label>
+            </div>
           </div>
           <div class="field">
             <span class="field-label">List mode</span>
@@ -468,8 +480,36 @@
             <button type="button" class="btn-quiet" id="pending-refresh">Refresh preview</button>
           </div>
           <h3>Generated nftables</h3>
-          <p class="hint meta">From the current saved config (same as written to <code class="inline">generated/nftables.nft</code> on apply).</p>
-          <pre id="pending-nft" class="code-block pending-nft-pre"></pre>
+          <p class="hint meta">
+            Compare <code class="inline">generated/nftables.nft</code> as it exists on disk to the ruleset generated from the current saved config (what apply would write).
+          </p>
+          <div id="pending-diff-root" class="pending-diff-root">
+            <div class="pending-diff-toolbar" role="tablist" aria-label="Diff view mode">
+              <div class="geo-segmented pending-diff-mode">
+                <button
+                  type="button"
+                  class="geo-seg-btn is-active"
+                  id="pending-mode-unified"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="pending-diff-panel"
+                >
+                  Unified
+                </button>
+                <button
+                  type="button"
+                  class="geo-seg-btn"
+                  id="pending-mode-split"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="pending-diff-panel"
+                >
+                  Split
+                </button>
+              </div>
+            </div>
+            <div id="pending-diff-panel" class="pending-diff-panel" role="tabpanel"></div>
+          </div>
           <p id="pending-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>

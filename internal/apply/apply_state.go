@@ -88,6 +88,8 @@ type PendingInfo struct {
 	CurrentConfigSHA256 string `json:"current_config_sha256"`
 	AppliedConfigSHA256 string `json:"applied_config_sha256"`
 	NFTables            string `json:"nftables"`
+	// NFTablesBaseline is the contents of generated/nftables.nft when readable (last written by reload).
+	NFTablesBaseline string `json:"nftables_baseline"`
 }
 
 // PendingSummary loads the on-disk config, compares its hash to last apply, and renders nftables preview.
@@ -114,5 +116,11 @@ func PendingSummary(cfgPath string) (PendingInfo, error) {
 		return out, err
 	}
 	out.NFTables = nft
+	nftPath := filepath.Join(filepath.Dir(cfgPath), GeneratedDir, "nftables.nft")
+	if b, err := os.ReadFile(nftPath); err == nil {
+		out.NFTablesBaseline = string(b)
+	} else if !os.IsNotExist(err) {
+		slog.Debug("pending: could not read nftables baseline file", "path", nftPath, "err", err)
+	}
 	return out, nil
 }

@@ -802,6 +802,258 @@ table.data button {
   margin-top: 0.5rem;
 }
 
+.pending-diff-root {
+  margin-top: 0.5rem;
+}
+
+.pending-diff-toolbar {
+  margin-bottom: 0.5rem;
+}
+
+.pending-diff-panel {
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  overflow: hidden;
+}
+
+.pending-diff-scroll {
+  max-height: min(55vh, 28rem);
+  overflow: auto;
+  margin: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #484f58 #161b22;
+}
+
+.pending-diff-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.pending-diff-scroll::-webkit-scrollbar-track {
+  background: #161b22;
+  border-radius: 4px;
+}
+
+.pending-diff-scroll::-webkit-scrollbar-thumb {
+  background: #484f58;
+  border-radius: 4px;
+}
+
+.pending-diff-scroll::-webkit-scrollbar-thumb:hover {
+  background: #6e7681;
+}
+
+.pending-diff-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.pending-diff-scroll::-webkit-scrollbar-corner {
+  background: #161b22;
+}
+
+.pending-diff-same {
+  margin: 0.75rem 1rem;
+}
+
+.pending-diff-raw-h {
+  margin: 0.75rem 1rem 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.pending-diff-unified {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.pending-diff-unified td {
+  vertical-align: top;
+  padding: 0 0.35rem;
+  white-space: pre;
+  word-break: normal;
+}
+
+.pending-diff-unified .diff-ln {
+  width: 3.25rem;
+  text-align: right;
+  color: #6e7681;
+  user-select: none;
+  background: #161b22;
+  border-right: 1px solid #30363d;
+}
+
+.pending-diff-unified .diff-sign {
+  width: 1.25rem;
+  text-align: center;
+  color: #8b949e;
+  user-select: none;
+  background: #161b22;
+  border-right: 1px solid #30363d;
+}
+
+.pending-diff-unified .diff-code {
+  padding-left: 0.5rem;
+  color: #e6edf3;
+}
+
+.pending-diff-unified .diff-row-diff-del .diff-code,
+.pending-diff-unified .diff-row-diff-del .diff-sign,
+.pending-diff-unified .diff-row-diff-del .diff-ln {
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.pending-diff-unified .diff-row-diff-ins .diff-code,
+.pending-diff-unified .diff-row-diff-ins .diff-sign,
+.pending-diff-unified .diff-row-diff-ins .diff-ln {
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.pending-diff-unified .diff-row-ctx .diff-ln,
+.pending-diff-unified .diff-row-ctx .diff-sign {
+  background: #161b22;
+}
+
+.pending-diff-unified .diff-ch-strong.diff-ch-del {
+  background: rgba(248, 81, 73, 0.45);
+  border-radius: 2px;
+}
+
+.pending-diff-unified .diff-ch-strong.diff-ch-ins {
+  background: rgba(63, 185, 80, 0.45);
+  border-radius: 2px;
+}
+
+/* Split = two panes: each has its own horizontal (and vertical) scrollbars; JS syncs scrollTop. */
+.pending-diff-split-view {
+  display: flex;
+  max-height: min(55vh, 28rem);
+  min-height: 0;
+}
+
+.pending-diff-split-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #484f58 #161b22;
+}
+
+.pending-diff-split-pane:first-child {
+  border-right: 1px solid #30363d;
+}
+
+.pending-diff-split-pane::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.pending-diff-split-pane::-webkit-scrollbar-track {
+  background: #161b22;
+  border-radius: 4px;
+}
+
+.pending-diff-split-pane::-webkit-scrollbar-thumb {
+  background: #484f58;
+  border-radius: 4px;
+}
+
+.pending-diff-split-pane::-webkit-scrollbar-thumb:hover {
+  background: #6e7681;
+}
+
+.pending-diff-split-pane::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.pending-diff-split-pane::-webkit-scrollbar-corner {
+  background: #161b22;
+}
+
+.pending-diff-split-side {
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+}
+
+.pending-diff-split-side td {
+  vertical-align: top;
+  padding: 0 0.35rem;
+  white-space: pre;
+  word-break: normal;
+}
+
+.pending-diff-split-side .diff-split-ln {
+  width: 1%;
+  min-width: 2.75rem;
+  text-align: right;
+  color: #6e7681;
+  user-select: none;
+  background: #161b22;
+  border-right: 1px solid #30363d;
+  white-space: nowrap;
+}
+
+.pending-diff-split-side .diff-split-code {
+  color: #e6edf3;
+}
+
+.pending-diff-split-side .diff-split-row-ctx .diff-split-ln,
+.pending-diff-split-side .diff-split-row-ctx .diff-split-code {
+  background: transparent;
+}
+
+.pending-diff-split-side .diff-split-row-ctx .diff-split-ln {
+  background: #161b22;
+}
+
+.pending-diff-split-side .diff-split-row-del .diff-split-ln,
+.pending-diff-split-side .diff-split-row-del .diff-split-code {
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.pending-diff-split-side .diff-split-row-ins .diff-split-ln,
+.pending-diff-split-side .diff-split-row-ins .diff-split-code {
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.pending-diff-split-side .diff-split-row-both-l .diff-split-ln,
+.pending-diff-split-side .diff-split-row-both-l .diff-split-code {
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.pending-diff-split-side .diff-split-row-both-r .diff-split-ln,
+.pending-diff-split-side .diff-split-row-both-r .diff-split-code {
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.pending-diff-split-side .diff-split-row-gap .diff-split-ln,
+.pending-diff-split-side .diff-split-row-gap .diff-split-code {
+  background: rgba(110, 118, 129, 0.06);
+}
+
+.pending-diff-split-side .diff-ch-strong.diff-ch-del {
+  background: rgba(248, 81, 73, 0.45);
+  border-radius: 2px;
+}
+
+.pending-diff-split-side .diff-ch-strong.diff-ch-ins {
+  background: rgba(63, 185, 80, 0.45);
+  border-radius: 2px;
+}
+
 .logs-pre {
   max-height: min(60vh, 36rem);
   margin-top: 0.35rem;

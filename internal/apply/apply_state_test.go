@@ -91,3 +91,45 @@ func TestApplyStatePendingAfterSave(t *testing.T) {
 		t.Fatalf("unexpected pending after record: %+v", info3)
 	}
 }
+
+func TestPendingSummaryNFTablesBaseline(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "evuproxy.yaml")
+	if err := os.WriteFile(cfgPath, []byte(testCfgV1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	genDir := filepath.Join(dir, GeneratedDir)
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	baseline := "# baseline nft\nflush ruleset\n"
+	nftPath := filepath.Join(genDir, "nftables.nft")
+	if err := os.WriteFile(nftPath, []byte(baseline), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := PendingSummary(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.NFTablesBaseline != baseline {
+		t.Fatalf("baseline: got %q want %q", info.NFTablesBaseline, baseline)
+	}
+	if info.NFTables == "" {
+		t.Fatal("expected non-empty generated nftables from config")
+	}
+}
+
+func TestPendingSummaryNFTablesBaselineMissing(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "evuproxy.yaml")
+	if err := os.WriteFile(cfgPath, []byte(testCfgV1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := PendingSummary(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.NFTablesBaseline != "" {
+		t.Fatalf("expected empty baseline without generated/nftables.nft, got len %d", len(info.NFTablesBaseline))
+	}
+}

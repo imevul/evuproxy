@@ -585,10 +585,10 @@
     const rows = cfg.peers
       .map(
         (p, i) =>
-          `<tr><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Disabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
       )
       .join("");
-    wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Status</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Status</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
       b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
     });
@@ -599,7 +599,7 @@
       inp.addEventListener("click", (ev) => ev.stopPropagation());
       inp.addEventListener("change", async () => {
         const idx = +inp.getAttribute("data-peer-disabled");
-        await patchPeerDisabled(idx, inp.checked);
+        await patchPeerDisabled(idx, !inp.checked);
       });
     });
   }
@@ -619,7 +619,7 @@
   }
 
   function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {
-    const ch = disabled ? " checked" : "";
+    const ch = disabled ? "" : " checked";
     return (
       `<td class="cell-disabled-toggle"><label class="toggle-switch" aria-label="${escapeHtml(ariaLabel)}">` +
       `<input type="checkbox" class="toggle-switch-input" ${dataAttr}="${index}"${ch} />` +
@@ -707,7 +707,7 @@
     $("peer-f-name").value = p.name || "";
     $("peer-f-tunnel").value = p.tunnel_ip || "";
     $("peer-f-pub").value = p.public_key || "";
-    $("peer-f-disabled").checked = !!p.disabled;
+    $("peer-f-disabled").checked = !p.disabled;
     const oe = $("onboard-endpoint");
     if (oe) oe.value = serverEndpointDisplay();
     const modal = $("peer-modal");
@@ -764,7 +764,7 @@
       name: $("peer-f-name").value.trim(),
       tunnel_ip: $("peer-f-tunnel").value.trim(),
       public_key: $("peer-f-pub").value.trim(),
-      disabled: $("peer-f-disabled").checked,
+      disabled: !($("peer-f-disabled") && $("peer-f-disabled").checked),
     };
     if (!peer.name || !peer.tunnel_ip || !peer.public_key) {
       setPeersMsg("Name, tunnel IP, and public key are required.", true);
@@ -893,10 +893,10 @@
     const rows = routes
       .map(
         (r, i) =>
-          `<tr><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td>${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Disabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td>${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
       )
       .join("");
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-route-edit]").forEach((b) => {
       b.addEventListener("click", () => openRouteEditor(+b.getAttribute("data-route-edit")));
     });
@@ -907,7 +907,7 @@
       inp.addEventListener("click", (ev) => ev.stopPropagation());
       inp.addEventListener("change", async () => {
         const idx = +inp.getAttribute("data-route-disabled");
-        await patchRouteDisabled(idx, inp.checked);
+        await patchRouteDisabled(idx, !inp.checked);
       });
     });
   }
@@ -918,7 +918,7 @@
     if (!cfg.forwarding.routes) cfg.forwarding.routes = [];
     peerTunnelIPv4Options(cfg);
     const dis = $("route-f-disabled");
-    if (dis) dis.checked = false;
+    if (dis) dis.checked = true;
     if (index === -1) {
       $("route-edit-index").value = "";
       $("route-editor-title").textContent = "Add route";
@@ -932,7 +932,7 @@
       setRouteProtoCheckboxes(r.proto);
       $("route-f-ports").value = (r.ports || []).join(", ");
       $("route-f-target").value = r.target_ip || "";
-      if (dis) dis.checked = !!r.disabled;
+      if (dis) dis.checked = !r.disabled;
     }
     const modal = $("route-modal");
     if (modal) {
@@ -969,7 +969,8 @@
       setRoutesMsg("Ports and target are required.", true);
       return;
     }
-    const entry = { proto, ports, target_ip: target, disabled: $("route-f-disabled") && $("route-f-disabled").checked };
+    const routeEn = $("route-f-disabled");
+    const entry = { proto, ports, target_ip: target, disabled: !(routeEn && routeEn.checked) };
     const idxRaw = $("route-edit-index").value;
     if (idxRaw === "") cfg.forwarding.routes.push(entry);
     else cfg.forwarding.routes[+idxRaw] = entry;
@@ -1036,7 +1037,7 @@
     const rows = rules
       .map((r, i) => {
         const aria =
-          "Disabled: INPUT " +
+          "Enabled: INPUT " +
           String(r.proto || "").toLowerCase() +
           " " +
           String(r.dport || r.note || "#" + i);
@@ -1045,7 +1046,7 @@
         );
       })
       .join("");
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Port(s)</th><th>Note</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Port(s)</th><th>Note</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-inbound-edit]").forEach((b) => {
       b.addEventListener("click", () => openInboundEditor(+b.getAttribute("data-inbound-edit")));
     });
@@ -1056,16 +1057,16 @@
       inp.addEventListener("click", (ev) => ev.stopPropagation());
       inp.addEventListener("change", async () => {
         const idx = +inp.getAttribute("data-inbound-disabled");
-        const wantDisabled = inp.checked;
-        if (!wantDisabled) {
+        const wantEnabled = inp.checked;
+        if (wantEnabled) {
           const r = (lastConfig.input_allows || [])[idx];
           if (!r || !String(r.dport || "").trim()) {
             setInboundMsg("Add a destination port in Edit before enabling this rule.", true);
-            inp.checked = true;
+            inp.checked = false;
             return;
           }
         }
-        await patchInboundDisabled(idx, wantDisabled);
+        await patchInboundDisabled(idx, !wantEnabled);
       });
     });
   }
@@ -1086,7 +1087,7 @@
       protoSel.value = "tcp";
       dport.value = "";
       note.value = "";
-      if (disInp) disInp.checked = false;
+      if (disInp) disInp.checked = true;
     } else {
       const r = cfg.input_allows[index];
       if (!r) return;
@@ -1096,7 +1097,7 @@
       protoSel.value = p === "udp" ? "udp" : "tcp";
       dport.value = r.dport || "";
       note.value = r.note || "";
-      if (disInp) disInp.checked = !!r.disabled;
+      if (disInp) disInp.checked = !r.disabled;
     }
     const modal = $("inbound-modal");
     if (modal) {
@@ -1121,15 +1122,15 @@
       return;
     }
     const disEl = $("inbound-f-disabled");
-    const disabled = disEl && disEl.checked;
-    if (!disabled && !dport) {
+    const enabled = disEl && disEl.checked;
+    if (enabled && !dport) {
       setInboundMsg("Destination port is required.", true);
       return;
     }
     const entry = { proto };
     if (dport) entry.dport = dport;
     if (note) entry.note = note;
-    if (disabled) entry.disabled = true;
+    entry.disabled = !enabled;
     const idxRaw = $("inbound-edit-index").value;
     if (idxRaw === "") cfg.input_allows.push(entry);
     else cfg.input_allows[+idxRaw] = entry;
@@ -1431,6 +1432,369 @@
     el.classList.toggle("err", !!isErr);
   }
 
+  const PENDING_DIFF_MODE_KEY = "evuproxy_pending_diff_mode";
+  const LINE_DIFF_MAX_CELLS = 4_000_000;
+  const LINE_DIFF_MAX_SIDE = 12_000;
+  const CHAR_DIFF_MAX_CELLS = 500_000;
+  const CHAR_DIFF_MAX_LEN = 4096;
+
+  let lastPendingBaseline = "";
+  let lastPendingNew = "";
+
+  function getPendingDiffMode() {
+    try {
+      const m = sessionStorage.getItem(PENDING_DIFF_MODE_KEY);
+      if (m === "split" || m === "unified") return m;
+    } catch (e) {
+      /* ignore */
+    }
+    return "unified";
+  }
+
+  function setPendingDiffMode(mode) {
+    try {
+      sessionStorage.setItem(PENDING_DIFF_MODE_KEY, mode);
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  function splitLines(text) {
+    if (text.length === 0) return [];
+    return String(text).replace(/\r\n/g, "\n").split("\n");
+  }
+
+  function mergeCharOps(ops) {
+    const merged = [];
+    for (const op of ops) {
+      const last = merged[merged.length - 1];
+      if (last && last.type === op.type) {
+        last.text += op.text;
+      } else {
+        merged.push({ type: op.type, text: op.text });
+      }
+    }
+    return merged;
+  }
+
+  function computeLineDiff(oldLines, newLines) {
+    const m = oldLines.length;
+    const n = newLines.length;
+    if (m > LINE_DIFF_MAX_SIDE || n > LINE_DIFF_MAX_SIDE || m * n > LINE_DIFF_MAX_CELLS) {
+      return null;
+    }
+    const cols = n + 1;
+    const idx = (i, j) => i * cols + j;
+    const lcsLen = new Uint32Array((m + 1) * (n + 1));
+    const dirs = new Int8Array((m + 1) * (n + 1));
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (oldLines[i - 1] === newLines[j - 1]) {
+          lcsLen[idx(i, j)] = lcsLen[idx(i - 1, j - 1)] + 1;
+          dirs[idx(i, j)] = 1;
+        } else if (lcsLen[idx(i - 1, j)] >= lcsLen[idx(i, j - 1)]) {
+          lcsLen[idx(i, j)] = lcsLen[idx(i - 1, j)];
+          dirs[idx(i, j)] = 2;
+        } else {
+          lcsLen[idx(i, j)] = lcsLen[idx(i, j - 1)];
+          dirs[idx(i, j)] = 3;
+        }
+      }
+    }
+    const ops = [];
+    let i = m;
+    let j = n;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && dirs[idx(i, j)] === 1) {
+        ops.unshift({ type: "equal", oldLine: oldLines[i - 1], newLine: newLines[j - 1] });
+        i--;
+        j--;
+      } else if (j > 0 && (i === 0 || dirs[idx(i, j)] === 3)) {
+        ops.unshift({ type: "insert", line: newLines[j - 1] });
+        j--;
+      } else if (i > 0) {
+        ops.unshift({ type: "delete", line: oldLines[i - 1] });
+        i--;
+      } else {
+        break;
+      }
+    }
+    return ops;
+  }
+
+  function computeCharDiff(oldStr, newStr) {
+    const a = oldStr.split("");
+    const b = newStr.split("");
+    const m = a.length;
+    const n = b.length;
+    if (m > CHAR_DIFF_MAX_LEN || n > CHAR_DIFF_MAX_LEN || m * n > CHAR_DIFF_MAX_CELLS) {
+      return null;
+    }
+    const cols = n + 1;
+    const idx = (i, j) => i * cols + j;
+    const lcsLen = new Uint32Array((m + 1) * (n + 1));
+    const dirs = new Int8Array((m + 1) * (n + 1));
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (a[i - 1] === b[j - 1]) {
+          lcsLen[idx(i, j)] = lcsLen[idx(i - 1, j - 1)] + 1;
+          dirs[idx(i, j)] = 1;
+        } else if (lcsLen[idx(i - 1, j)] >= lcsLen[idx(i, j - 1)]) {
+          lcsLen[idx(i, j)] = lcsLen[idx(i - 1, j)];
+          dirs[idx(i, j)] = 2;
+        } else {
+          lcsLen[idx(i, j)] = lcsLen[idx(i, j - 1)];
+          dirs[idx(i, j)] = 3;
+        }
+      }
+    }
+    const raw = [];
+    let i = m;
+    let j = n;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && dirs[idx(i, j)] === 1) {
+        raw.unshift({ type: "equal", text: a[i - 1] });
+        i--;
+        j--;
+      } else if (j > 0 && (i === 0 || dirs[idx(i, j)] === 3)) {
+        raw.unshift({ type: "insert", text: b[j - 1] });
+        j--;
+      } else if (i > 0) {
+        raw.unshift({ type: "delete", text: a[i - 1] });
+        i--;
+      } else {
+        break;
+      }
+    }
+    return mergeCharOps(raw);
+  }
+
+  function intralinePairHtml(oldLine, newLine) {
+    if (oldLine === newLine) {
+      const e = escapeHtml(oldLine);
+      return { delHtml: e, insHtml: e };
+    }
+    if (!oldLine) {
+      return {
+        delHtml: "",
+        insHtml: `<span class="diff-ch-strong diff-ch-ins">${escapeHtml(newLine)}</span>`,
+      };
+    }
+    if (!newLine) {
+      return {
+        delHtml: `<span class="diff-ch-strong diff-ch-del">${escapeHtml(oldLine)}</span>`,
+        insHtml: "",
+      };
+    }
+    const ops = computeCharDiff(oldLine, newLine);
+    if (!ops) {
+      return { delHtml: escapeHtml(oldLine), insHtml: escapeHtml(newLine) };
+    }
+    let delH = "";
+    let insH = "";
+    for (const op of ops) {
+      if (op.type === "equal") {
+        const e = escapeHtml(op.text);
+        delH += e;
+        insH += e;
+      } else if (op.type === "delete") {
+        delH += `<span class="diff-ch-strong diff-ch-del">${escapeHtml(op.text)}</span>`;
+      } else {
+        insH += `<span class="diff-ch-strong diff-ch-ins">${escapeHtml(op.text)}</span>`;
+      }
+    }
+    return { delHtml: delH, insHtml: insH };
+  }
+
+  function renderUnifiedDiffHtml(ops) {
+    const rows = [];
+    let oldNum = 0;
+    let newNum = 0;
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (op.type === "equal") {
+        oldNum++;
+        newNum++;
+        rows.push(
+          `<tr class="diff-row-ctx"><td class="diff-ln">${oldNum}</td><td class="diff-ln">${newNum}</td><td class="diff-sign"></td><td class="diff-code">${escapeHtml(
+            op.oldLine
+          )}</td></tr>`
+        );
+        continue;
+      }
+      if (op.type === "delete") {
+        const next = ops[i + 1];
+        if (next && next.type === "insert") {
+          const { delHtml, insHtml } = intralinePairHtml(op.line, next.line);
+          oldNum++;
+          rows.push(
+            `<tr class="diff-row-diff-del"><td class="diff-ln">${oldNum}</td><td class="diff-ln"></td><td class="diff-sign">-</td><td class="diff-code">${delHtml}</td></tr>`
+          );
+          newNum++;
+          rows.push(
+            `<tr class="diff-row-diff-ins"><td class="diff-ln"></td><td class="diff-ln">${newNum}</td><td class="diff-sign">+</td><td class="diff-code">${insHtml}</td></tr>`
+          );
+          i++;
+          continue;
+        }
+        oldNum++;
+        rows.push(
+          `<tr class="diff-row-diff-del"><td class="diff-ln">${oldNum}</td><td class="diff-ln"></td><td class="diff-sign">-</td><td class="diff-code">${escapeHtml(
+            op.line
+          )}</td></tr>`
+        );
+        continue;
+      }
+      if (op.type === "insert") {
+        newNum++;
+        rows.push(
+          `<tr class="diff-row-diff-ins"><td class="diff-ln"></td><td class="diff-ln">${newNum}</td><td class="diff-sign">+</td><td class="diff-code">${escapeHtml(
+            op.line
+          )}</td></tr>`
+        );
+      }
+    }
+    return `<div class="pending-diff-scroll"><table class="pending-diff-unified"><tbody>${rows.join("")}</tbody></table></div>`;
+  }
+
+  function renderSplitDiffHtml(ops) {
+    /** Keeps row height aligned between the two independent tables (empty td can collapse). */
+    const padCell = '<td class="diff-split-ln"></td><td class="diff-split-code diff-split-pad">&nbsp;</td>';
+    const leftRows = [];
+    const rightRows = [];
+    let oldNum = 0;
+    let newNum = 0;
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (op.type === "equal") {
+        oldNum++;
+        newNum++;
+        leftRows.push(
+          `<tr class="diff-split-row diff-split-row-ctx"><td class="diff-split-ln">${oldNum}</td><td class="diff-split-code">${escapeHtml(
+            op.oldLine
+          )}</td></tr>`
+        );
+        rightRows.push(
+          `<tr class="diff-split-row diff-split-row-ctx"><td class="diff-split-ln">${newNum}</td><td class="diff-split-code">${escapeHtml(
+            op.newLine
+          )}</td></tr>`
+        );
+        continue;
+      }
+      if (op.type === "delete") {
+        const next = ops[i + 1];
+        if (next && next.type === "insert") {
+          const { delHtml, insHtml } = intralinePairHtml(op.line, next.line);
+          oldNum++;
+          newNum++;
+          leftRows.push(
+            `<tr class="diff-split-row diff-split-row-both-l"><td class="diff-split-ln">${oldNum}</td><td class="diff-split-code">${delHtml}</td></tr>`
+          );
+          rightRows.push(
+            `<tr class="diff-split-row diff-split-row-both-r"><td class="diff-split-ln">${newNum}</td><td class="diff-split-code">${insHtml}</td></tr>`
+          );
+          i++;
+          continue;
+        }
+        oldNum++;
+        leftRows.push(
+          `<tr class="diff-split-row diff-split-row-del"><td class="diff-split-ln">${oldNum}</td><td class="diff-split-code">${escapeHtml(
+            op.line
+          )}</td></tr>`
+        );
+        rightRows.push(`<tr class="diff-split-row diff-split-row-gap">${padCell}</tr>`);
+        continue;
+      }
+      if (op.type === "insert") {
+        newNum++;
+        leftRows.push(`<tr class="diff-split-row diff-split-row-gap">${padCell}</tr>`);
+        rightRows.push(
+          `<tr class="diff-split-row diff-split-row-ins"><td class="diff-split-ln">${newNum}</td><td class="diff-split-code">${escapeHtml(
+            op.line
+          )}</td></tr>`
+        );
+      }
+    }
+    return (
+      `<div class="pending-diff-split-view">` +
+      `<div class="pending-diff-split-pane" data-pending-split-pane="left" tabindex="-1"><table class="pending-diff-split-side"><tbody>${leftRows.join(
+        ""
+      )}</tbody></table></div>` +
+      `<div class="pending-diff-split-pane" data-pending-split-pane="right" tabindex="-1"><table class="pending-diff-split-side"><tbody>${rightRows.join(
+        ""
+      )}</tbody></table></div>` +
+      `</div>`
+    );
+  }
+
+  /** Link vertical scroll between split panes; horizontal scroll stays independent per pane. */
+  function setupPendingSplitScrollSync(panel) {
+    const view = panel && panel.querySelector(".pending-diff-split-view");
+    if (!view) return;
+    const panes = view.querySelectorAll(".pending-diff-split-pane");
+    if (panes.length !== 2) return;
+    const left = panes[0];
+    const right = panes[1];
+    let lock = false;
+    function syncFrom(src, dst) {
+      if (lock) return;
+      if (dst.scrollTop === src.scrollTop) return;
+      lock = true;
+      dst.scrollTop = src.scrollTop;
+      lock = false;
+    }
+    left.addEventListener("scroll", () => syncFrom(left, right), { passive: true });
+    right.addEventListener("scroll", () => syncFrom(right, left), { passive: true });
+  }
+
+  function renderPendingDiffTooLarge(oldText, newText) {
+    return (
+      `<p class="hint pending-diff-same">Diff too large to compute in the browser. Showing both texts.</p>` +
+      `<h4 class="pending-diff-raw-h">Baseline (<code>generated/nftables.nft</code>)</h4>` +
+      `<pre class="code-block pending-nft-pre" tabindex="0">${escapeHtml(oldText)}</pre>` +
+      `<h4 class="pending-diff-raw-h">Proposed (current saved config)</h4>` +
+      `<pre class="code-block pending-nft-pre" tabindex="0">${escapeHtml(newText)}</pre>`
+    );
+  }
+
+  function renderPendingDiffPanel() {
+    const panel = $("pending-diff-panel");
+    const uBtn = $("pending-mode-unified");
+    const sBtn = $("pending-mode-split");
+    if (!panel) return;
+    const mode = getPendingDiffMode();
+    if (uBtn && sBtn) {
+      uBtn.classList.toggle("is-active", mode === "unified");
+      sBtn.classList.toggle("is-active", mode === "split");
+      uBtn.setAttribute("aria-selected", mode === "unified" ? "true" : "false");
+      sBtn.setAttribute("aria-selected", mode === "split" ? "true" : "false");
+    }
+    panel.setAttribute("aria-labelledby", mode === "unified" ? "pending-mode-unified" : "pending-mode-split");
+    const oldText = lastPendingBaseline;
+    const newText = lastPendingNew;
+    if (oldText === newText) {
+      let body = `<p class="hint pending-diff-same">No differences.</p>`;
+      if (newText) {
+        body += `<pre class="code-block pending-nft-pre" tabindex="0">${escapeHtml(newText)}</pre>`;
+      }
+      panel.innerHTML = body;
+      return;
+    }
+    const oldLines = splitLines(oldText);
+    const newLines = splitLines(newText);
+    const ops = computeLineDiff(oldLines, newLines);
+    if (!ops) {
+      panel.innerHTML = renderPendingDiffTooLarge(oldText, newText);
+      return;
+    }
+    if (mode === "split") {
+      panel.innerHTML = renderSplitDiffHtml(ops);
+      setupPendingSplitScrollSync(panel);
+    } else {
+      panel.innerHTML = renderUnifiedDiffHtml(ops);
+    }
+  }
+
   async function refreshPendingBadge() {
     const dot = $("nav-pending-dot");
     if (!dot) return;
@@ -1445,8 +1809,8 @@
 
   async function refreshPendingPage() {
     const status = $("pending-status");
-    const pre = $("pending-nft");
-    if (!status || !pre) return;
+    const panel = $("pending-diff-panel");
+    if (!status || !panel) return;
     setPendingMsg("");
     try {
       const p = await api("/v1/pending");
@@ -1462,11 +1826,15 @@
         status.classList.remove("pending-yes");
         status.classList.add("pending-no");
       }
-      pre.textContent = p.nftables || "";
+      lastPendingBaseline = p.nftables_baseline != null ? String(p.nftables_baseline) : "";
+      lastPendingNew = p.nftables != null ? String(p.nftables) : "";
+      renderPendingDiffPanel();
     } catch (e) {
       status.textContent = "";
       status.classList.remove("pending-yes", "pending-no");
-      pre.textContent = "";
+      lastPendingBaseline = "";
+      lastPendingNew = "";
+      panel.innerHTML = "";
       setApiStatus(false, String(e.message || e));
       setPendingMsg(String(e.message || e), true);
     }
@@ -1886,7 +2254,7 @@
     $("peer-f-name").value = "";
     $("peer-f-tunnel").value = suggestedPeerTunnelIP(lastConfig);
     $("peer-f-pub").value = "";
-    $("peer-f-disabled").checked = false;
+    $("peer-f-disabled").checked = true;
     resetPeerOnboardExtras();
     const oe = $("onboard-endpoint");
     if (oe) oe.value = serverEndpointDisplay();
@@ -2106,6 +2474,20 @@
   if (peerDisabled) peerDisabled.addEventListener("change", onPeerModalFieldActivity);
 
   $("pending-refresh").addEventListener("click", refreshPendingPage);
+  const pendingModeUnified = $("pending-mode-unified");
+  const pendingModeSplit = $("pending-mode-split");
+  if (pendingModeUnified) {
+    pendingModeUnified.addEventListener("click", () => {
+      setPendingDiffMode("unified");
+      renderPendingDiffPanel();
+    });
+  }
+  if (pendingModeSplit) {
+    pendingModeSplit.addEventListener("click", () => {
+      setPendingDiffMode("split");
+      renderPendingDiffPanel();
+    });
+  }
   $("pending-apply").addEventListener("click", async () => {
     setPendingMsg("…");
     try {
