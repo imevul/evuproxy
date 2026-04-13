@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/imevul/evuproxy/compare/v0.3.0...v0.4.0) (2026-04-13)
+
+
+### Features
+
+* **api:** mutating-op mutex, backup allowlist, timeouts, observability ([23507ed](https://github.com/imevul/evuproxy/commit/23507ed9d7ce5571cc9bf723c092663f9811f778))
+
+
+### Bug Fixes
+
+* **config:** disable geo feature in evuproxy example configuration ([09d5ab2](https://github.com/imevul/evuproxy/commit/09d5ab2981b22015778c71b2476c0b694d3f779a))
+
 ## [0.3.0](https://github.com/imevul/evuproxy/compare/v0.2.0...v0.3.0) (2026-04-12)
 
 
