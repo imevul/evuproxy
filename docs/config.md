@@ -115,9 +115,17 @@ Non-disabled peers must have a non-empty `name`, `public_key`, and `tunnel_ip`.
 
 After editing `config.yaml`, run **`evuproxy reload --config /etc/evuproxy/config.yaml`** (or use the HTTP API) so WireGuard and nftables are regenerated. The admin UI can edit and save via **`PUT /api/v1/config`** (YAML is rewritten from the structured config; comments and unknown keys are not preserved).
 
+### Undo last save (`config.yaml.bak`)
+
+Each successful **`PUT /api/v1/config`** that **replaces an existing file** writes the previous contents to **`config.yaml.bak`** beside the config (same directory).
+
+- **`evuproxy undo-last-change --config /etc/evuproxy/config.yaml`** swaps **`config.yaml`** with **`config.yaml.bak`**: the backup becomes the live file, and the file you replaced is stored as the new **`.bak`**. Run the command again to swap back (single-step undo/redo). The backup must be valid YAML for the EvuProxy schema or the command fails.
+- The host still runs the last applied rules until you **`evuproxy reload`**, use **Pending changes → Apply** in the UI, or **`POST /api/v1/reload`**.
+
 ---
 
 ## Related files
 
 - **`ui-preferences.json`** next to the config file stores admin UI-only settings (not part of this schema).
+- **`config.yaml.bak`** holds the previous config after a structured save (API/UI); optional one-level rollback via **`evuproxy undo-last-change`** or **`POST /api/v1/config/undo`**.
 - Generated artifacts (e.g. WireGuard config under `config`’s directory layout) are produced by `evuproxy reload`; do not hand-edit generated files.

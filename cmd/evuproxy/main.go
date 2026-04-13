@@ -33,6 +33,7 @@ func main() {
 		cmdServe(),
 		cmdBackup(),
 		cmdRestore(),
+		cmdUndoLastChange(),
 	)
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -145,4 +146,14 @@ func cmdRestore() *cobra.Command {
 	}
 	c.Flags().StringVar(&archive, "archive", "", "path to .tgz from evuproxy backup")
 	return c
+}
+
+func cmdUndoLastChange() *cobra.Command {
+	return &cobra.Command{
+		Use:   "undo-last-change",
+		Short: "Swap config.yaml with config.yaml.bak (one-level undo/redo toggle)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apply.UndoConfigYAML(cfgPath)
+		},
+	}
 }

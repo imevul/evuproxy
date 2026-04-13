@@ -10,7 +10,7 @@
 
 ## Mutating operations (serialization)
 
-These endpoints change on-disk config, backups, or live nftables / WireGuard: **`PUT /config`**, **`POST /reload`**, **`POST /update-geo`**, **`POST /backup`**, **`POST /restore`**. Only one runs at a time; a second concurrent request gets **HTTP 503** with a stable error message (no queue). Use retries with backoff on the client.
+These endpoints change on-disk config, backups, or live nftables / WireGuard: **`PUT /config`**, **`POST /config/undo`**, **`POST /reload`**, **`POST /update-geo`**, **`POST /backup`**, **`POST /restore`**. Only one runs at a time; a second concurrent request gets **HTTP 503** with a stable error message (no queue). Use retries with backoff on the client.
 
 ## Backup and restore paths
 
@@ -23,8 +23,9 @@ All paths below are under **`/api/v1`** unless noted.
 
 | Method        | Path                                                            | Purpose                                                                                                                                                   |
 | ------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET` / `PUT` | `/config`                                                       | Read or replace full config. **`PUT`** accepts JSON, validates, writes **YAML** to disk; **does not** reload WireGuard/nftables until **`POST /reload`**. |
-| `GET`         | `/pending`                                                      | Compare on-disk config to last successful apply. **`nftables`** is the **generated ruleset text** from the current on-disk config. **`nftables_baseline`** is the contents of **`generated/nftables.nft`** when **`os.ReadFile`** succeeds (typically the ruleset last written by **`POST /reload`**); if the file is missing or unreadable (permissions, I/O), it is an empty string. Use both fields to diff on-disk generated rules vs what the current config would produce next. |
+| `GET` / `PUT` | `/config`                                                       | Read or replace full config. **`PUT`** accepts JSON, validates, writes **YAML** to disk; **does not** reload WireGuard/nftables until **`POST /reload`**. If the file already exists, **`PUT`** copies the previous bytes to **`config.yaml.bak`** next to the config path before replacing. |
+| `POST`        | `/config/undo`                                                  | Swap **`config.yaml`** with **`config.yaml.bak`** (validates backup YAML). Running again swaps back (one-level undo/redo). **400** if there is no backup file or the backup is invalid. Does not reload the host. |
+| `GET`         | `/pending`                                                      | Compare on-disk config to last successful apply. **`nftables`** is the **generated ruleset text** from the current on-disk config. **`nftables_baseline`** is the contents of **`generated/nftables.nft`** when **`os.ReadFile`** succeeds (typically the ruleset last written by **`POST /reload`**); if the file is missing or unreadable (permissions, I/O), it is an empty string. Use both fields to diff on-disk generated rules vs what the current config would produce next. **`config_backup_available`** is **`true`** when **`config.yaml.bak`** exists (after at least one **`PUT /config`** that replaced an existing file). |
 | `GET` / `PUT` | `/preferences`                                                  | UI helper fields (e.g. tunnel subnet CIDR, WireGuard endpoint for client snippets).                                                                       |
 | `POST`        | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config.                                                                                                    |
 | `POST`        | `/update-geo`                                                   | Download zones and refresh geo sets in nftables.                                                                                                          |
@@ -34,3 +35,5 @@ All paths below are under **`/api/v1`** unless noted.
 
 
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
+
+**`POST /api/v1/config/undo`** uses the same swap semantics as **`evuproxy undo-last-change`** (see [Applying changes](config.md#applying-changes) in the config reference).

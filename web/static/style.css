@@ -564,6 +564,21 @@ button:hover {
   color: #c9d1d9;
 }
 
+.btn-danger {
+  border-color: #f85149;
+  background: #da3633;
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #f85149;
+}
+
+.btn-danger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .btn-row {
   display: flex;
   flex-wrap: wrap;

@@ -90,6 +90,8 @@ type PendingInfo struct {
 	NFTables            string `json:"nftables"`
 	// NFTablesBaseline is the contents of generated/nftables.nft when readable (last written by reload).
 	NFTablesBaseline string `json:"nftables_baseline"`
+	// ConfigBackupAvailable is true when ConfigYAMLBackupPath exists (from a prior save that replaced the file).
+	ConfigBackupAvailable bool `json:"config_backup_available"`
 }
 
 // PendingSummary loads the on-disk config, compares its hash to last apply, and renders nftables preview.
@@ -121,6 +123,9 @@ func PendingSummary(cfgPath string) (PendingInfo, error) {
 		out.NFTablesBaseline = string(b)
 	} else if !os.IsNotExist(err) {
 		slog.Debug("pending: could not read nftables baseline file", "path", nftPath, "err", err)
+	}
+	if _, err := os.Stat(ConfigYAMLBackupPath(cfgPath)); err == nil {
+		out.ConfigBackupAvailable = true
 	}
 	return out, nil
 }
