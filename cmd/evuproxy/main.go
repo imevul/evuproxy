@@ -129,7 +129,7 @@ func cmdBackup() *cobra.Command {
 			return apply.Backup(cfgPath, dest)
 		},
 	}
-	c.Flags().StringVar(&dest, "dest", "", "output path e.g. /root/evuproxy-backup.tgz")
+	c.Flags().StringVar(&dest, "dest", "", "output .tgz path (absolute or cwd-relative; must resolve under EVUPROXY_BACKUP_DIR, default /var/backups)")
 	return c
 }
 
@@ -145,7 +145,7 @@ func cmdRestore() *cobra.Command {
 			return apply.Restore(cfgPath, archive)
 		},
 	}
-	c.Flags().StringVar(&archive, "archive", "", "path to .tgz from evuproxy backup")
+	c.Flags().StringVar(&archive, "archive", "", "path to .tgz (absolute or cwd-relative; must resolve under EVUPROXY_BACKUP_DIR, default /var/backups)")
 	return c
 }
 

@@ -1,5 +1,8 @@
 name: Build Go binary
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

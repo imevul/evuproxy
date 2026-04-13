@@ -67,13 +67,21 @@ func ResolveBackupPath(p string) (string, error) {
 
 // Backup creates a gzip tarball of /etc/evuproxy (parent of config file).
 func Backup(configPath, dest string) error {
+	destAbs, err := filepath.Abs(dest)
+	if err != nil {
+		return fmt.Errorf("backup: dest: %w", err)
+	}
+	destResolved, err := ResolveBackupPath(destAbs)
+	if err != nil {
+		return fmt.Errorf("backup: %w", err)
+	}
 	root := filepath.Dir(configPath)
-	if d := filepath.Dir(dest); d != "." && d != "/" {
+	if d := filepath.Dir(destResolved); d != "." && d != "/" {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			return err
+			return fmt.Errorf("backup: mkdir: %w", err)
 		}
 	}
-	cmd := exec.Command("tar", "-czf", dest, "-C", root, ".")
+	cmd := exec.Command("tar", "-czf", destResolved, "-C", root, ".")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("tar: %w: %s", err, out)
 	}
@@ -84,12 +92,20 @@ func Backup(configPath, dest string) error {
 // Only regular files and directories are allowed; symlinks, hard links, and absolute
 // or parent-directory paths are rejected to avoid tar path traversal.
 func Restore(configPath, archive string) error {
+	archAbs, err := filepath.Abs(archive)
+	if err != nil {
+		return fmt.Errorf("restore: archive path: %w", err)
+	}
+	archivePath, err := ResolveBackupPath(archAbs)
+	if err != nil {
+		return fmt.Errorf("restore: %w", err)
+	}
 	root := filepath.Dir(configPath)
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return fmt.Errorf("restore: config root: %w", err)
 	}
-	f, err := os.Open(archive)
+	f, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("restore: open archive: %w", err)
 	}
@@ -101,16 +117,12 @@ func Restore(configPath, archive string) error {
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 	for {
-		hdr, err := tr.Next()
+		hdr, rel, err := nextTarMemberHeader(tr)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("restore: read tar: %w", err)
-		}
-		rel, err := tarEntryRelPath(hdr.Name)
-		if err != nil {
-			return fmt.Errorf("restore: %w", err)
+			return err
 		}
 		if rel == "." {
 			continue
@@ -140,6 +152,23 @@ func Restore(configPath, archive string) error {
 		}
 	}
 	return nil
+}
+
+// nextTarMemberHeader reads the next archive member and validates hdr.Name before any
+// extraction, mitigating zip-slip / path traversal from malicious archives.
+func nextTarMemberHeader(tr *tar.Reader) (*tar.Header, string, error) {
+	hdr, err := tr.Next()
+	if err != nil {
+		if err == io.EOF {
+			return nil, "", io.EOF
+		}
+		return nil, "", fmt.Errorf("restore: read tar: %w", err)
+	}
+	rel, err := tarEntryRelPath(hdr.Name)
+	if err != nil {
+		return nil, "", fmt.Errorf("restore: %w", err)
+	}
+	return hdr, rel, nil
 }
 
 func dirMode(hdr *tar.Header) os.FileMode {

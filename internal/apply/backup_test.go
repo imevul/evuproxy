@@ -11,6 +11,7 @@ import (
 
 func TestRestoreSafe_extractsFile(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("EVUPROXY_BACKUP_DIR", dir)
 	root := filepath.Join(dir, "cfgroot")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -46,6 +47,7 @@ func TestRestoreSafe_extractsFile(t *testing.T) {
 
 func TestRestore_rejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("EVUPROXY_BACKUP_DIR", dir)
 	cfg := filepath.Join(dir, "nested", "config.yaml")
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
 		t.Fatal(err)
@@ -97,6 +99,7 @@ func TestResolveBackupPath_allowlist(t *testing.T) {
 
 func TestRestore_rejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("EVUPROXY_BACKUP_DIR", dir)
 	cfg := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfg, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)

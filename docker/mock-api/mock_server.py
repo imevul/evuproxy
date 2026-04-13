@@ -553,5 +553,8 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     httpd = HTTPServer(("0.0.0.0", PORT), Handler)
-    print("mock EvuProxy API on 0.0.0.0:%s (MOCK_API_TOKEN=%r)" % (PORT, TOKEN))
+    print(
+        "mock EvuProxy API on 0.0.0.0:%s (MOCK_API_TOKEN %s)"
+        % (PORT, "set" if TOKEN else "unset")
+    )
     httpd.serve_forever()
