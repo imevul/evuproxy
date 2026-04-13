@@ -2,6 +2,7 @@ package apply
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,24 +49,24 @@ func Reload(cfgPath string) error {
 
 	check := exec.Command("nft", "-c", "-f", nftPath)
 	if out, err := check.CombinedOutput(); err != nil {
-		return fmt.Errorf("nft validate: %w\n%s", err, out)
+		return fmt.Errorf("nft validate: %w\n%s", err, TruncateForLog(string(out), 8192))
 	}
 
-	// Replace EvuProxy tables atomically.
-	_ = exec.Command("nft", "delete", "table", "inet", "evuproxy").Run()
-	_ = exec.Command("nft", "delete", "table", "ip", "evuproxy").Run()
+	// Replace EvuProxy tables atomically. Delete may fail if the table is absent; that is normal on first install.
+	tryDeleteNFTTable("inet", "evuproxy")
+	tryDeleteNFTTable("ip", "evuproxy")
 
 	load := exec.Command("nft", "-f", nftPath)
 	if out, err := load.CombinedOutput(); err != nil {
-		return fmt.Errorf("nft load: %w\n%s", err, out)
+		return fmt.Errorf("nft load: %w\n%s", err, TruncateForLog(string(out), 8192))
 	}
 
 	if c.Geo.Enabled {
 		if err := ensureGeoZones(c); err != nil {
-			fmt.Fprintf(os.Stderr, "evuproxy: warning: geo zones: %v\n", err)
+			slog.Warn("geo zones", "err", err)
 		}
 		if err := applyGeoLoader(c, base); err != nil {
-			fmt.Fprintf(os.Stderr, "evuproxy: warning: geo load failed (sets may be empty — run evuproxy update-geo): %v\n", err)
+			slog.Warn("geo load failed; nft geo sets may be empty — run evuproxy update-geo", "err", err)
 		}
 	}
 
@@ -101,13 +102,20 @@ func applyGeoLoader(c *config.Config, configDir string) error {
 	}
 	cmd := exec.Command("nft", "-c", "-f", loaderPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("nft validate geo: %w\n%s", err, out)
+		return fmt.Errorf("nft validate geo: %w\n%s", err, TruncateForLog(string(out), 8192))
 	}
 	cmd = exec.Command("nft", "-f", loaderPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("nft load geo: %w\n%s", err, out)
+		return fmt.Errorf("nft load geo: %w\n%s", err, TruncateForLog(string(out), 8192))
 	}
 	return nil
+}
+
+func tryDeleteNFTTable(family, table string) {
+	out, err := exec.Command("nft", "delete", "table", family, table).CombinedOutput()
+	if err != nil {
+		slog.Debug("nft delete table", "family", family, "table", table, "err", err, "output", TruncateForLog(string(out), 1024))
+	}
 }
 
 func reloadWireGuard(iface, confPath string) error {

@@ -12,6 +12,59 @@ import (
 	"strings"
 )
 
+// BackupAllowDir returns the directory prefix allowed for API backup/restore paths.
+// Override with environment variable EVUPROXY_BACKUP_DIR (must be absolute after clean).
+func BackupAllowDir() string {
+	d := strings.TrimSpace(os.Getenv("EVUPROXY_BACKUP_DIR"))
+	if d == "" {
+		return "/var/backups"
+	}
+	return d
+}
+
+// ResolveBackupPath checks that p is an absolute path under BackupAllowDir after canonical
+// resolution (no .. escape; symlinks on existing paths must not leave the allow tree).
+func ResolveBackupPath(p string) (string, error) {
+	if strings.TrimSpace(p) == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	if !filepath.IsAbs(p) {
+		return "", fmt.Errorf("path must be absolute")
+	}
+	clean := filepath.Clean(p)
+	root := filepath.Clean(BackupAllowDir())
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("EVUPROXY_BACKUP_DIR must be absolute")
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	rootReal := rootAbs
+	if r, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		rootReal = r
+	}
+	targetAbs, err := filepath.Abs(clean)
+	if err != nil {
+		return "", err
+	}
+	targetReal := targetAbs
+	if r, err := filepath.EvalSymlinks(targetAbs); err == nil {
+		targetReal = r
+	} else {
+		// Destination may not exist yet (backup output). Resolve parent chain.
+		dir := filepath.Dir(targetAbs)
+		if r, err := filepath.EvalSymlinks(dir); err == nil {
+			targetReal = filepath.Join(r, filepath.Base(targetAbs))
+		}
+	}
+	rel, err := filepath.Rel(rootReal, targetReal)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("path outside %s", rootReal)
+	}
+	return targetAbs, nil
+}
+
 // Backup creates a gzip tarball of /etc/evuproxy (parent of config file).
 func Backup(configPath, dest string) error {
 	root := filepath.Dir(configPath)

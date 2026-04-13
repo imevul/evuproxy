@@ -30,7 +30,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
   ```
 4. On boot, `evuproxy.service` reapplies the same. Geo zones refresh via `evuproxy-geo.timer`. With **geo enabled**, the first `reload` attempts to download country zones if files are missing; ensure outbound HTTPS is allowed.
 5. **WireGuard on the backend peer**: use a narrow **`AllowedIPs`** (tunnel subnet only, not `0.0.0.0/0`) so local LAN routing stays direct.
-6. **Peer (client) install (Linux):** [scripts/peer-install.sh](scripts/peer-install.sh) installs `wireguard-tools`, writes `/etc/wireguard/<iface>.conf`, and enables `wg-quick`. The admin UI **Add peer** modal generates the matching one-liner (`export … && curl … | sudo -E bash`). Forks or pinned releases can set `window.EVUPROXY_PEER_INSTALL_SCRIPT_URL` before loading the UI to use another raw script URL.
+6. **Peer (client) install (Linux):** [scripts/peer-install.sh](scripts/peer-install.sh) installs `wireguard-tools`, writes `/etc/wireguard/<iface>.conf`, and enables `wg-quick`. The admin UI **Add peer** modal generates a short shell script: download the install script to a temp file, print `sha256sum`, then run with `sudo` after you compare the hash to **`scripts/peer-install.sh`** in **SHA256SUMS** on the matching [GitHub Release](https://github.com/imevul/evuproxy/releases) (same tag or commit as the raw URL). For production peers, set `window.EVUPROXY_PEER_INSTALL_SCRIPT_URL` to a **tag-pinned** raw URL (not floating `main`) so the checksum in a fixed release applies.
 
 ## Command-line interface
 
@@ -50,8 +50,26 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 ### Binding, CORS, and authentication
 
 - **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment variable **`EVUPROXY_API_TOKEN`** or **`evuproxy serve --token-file`** (default `/etc/evuproxy/api.token`).
-- **Cross-origin UI:** If the admin UI is opened from another origin (different scheme/host/port than the API), the browser needs CORS. Enable with **`evuproxy serve --cors-origins`**: a comma-separated list of exact `Origin` values (for example `https://myui.example.com,http://10.0.0.2:9080`), or `*` to allow any origin. The API remains protected by the bearer token; prefer an explicit list over `*` when the API is reachable from untrusted networks.
-- **Auth:** `Authorization: Bearer …` or `X-API-Token` on `/api/v1/*` routes. **`GET /healthz`** is unauthenticated (for probes).
+- **Cross-origin UI:** If the admin UI is opened from another origin (different scheme/host/port than the API), the browser needs CORS. Enable with **`evuproxy serve --cors-origins`**: a comma-separated list of exact `Origin` values (for example `https://myui.example.com,http://10.0.0.2:9080`), or `*` to allow any origin. The API remains protected by the bearer token; prefer an explicit list over `*` when the API is reachable from untrusted networks. With `*`, any website the operator opens could send credentialed requests if the token is stored in the UI — keep the API on localhost or use an explicit origin list when the browser can load untrusted pages.
+- **Auth:** `Authorization: Bearer …` or `X-API-Token` on `/api/v1/*` routes. **`GET /healthz`** is unauthenticated (for probes). **Reverse proxies** should not log `Authorization` or `X-API-Token` values (redact or omit these headers in access logs).
+
+### Mutating operations (serialization)
+
+These endpoints change on-disk config, backups, or live nftables / WireGuard: **`PUT /config`**, **`POST /reload`**, **`POST /update-geo`**, **`POST /backup`**, **`POST /restore`**. Only one runs at a time; a second concurrent request gets **HTTP 503** with a stable error message (no queue). Use retries with backoff on the client.
+
+### Backup and restore paths
+
+**`POST /backup?path=…`** and **`POST /restore?path=…`** only accept absolute paths that resolve under the backup allow directory (default **`/var/backups`**). Override the directory with environment variable **`EVUPROXY_BACKUP_DIR`** (must be absolute). Paths are canonicalized; locations outside the allow tree return **4xx**. Treat the backup directory like sensitive storage: a **local attacker** who can create symlinks there could in theory race the API between path check and `tar` (narrow window); use a dedicated directory with restrictive permissions.
+
+### Privacy and telemetry
+
+- **No project telemetry:** EvuProxy does not phone home or report usage to the authors. Outbound connections are **operational only** (e.g. GeoIP zone downloads to IPDeny or your configured source, HTTPS for install scripts if you use them).
+- **Logs and stats:** **`GET /logs`** returns recent firewall-related journal lines (may include source/destination IPs). **`GET /stats`** and **`GET /metrics`** expose WireGuard and nftables-derived data (keys, endpoints, counters). Treat API responses and host logs as **sensitive** in multi-tenant or shared-log environments.
+- **Geo fetches:** Zone downloads are made from the **server’s public IP** (or the egress used for HTTPS). See [Third-party data](#third-party-data-and-attribution) for IPDeny terms.
+
+### Security roadmap (scoped access)
+
+**Deferred:** separate read vs write API tokens, CSRF hardening beyond bearer tokens, and a strict **Content-Security-Policy** for the static UI are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost.
 
 ### Endpoints
 
@@ -61,12 +79,12 @@ All paths below are under **`/api/v1`** unless noted.
 | Method        | Path                                                            | Purpose                                                                                                                                                   |
 | ------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET` / `PUT` | `/config`                                                       | Read or replace full config. **`PUT`** accepts JSON, validates, writes **YAML** to disk; **does not** reload WireGuard/nftables until **`POST /reload`**. |
-| `GET`         | `/pending`                                                      | Compare on-disk config to last successful apply; preview generated nftables when pending.                                                                 |
+| `GET`         | `/pending`                                                      | Compare on-disk config to last successful apply. **`nftables`** in the JSON is the **generated ruleset text** from the current on-disk config whenever NFTables generation succeeds (independent of whether a reload has applied it yet). |
 | `GET` / `PUT` | `/preferences`                                                  | UI helper fields (e.g. tunnel subnet CIDR, WireGuard endpoint for client snippets).                                                                       |
 | `POST`        | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config.                                                                                                    |
 | `POST`        | `/update-geo`                                                   | Download zones and refresh geo sets in nftables.                                                                                                          |
-| `GET`         | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`, `/about` | Diagnostics, config summary, nft chain text, host stats, recent firewall-related journal lines, version info.                                             |
-| `POST`        | `/backup?path=…`, `/restore?path=…`                             | Archive or restore under `/etc/evuproxy`. **`backup`** defaults `path` to `/var/backups/evuproxy-config.tgz` if omitted; **`restore`** requires `path`.   |
+| `GET`         | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`, `/about` | Diagnostics, config summary, **`/metrics`** text for both **inet evuproxy** forward and input chains (either `nft list` failure → 5xx), host stats, recent firewall-related journal lines, version info.                                             |
+| `POST`        | `/backup?path=…`, `/restore?path=…`                             | Archive or restore under `/etc/evuproxy`. Paths must resolve under **`EVUPROXY_BACKUP_DIR`** (default `/var/backups`). **`backup`** defaults `path` to `/var/backups/evuproxy-config.tgz` if omitted; **`restore`** requires `path`.   |
 | `GET`         | `/healthz`                                                      | Plain `ok` (no `/api/v1` prefix, no token).                                                                                                               |
 
 
@@ -80,7 +98,7 @@ The admin UI is intended to run **in Docker only**. From the repo:
 docker compose up --build
 ```
 
-Browse `http://127.0.0.1:9080`. On a remote VPS, use an **SSH tunnel** instead of exposing the UI publicly. The UI container uses **host networking** so nginx can proxy `/api` to **`127.0.0.1:9847`** without binding the API on `0.0.0.0`. Override **`EVUPROXY_UI_LISTEN`** (e.g. `0.0.0.0:9080`) only for temporary LAN tests. **Host network is Linux-oriented**; use the dev mock stack on other setups if needed.
+Browse `http://127.0.0.1:9080`. On a remote VPS, use an **SSH tunnel** instead of exposing the UI publicly. The UI container uses **host networking** so nginx can proxy `/api` to **`127.0.0.1:9847`** without binding the API on `0.0.0.0`. Override **`EVUPROXY_UI_LISTEN`** (e.g. `0.0.0.0:9080`) only for temporary LAN tests — the UI then listens on all interfaces; combine with firewall rules and treat the token like a password. **Host network is Linux-oriented**; use the dev mock stack on other setups if needed. Docker Compose defines an optional **`healthcheck`** against **`GET /healthz`** on the UI nginx port.
 
 ### Local UI with mock API
 
@@ -100,6 +118,7 @@ Open `http://127.0.0.1:9080` and enter API token **`dev`** (default), or set `MO
 - Do not expose the API on `0.0.0.0` without TLS and strong auth.
 - Geo data is approximate; VPN users bypass country filters.
 - If geo sets are **empty** while geo is enabled, traffic may be blocked — check `journalctl` and run `evuproxy update-geo`.
+- **Reload diagnostics:** `nft delete table` before replace may fail when tables were never loaded (first install); that is expected. Enable **debug** logging to see those lines. Geo zone / loader warnings during reload are logged at **WARN**; fix by running **`evuproxy update-geo`** or fixing zone files.
 
 ## Uninstall
 
@@ -127,9 +146,9 @@ The running binary exposes its version via `evuproxy version`, `GET /api/v1/abou
 
 ## Third-party data and attribution
 
-The default GeoIP country zone files are fetched from IPDeny’s public dataset at `https://www.ipdeny.com/ipblocks/data/countries/<cc>.zone` (see [`internal/gen/geo.go`](internal/gen/geo.go)).
-
 **Powered by [IPDENY.COM](https://www.ipdeny.com) IP database in the default configuration.**
+
+The default GeoIP country zone files are fetched from IPDeny’s public dataset at `https://www.ipdeny.com/ipblocks/data/countries/<cc>.zone` (see [`internal/gen/geo.go`](internal/gen/geo.go)).
 
 Further reading from IPDeny:
 
@@ -137,9 +156,11 @@ Further reading from IPDeny:
 - [Link back / examples](https://www.ipdeny.com/linkback.php)
 - [Usage limits](https://www.ipdeny.com/usagelimits.php)
 
-`evuproxy` downloads zones **one at a time** (no parallel connections) and pauses **750ms** between successive requests to follow IPDeny’s suggested spacing. Together with the default **`evuproxy-geo.timer`** (about once per 24h) and typical `geo.countries` lists, usage stays well under their **5000 zone downloads per day per IP** guideline; see [usage limits](https://www.ipdeny.com/usagelimits.php) for the full policy.
+`evuproxy` downloads zones **one at a time** (no parallel connections) and pauses **750ms** between successive requests to follow IPDeny’s suggested spacing. Together with the default **`evuproxy-geo.timer`** (about once per 24h) and typical `geo.countries` lists, usage stays well under their **5000 zone downloads per day per IP** guideline; see [usage limits](https://www.ipdeny.com/usagelimits.php) for the full policy. Downloads originate from your **server’s egress IP**; respect IPDeny’s terms and attribution when using their data.
 
-If you **copy or redistribute** downloaded `.zone` files, keep IPDeny’s **`Copyrights.txt`** with them as described in their [copyright notice](https://www.ipdeny.com/copyright.php).
+If you **copy or redistribute** downloaded `.zone` files, keep IPDeny’s **`Copyrights.txt`** with them as described in their [copyright notice](https://www.ipdeny.com/copyright.php). **Backups** of `/etc/evuproxy` may include downloaded zones and **`Copyrights.txt`** — preserve attribution when moving archives off-host.
+
+For IPDeny’s licensing, privacy, and acceptable use, see their site: [copyright](https://www.ipdeny.com/copyright.php), [usage limits](https://www.ipdeny.com/usagelimits.php), and related pages linked from [Third-party data](#third-party-data-and-attribution) above.
 
 ## License
 

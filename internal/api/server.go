@@ -5,12 +5,13 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
-	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/imevul/evuproxy/internal/apply"
@@ -26,6 +27,11 @@ type Server struct {
 	// CORSOrigins is a comma-separated list of allowed browser Origin values, or "*" for any.
 	// Used when the web UI is served from a different host than the API.
 	CORSOrigins string
+
+	// applyMu serializes mutating operations that touch config on disk, nftables, or WireGuard
+	// (reload, update-geo, backup, restore, PUT /config). A second concurrent request fails fast
+	// with HTTP 503 and does not queue.
+	applyMu sync.Mutex
 }
 
 func tokenMatch(got, want string) bool {
@@ -35,6 +41,15 @@ func tokenMatch(got, want string) bool {
 	g := sha256.Sum256([]byte(got))
 	w := sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
+}
+
+// tryMutatingLock acquires applyMu or responds with 503 and returns false.
+func (s *Server) tryMutatingLock(w http.ResponseWriter) bool {
+	if !s.applyMu.TryLock() {
+		s.jsonErr(w, http.StatusServiceUnavailable, "another configuration or apply operation is in progress")
+		return false
+	}
+	return true
 }
 
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
@@ -80,6 +95,10 @@ func (s *Server) Routes() http.Handler {
 }
 
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
+	if !s.tryMutatingLock(w) {
+		return
+	}
+	defer s.applyMu.Unlock()
 	if err := apply.Reload(s.Config); err != nil {
 		s.logErr("reload", err)
 		s.jsonErr(w, http.StatusInternalServerError, "reload failed")
@@ -89,6 +108,10 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateGeo(w http.ResponseWriter, r *http.Request) {
+	if !s.tryMutatingLock(w) {
+		return
+	}
+	defer s.applyMu.Unlock()
 	if err := apply.UpdateGeo(s.Config); err != nil {
 		s.logErr("update-geo", err)
 		s.jsonErr(w, http.StatusInternalServerError, "geo update failed")
@@ -128,15 +151,26 @@ func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
+	if !s.tryMutatingLock(w) {
+		return
+	}
+	defer s.applyMu.Unlock()
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	defer r.Body.Close()
 	var c config.Config
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-		s.jsonErr(w, http.StatusBadRequest, err.Error())
+		s.logErr("config put decode", err)
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			s.jsonErr(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		s.jsonErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if err := apply.SaveConfigYAML(s.Config, &c); err != nil {
-		s.jsonErr(w, http.StatusBadRequest, err.Error())
+		s.logErr("config put save", err)
+		s.jsonErr(w, http.StatusBadRequest, "could not save configuration")
 		return
 	}
 	s.jsonOK(w, map[string]string{"result": "saved", "hint": "Review and apply from GET /api/v1/pending or POST /api/v1/reload"})
@@ -167,14 +201,16 @@ func (s *Server) handlePreferencesPut(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var p apply.UIPreferences
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		s.jsonErr(w, http.StatusBadRequest, err.Error())
+		s.logErr("preferences decode", err)
+		s.jsonErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	p.PeerTunnelSubnetCIDR = strings.TrimSpace(p.PeerTunnelSubnetCIDR)
 	p.WireGuardServerEndpoint = strings.TrimSpace(p.WireGuardServerEndpoint)
 	if p.PeerTunnelSubnetCIDR != "" {
 		if _, _, err := net.ParseCIDR(p.PeerTunnelSubnetCIDR); err != nil {
-			s.jsonErr(w, http.StatusBadRequest, "invalid peer_tunnel_subnet_cidr: "+err.Error())
+			s.logErr("preferences cidr", err)
+			s.jsonErr(w, http.StatusBadRequest, "invalid peer_tunnel_subnet_cidr")
 			return
 		}
 	}
@@ -235,13 +271,12 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	fwd, err := exec.Command("nft", "list", "chain", "inet", "evuproxy", "forward").CombinedOutput()
+	fwd, inp, err := apply.NFTablesChainsForMetrics()
 	if err != nil {
-		s.logErr("nft forward chain", err, "output", string(fwd))
+		s.logErr("nft metrics chains", err, "forward_snip", apply.TruncateForLog(string(fwd), 2048), "input_snip", apply.TruncateForLog(string(inp), 2048))
 		s.jsonErr(w, http.StatusInternalServerError, "could not list nftables")
 		return
 	}
-	inp, _ := exec.Command("nft", "list", "chain", "inet", "evuproxy", "input").CombinedOutput()
 	s.jsonOK(w, map[string]string{
 		"forward_chain": string(fwd),
 		"input_chain":   string(inp),
@@ -249,9 +284,19 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
+	if !s.tryMutatingLock(w) {
+		return
+	}
+	defer s.applyMu.Unlock()
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		path = "/var/backups/evuproxy-config.tgz"
+	}
+	path, err := apply.ResolveBackupPath(path)
+	if err != nil {
+		s.logErr("backup path", err)
+		s.jsonErr(w, http.StatusBadRequest, "invalid or disallowed backup path")
+		return
 	}
 	if err := apply.Backup(s.Config, path); err != nil {
 		s.logErr("backup", err)
@@ -262,9 +307,19 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
+	if !s.tryMutatingLock(w) {
+		return
+	}
+	defer s.applyMu.Unlock()
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		s.jsonErr(w, http.StatusBadRequest, "path query required")
+		return
+	}
+	path, err := apply.ResolveBackupPath(path)
+	if err != nil {
+		s.logErr("restore path", err)
+		s.jsonErr(w, http.StatusBadRequest, "invalid or disallowed restore path")
 		return
 	}
 	if err := apply.Restore(s.Config, path); err != nil {
@@ -305,10 +360,17 @@ func (s *Server) Run() error {
 	if cors := parseCORSOrigins(s.CORSOrigins); cors != nil {
 		handler = cors.wrap(handler)
 	}
+	// ReadHeaderTimeout caps slow request headers (slowloris). ReadTimeout bounds the full
+	// request body (e.g. PUT /config up to 2 MiB). WriteTimeout must cover the slowest
+	// handler including POST /reload and /update-geo under the apply mutex and GET /logs
+	// (~12s subprocess). IdleTimeout limits idle keep-alive connections.
 	srv := &http.Server{
 		Addr:              s.Listen,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      6 * time.Minute,
+		IdleTimeout:       120 * time.Second,
 	}
 	s.Logger.Info("evuproxy API listening", "addr", s.Listen)
 	return srv.ListenAndServe()

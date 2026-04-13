@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -74,7 +75,11 @@ func EnsureApplyStateFromDisk(cfgPath string) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return RecordAppliedConfigHash(cfgPath)
+	if err := RecordAppliedConfigHash(cfgPath); err != nil {
+		return err
+	}
+	slog.Info("apply state initialized from current on-disk config (first run or missing state file)", "path", p)
+	return nil
 }
 
 // PendingInfo describes whether disk config differs from last successful apply and shows generated nftables.

@@ -1,4 +1,6 @@
+# For reproducible builds, pin with @sha256:… from `docker buildx imagetools inspect nginx:1.27-alpine`.
 FROM nginx:1.27-alpine
+RUN apk add --no-cache curl
 
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY web /usr/share/nginx/html

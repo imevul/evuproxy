@@ -577,6 +577,10 @@
       wrap.innerHTML = "<p class=\"hint\">No peers.</p>";
       return;
     }
+    const wgWarn =
+      wgStats && wgStats.wireguard_dump_failed
+        ? '<p class="hint">WireGuard peer status unavailable (<code>wg show</code> failed — interface down or tools missing).</p>'
+        : "";
     const pubMap = wgPeerPubKeyMap(wgStats);
     const rows = cfg.peers
       .map(
@@ -584,7 +588,7 @@
           `<tr><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td><td>${p.disabled ? "yes" : ""}</td><td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
       )
       .join("");
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Status</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Status</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
       b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
     });
@@ -1384,7 +1388,10 @@
     try {
       const st = await api("/v1/stats");
       setApiStatus(true);
-      if (st.wireguard_peers && st.wireguard_peers.length) {
+      if (st.wireguard_dump_failed) {
+        wgW.innerHTML =
+          "<p class=\"hint\">WireGuard stats unavailable (<code>wg show</code> failed — interface missing, permission denied, or tools not installed).</p>";
+      } else if (st.wireguard_peers && st.wireguard_peers.length) {
         const rows = st.wireguard_peers
           .map(
             (p) =>
@@ -1393,7 +1400,7 @@
           .join("");
         wgW.innerHTML = `<table class="data"><thead><tr><th>Public key</th><th>Endpoint</th><th>Handshake</th><th>RX / TX</th></tr></thead><tbody>${rows}</tbody></table>`;
       } else {
-        wgW.innerHTML = "<p class=\"hint\">No peer stats (interface down or mock).</p>";
+        wgW.innerHTML = "<p class=\"hint\">No peers on this WireGuard interface (dump succeeded but no peer rows).</p>";
       }
       if (st.nftables_counters && st.nftables_counters.length) {
         const rows = st.nftables_counters
@@ -1553,21 +1560,21 @@
 
   function buildPeerInstallOneliner(p) {
     const q = shellSingleQuote;
-    return (
-      "export EVUPROXY_WG_PRIVATE_KEY=" +
-      q(p.priv) +
-      " EVUPROXY_WG_ADDRESS=" +
-      q(p.tip) +
-      " EVUPROXY_WG_SERVER_PUBLIC_KEY=" +
-      q(p.serverPublicKey) +
-      " EVUPROXY_WG_ENDPOINT=" +
-      q(p.ep) +
-      " EVUPROXY_WG_ALLOWED_IPS=" +
-      q(p.subnet) +
-      " && curl -fsSL " +
-      q(peerInstallScriptUrl) +
-      " | sudo -E bash"
-    );
+    const url = peerInstallScriptUrl;
+    return [
+      "set -euo pipefail",
+      "export EVUPROXY_WG_PRIVATE_KEY=" + q(p.priv),
+      "export EVUPROXY_WG_ADDRESS=" + q(p.tip),
+      "export EVUPROXY_WG_SERVER_PUBLIC_KEY=" + q(p.serverPublicKey),
+      "export EVUPROXY_WG_ENDPOINT=" + q(p.ep),
+      "export EVUPROXY_WG_ALLOWED_IPS=" + q(p.subnet),
+      '_evu_script="$(mktemp)"',
+      "trap 'rm -f \"$_evu_script\"' EXIT INT TERM",
+      "curl -fsSL " + q(url) + ' -o "$_evu_script"',
+      'sha256sum "$_evu_script"',
+      "# Compare the hash to scripts/peer-install.sh in SHA256SUMS on the matching GitHub Release, then run:",
+      'sudo -E bash "$_evu_script"',
+ ].join("\n");
   }
 
   function refreshOnboardInstallCmd() {

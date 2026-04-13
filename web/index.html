@@ -206,7 +206,7 @@
                 </div>
                 <h4 class="peer-section-title" style="margin-top: 1rem">Install on Linux (systemd)</h4>
                 <p class="hint">
-                  One-line install on the peer: installs <code>wireguard-tools</code>, writes <code>/etc/wireguard/</code>, and enables <code>wg-quick@…</code>. Server public key and listen port load from the API when you change any field in this dialog. The command contains your <strong>private key</strong> — avoid shared terminals and shell history on untrusted hosts. <code>curl | bash</code> trusts this script’s source; pin a tag or commit in the URL if you prefer.
+                  Installs <code>wireguard-tools</code>, writes <code>/etc/wireguard/</code>, and enables <code>wg-quick@…</code>. Server public key and listen port load from the API when you change any field in this dialog. The command contains your <strong>private key</strong> — avoid shared terminals and shell history on untrusted hosts. The script is downloaded to a temp file, <code>sha256sum</code> is printed so you can verify it against <strong>SHA256SUMS</strong> on the GitHub Release (same tag or commit as the script URL) before <code>sudo bash</code>. Set <code>window.EVUPROXY_PEER_INSTALL_SCRIPT_URL</code> to a release-pinned raw URL for a stable trust anchor.
                 </p>
                 <div class="onboard-toolbar">
                   <button type="button" id="onboard-install-copy" class="btn-quiet">Copy install command</button>

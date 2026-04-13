@@ -9,7 +9,7 @@ import (
 
 // Log prefixes emitted by generated nftables (see internal/gen/nftables.go).
 const (
-	LogPrefixGeoBlock     = "evuproxy-geo-block"
+	LogPrefixGeoBlock    = "evuproxy-geo-block"
 	LogPrefixForwardDrop = "evuproxy-forward-drop"
 )
 

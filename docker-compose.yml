@@ -12,6 +12,12 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     network_mode: host
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9080/healthz | grep -q ok || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     environment:
       EVUPROXY_API_UPSTREAM: 127.0.0.1:9847
       # Override from shell: EVUPROXY_UI_LISTEN=0.0.0.0:9080 docker compose up -d

@@ -71,6 +71,30 @@ func TestRestore_rejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestResolveBackupPath_allowlist(t *testing.T) {
+	dir := t.TempDir()
+	allow := filepath.Join(dir, "backups")
+	if err := os.MkdirAll(allow, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("EVUPROXY_BACKUP_DIR", allow)
+
+	got, err := ResolveBackupPath(filepath.Join(allow, "x.tgz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(got) != filepath.Clean(filepath.Join(allow, "x.tgz")) {
+		t.Fatalf("got %q", got)
+	}
+
+	if _, err := ResolveBackupPath("/etc/passwd"); err == nil {
+		t.Fatal("expected reject outside allow dir")
+	}
+	if _, err := ResolveBackupPath("relative.tgz"); err == nil {
+		t.Fatal("expected reject relative path")
+	}
+}
+
 func TestRestore_rejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config.yaml")

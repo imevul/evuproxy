@@ -13,7 +13,7 @@ const DefaultPeerTunnelSubnetCIDR = "10.100.0.0/24"
 
 // UIPreferences holds admin UI settings stored beside the main config (not part of WireGuard YAML).
 type UIPreferences struct {
-	PeerTunnelSubnetCIDR     string `json:"peer_tunnel_subnet_cidr"`
+	PeerTunnelSubnetCIDR    string `json:"peer_tunnel_subnet_cidr"`
 	WireGuardServerEndpoint string `json:"wireguard_server_endpoint"`
 }
 

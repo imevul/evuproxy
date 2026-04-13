@@ -47,7 +47,7 @@ func TestUIPreferencesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := UIPreferences{
-		PeerTunnelSubnetCIDR:     "10.0.0.0/24",
+		PeerTunnelSubnetCIDR:    "10.0.0.0/24",
 		WireGuardServerEndpoint: "vpn.example:51830",
 	}
 	if err := SaveUIPreferences(cfgPath, &want); err != nil {

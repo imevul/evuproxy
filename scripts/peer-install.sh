@@ -4,16 +4,14 @@ set -euo pipefail
 # EvuProxy — WireGuard client (peer) setup for Linux.
 # Run as root. Installs wireguard-tools, writes /etc/wireguard/<iface>.conf, enables wg-quick.
 #
-# Example (paste from the admin UI after filling the peer form and refreshing server details):
-#   export EVUPROXY_WG_PRIVATE_KEY='…' EVUPROXY_WG_ADDRESS='10.100.0.5/32' \
-#     EVUPROXY_WG_SERVER_PUBLIC_KEY='…' EVUPROXY_WG_ENDPOINT='vpn.example.com:51830' \
-#     EVUPROXY_WG_ALLOWED_IPS='10.100.0.0/24' && \
-#     curl -fsSL 'https://raw.githubusercontent.com/imevul/evuproxy/main/scripts/peer-install.sh' | sudo -E bash
+# Example (the admin UI generates a script that downloads this file, prints sha256sum for
+# comparison with GitHub Release SHA256SUMS, then runs: sudo -E bash "$tmpfile").
+# Avoid copying a raw `curl … | bash` one-liner from old docs unless you verify the script hash first.
 #
 # Pin a release by replacing `main` with a tag or commit in the URL.
 #
 # Security: the command embeds your private key (shell history, shared sessions). Only use on a
-# trusted peer. curl|bash trusts TLS and the script source; review this file or host your own copy.
+# trusted peer. Verify the script (checksum or review) before execution; host your own copy for stricter control.
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Run as root (e.g. sudo -E bash)." >&2

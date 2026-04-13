@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"fmt"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -11,9 +12,12 @@ import (
 
 // Stats bundles observability data for the admin UI.
 type Stats struct {
-	WireGuardInterface string           `json:"wireguard_interface"`
-	WireGuardPeers     []WGPeerDump     `json:"wireguard_peers"`
-	NFTables           []NFTCounterLine `json:"nftables_counters"`
+	WireGuardInterface string `json:"wireguard_interface"`
+	// WireGuardDumpFailed is true when `wg show` could not be read (interface missing, permission, etc.).
+	// When false and WireGuardPeers is empty, the interface has no peer rows (e.g. no peers configured).
+	WireGuardDumpFailed bool             `json:"wireguard_dump_failed,omitempty"`
+	WireGuardPeers      []WGPeerDump     `json:"wireguard_peers"`
+	NFTables            []NFTCounterLine `json:"nftables_counters"`
 }
 
 // WGPeerDump is one line from `wg show IFACE dump` (peer rows only).
@@ -44,10 +48,28 @@ func StatsFromHost(cfgPath string) (*Stats, error) {
 		return nil, err
 	}
 	st := &Stats{WireGuardInterface: c.WireGuard.Interface}
-	st.WireGuardPeers, _ = wgDumpPeers(c.WireGuard.Interface)
+	peers, err := wgDumpPeers(c.WireGuard.Interface)
+	if err != nil {
+		st.WireGuardDumpFailed = true
+	} else {
+		st.WireGuardPeers = peers
+	}
 	st.NFTables = append(st.NFTables, nftCounterLines("inet", "evuproxy")...)
 	st.NFTables = append(st.NFTables, nftCounterLines("ip", "evuproxy")...)
 	return st, nil
+}
+
+// NFTablesChainsForMetrics returns the text of the evuproxy forward and input chains (inet).
+func NFTablesChainsForMetrics() (forward, input []byte, err error) {
+	fwd, err := exec.Command("nft", "list", "chain", "inet", "evuproxy", "forward").CombinedOutput()
+	if err != nil {
+		return fwd, nil, fmt.Errorf("nft forward chain: %w", err)
+	}
+	inp, err := exec.Command("nft", "list", "chain", "inet", "evuproxy", "input").CombinedOutput()
+	if err != nil {
+		return fwd, inp, fmt.Errorf("nft input chain: %w", err)
+	}
+	return fwd, inp, nil
 }
 
 func wgDumpPeers(iface string) ([]WGPeerDump, error) {
@@ -57,7 +79,7 @@ func wgDumpPeers(iface string) ([]WGPeerDump, error) {
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(lines) < 2 {
-		return nil, nil
+		return []WGPeerDump{}, nil
 	}
 	var peers []WGPeerDump
 	for _, line := range lines[1:] {
