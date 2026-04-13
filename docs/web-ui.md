@@ -8,6 +8,8 @@ docker compose up --build
 
 Browse `http://127.0.0.1:9080`. On a remote VPS, use an **SSH tunnel** instead of exposing the UI publicly. The UI container uses **host networking** so nginx can proxy `/api` to **`127.0.0.1:9847`** without binding the API on `0.0.0.0`. Override **`EVUPROXY_UI_LISTEN`** (e.g. `0.0.0.0:9080`) only for temporary LAN tests — the UI then listens on all interfaces; combine with firewall rules and treat the token like a password. **Host network is Linux-oriented**; use the dev mock stack on other setups if needed. Docker Compose defines an optional **`healthcheck`** against **`GET /healthz`** on the UI nginx port.
 
+Production nginx sends **`Cache-Control: no-cache, private, must-revalidate`** for HTML and `/static/*` so a rebuilt UI image is picked up after a normal reload (without relying on hard refresh). Ensure **`evuproxy serve`** on the host is updated when API behavior changes (e.g. new JSON fields); `scripts/update.sh` restarts the API service and rebuilds the UI container when compose is in use.
+
 See also [Security and privacy](security-and-privacy.md) and [Local HTTP API](http-api.md).
 
 ## Local UI with mock API
