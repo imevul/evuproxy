@@ -62,9 +62,10 @@ type Geo struct {
 }
 
 type AllowRule struct {
-	Proto string `yaml:"proto" json:"proto"`
-	DPort string `yaml:"dport" json:"dport"` // single port, range, or brace list e.g. "{80,443}"
-	Note  string `yaml:"note,omitempty" json:"note,omitempty"`
+	Proto    string `yaml:"proto" json:"proto"`
+	DPort    string `yaml:"dport" json:"dport"` // single port, range, or brace list e.g. "{80,443}"
+	Note     string `yaml:"note,omitempty" json:"note,omitempty"`
+	Disabled bool   `yaml:"disabled,omitempty" json:"disabled,omitempty"` // if true, omitted from generated nftables
 }
 
 type Peer struct {
@@ -171,6 +172,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("network.public_interface: %w", err)
 	}
 	for i, a := range c.InputAllows {
+		if a.Disabled {
+			continue
+		}
 		if err := ValidateInputAllowDport(a.DPort); err != nil {
 			return fmt.Errorf("input_allows[%d].dport: %w", i, err)
 		}

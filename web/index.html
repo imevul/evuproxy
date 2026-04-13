@@ -163,7 +163,21 @@
                 <input type="text" id="peer-f-pub" class="mono" spellcheck="false" autocomplete="off" />
               </div>
               <div class="field">
-                <label><input type="checkbox" id="peer-f-disabled" /> Disabled</label>
+                <div class="toggle-switch-row">
+                  <span class="toggle-switch-text" id="peer-f-disabled-desc"
+                    >Disabled (keep in config, omit from WireGuard until enabled)</span
+                  >
+                  <label class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      id="peer-f-disabled"
+                      class="toggle-switch-input"
+                      autocomplete="off"
+                      aria-labelledby="peer-f-disabled-desc"
+                    />
+                    <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                  </label>
+                </div>
               </div>
               <div class="btn-row">
                 <button type="button" class="btn-primary" id="peer-save">Save</button>
@@ -264,7 +278,21 @@
                 <select id="route-f-target"></select>
               </div>
               <div class="field">
-                <label class="check"><input type="checkbox" id="route-f-disabled" /> Disabled (keep in config, omit from nftables until enabled)</label>
+                <div class="toggle-switch-row">
+                  <span class="toggle-switch-text" id="route-f-disabled-desc"
+                    >Disabled (keep in config, omit from nftables until enabled)</span
+                  >
+                  <label class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      id="route-f-disabled"
+                      class="toggle-switch-input"
+                      autocomplete="off"
+                      aria-labelledby="route-f-disabled-desc"
+                    />
+                    <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                  </label>
+                </div>
               </div>
               <div class="btn-row">
                 <button type="button" class="btn-primary" id="route-save">Save route</button>
@@ -278,7 +306,8 @@
       <section id="page-inbound" class="page" hidden>
         <h2 class="page-title">Inbound access</h2>
         <p class="hint">
-          Extra nftables <strong>INPUT</strong> accept rules on the host (SSH, HTTP, etc.). Stored as <code class="inline">input_allows</code> in config.
+          Extra nftables <strong>INPUT</strong> accept rules on the host (SSH, HTTP, etc.). Stored as <code class="inline">input_allows</code> in config. Use the
+          <strong>Disabled</strong> toggle to keep a rule in config but leave it out of generated nftables until you enable it again.
         </p>
         <div class="card">
           <div class="toolbar">
@@ -315,6 +344,23 @@
               <div class="field">
                 <label for="inbound-f-note">Note <span class="meta">(optional)</span></label>
                 <input type="text" id="inbound-f-note" placeholder="e.g. public HTTPS" autocomplete="off" />
+              </div>
+              <div class="field">
+                <div class="toggle-switch-row">
+                  <span class="toggle-switch-text" id="inbound-f-disabled-desc"
+                    >Disabled (keep in config, omit from nftables until enabled)</span
+                  >
+                  <label class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      id="inbound-f-disabled"
+                      class="toggle-switch-input"
+                      autocomplete="off"
+                      aria-labelledby="inbound-f-disabled-desc"
+                    />
+                    <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                  </label>
+                </div>
               </div>
               <div class="btn-row">
                 <button type="button" class="btn-primary" id="inbound-save">Save rule</button>

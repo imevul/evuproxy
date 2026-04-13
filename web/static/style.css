@@ -266,6 +266,11 @@ body.app .toggle-switch .toggle-switch-input[type="checkbox"] {
   opacity: 0;
 }
 
+.data .cell-disabled-toggle {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 .content {
   padding: 1.25rem;
   overflow: auto;

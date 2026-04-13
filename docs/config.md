@@ -92,8 +92,9 @@ Rules appended to the `inet evuproxy` **input** chain so the host remains reacha
 | Field | Type | Description |
 |-------|------|-------------|
 | `proto` | string | `tcp` or `udp`. |
-| `dport` | string | Destination port: single port, range, or nft brace list (e.g. `"22"`, `"{ 80, 443 }"`). When `dport` contains `{` / `}`, it is emitted verbatim into nftables. |
+| `dport` | string | Destination port: single port, range, or nft brace list (e.g. `"22"`, `"{ 80, 443 }"`). When `dport` contains `{` / `}`, it is emitted verbatim into nftables. **Disabled** entries skip validation of `dport`. |
 | `note` | string | Optional; not used by the rules engine (documentation only). |
+| `disabled` | bool | If `true`, the rule is kept in config but omitted from generated nftables (no INPUT accept line) until enabled. |
 
 ---
 

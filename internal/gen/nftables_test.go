@@ -165,6 +165,33 @@ func TestNFTablesSkipsDisabledRoute(t *testing.T) {
 	}
 }
 
+func TestNFTablesSkipsDisabledInputAllow(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		InputAllows: []config.AllowRule{
+			{Proto: "tcp", DPort: "22"},
+			{Proto: "tcp", DPort: "9999", Disabled: true},
+		},
+		Geo: config.Geo{Enabled: false},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "tcp dport 22 accept") {
+		t.Fatalf("enabled input_allow must appear: %s", s)
+	}
+	if strings.Contains(s, "tcp dport 9999 accept") {
+		t.Fatalf("disabled input_allow must not appear in nftables: %s", s)
+	}
+}
+
 func TestNFTablesForwardAllowDockerBridges(t *testing.T) {
 	c := &config.Config{
 		WireGuard: config.WireGuard{

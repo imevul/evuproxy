@@ -585,7 +585,7 @@
     const rows = cfg.peers
       .map(
         (p, i) =>
-          `<tr><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td><td>${p.disabled ? "yes" : ""}</td><td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Disabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
       )
       .join("");
     wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Status</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -594,6 +594,13 @@
     });
     wrap.querySelectorAll("[data-peer-del]").forEach((b) => {
       b.addEventListener("click", () => removePeer(+b.getAttribute("data-peer-del")));
+    });
+    wrap.querySelectorAll("input[data-peer-disabled]").forEach((inp) => {
+      inp.addEventListener("click", (ev) => ev.stopPropagation());
+      inp.addEventListener("change", async () => {
+        const idx = +inp.getAttribute("data-peer-disabled");
+        await patchPeerDisabled(idx, inp.checked);
+      });
     });
   }
 
@@ -609,6 +616,67 @@
     s = String(s || "");
     if (s.length <= n) return s;
     return s.slice(0, Math.floor(n / 2)) + "…" + s.slice(-Math.floor(n / 3));
+  }
+
+  function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {
+    const ch = disabled ? " checked" : "";
+    return (
+      `<td class="cell-disabled-toggle"><label class="toggle-switch" aria-label="${escapeHtml(ariaLabel)}">` +
+      `<input type="checkbox" class="toggle-switch-input" ${dataAttr}="${index}"${ch} />` +
+      `<span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>` +
+      `</label></td>`
+    );
+  }
+
+  async function patchPeerDisabled(index, disabled) {
+    const cfg = JSON.parse(JSON.stringify(lastConfig));
+    if (!cfg.peers || cfg.peers[index] === undefined) return;
+    cfg.peers[index].disabled = disabled;
+    try {
+      await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
+      lastConfig = cfg;
+      setPeersMsg("");
+      setApiStatus(true);
+      refreshPendingBadge();
+      renderPeersTable(cfg, lastPeerWgStats);
+    } catch (e) {
+      setPeersMsg(String(e.message || e), true);
+      renderPeersTable(lastConfig, lastPeerWgStats);
+    }
+  }
+
+  async function patchRouteDisabled(index, disabled) {
+    const cfg = JSON.parse(JSON.stringify(lastConfig));
+    if (!cfg.forwarding || !cfg.forwarding.routes || cfg.forwarding.routes[index] === undefined) return;
+    cfg.forwarding.routes[index].disabled = disabled;
+    try {
+      await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
+      lastConfig = cfg;
+      setRoutesMsg("");
+      setApiStatus(true);
+      refreshPendingBadge();
+      renderRoutesTable(cfg);
+    } catch (e) {
+      setRoutesMsg(String(e.message || e), true);
+      renderRoutesTable(lastConfig);
+    }
+  }
+
+  async function patchInboundDisabled(index, disabled) {
+    const cfg = JSON.parse(JSON.stringify(lastConfig));
+    if (!cfg.input_allows || cfg.input_allows[index] === undefined) return;
+    cfg.input_allows[index].disabled = disabled;
+    try {
+      await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
+      lastConfig = cfg;
+      setInboundMsg("");
+      setApiStatus(true);
+      refreshPendingBadge();
+      renderInboundTable(cfg);
+    } catch (e) {
+      setInboundMsg(String(e.message || e), true);
+      renderInboundTable(lastConfig);
+    }
   }
 
   async function refreshPeersPage() {
@@ -825,7 +893,7 @@
     const rows = routes
       .map(
         (r, i) =>
-          `<tr><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td><td>${r.disabled ? "yes" : ""}</td><td class="row-actions"><button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td>${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Disabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
       )
       .join("");
     wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -834,6 +902,13 @@
     });
     wrap.querySelectorAll("[data-route-del]").forEach((b) => {
       b.addEventListener("click", () => removeRoute(+b.getAttribute("data-route-del")));
+    });
+    wrap.querySelectorAll("input[data-route-disabled]").forEach((inp) => {
+      inp.addEventListener("click", (ev) => ev.stopPropagation());
+      inp.addEventListener("change", async () => {
+        const idx = +inp.getAttribute("data-route-disabled");
+        await patchRouteDisabled(idx, inp.checked);
+      });
     });
   }
 
@@ -959,17 +1034,39 @@
       return;
     }
     const rows = rules
-      .map(
-        (r, i) =>
-          `<tr><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td><td class="row-actions"><button type="button" data-inbound-edit="${i}">Edit</button> <button type="button" data-inbound-del="${i}" class="btn-quiet">Remove</button></td></tr>`
-      )
+      .map((r, i) => {
+        const aria =
+          "Disabled: INPUT " +
+          String(r.proto || "").toLowerCase() +
+          " " +
+          String(r.dport || r.note || "#" + i);
+        return (
+          `<tr><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" data-inbound-edit="${i}">Edit</button> <button type="button" data-inbound-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+        );
+      })
       .join("");
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Port(s)</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Port(s)</th><th>Note</th><th>Disabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-inbound-edit]").forEach((b) => {
       b.addEventListener("click", () => openInboundEditor(+b.getAttribute("data-inbound-edit")));
     });
     wrap.querySelectorAll("[data-inbound-del]").forEach((b) => {
       b.addEventListener("click", () => removeInboundRule(+b.getAttribute("data-inbound-del")));
+    });
+    wrap.querySelectorAll("input[data-inbound-disabled]").forEach((inp) => {
+      inp.addEventListener("click", (ev) => ev.stopPropagation());
+      inp.addEventListener("change", async () => {
+        const idx = +inp.getAttribute("data-inbound-disabled");
+        const wantDisabled = inp.checked;
+        if (!wantDisabled) {
+          const r = (lastConfig.input_allows || [])[idx];
+          if (!r || !String(r.dport || "").trim()) {
+            setInboundMsg("Add a destination port in Edit before enabling this rule.", true);
+            inp.checked = true;
+            return;
+          }
+        }
+        await patchInboundDisabled(idx, wantDisabled);
+      });
     });
   }
 
@@ -982,12 +1079,14 @@
     const note = $("inbound-f-note");
     if (!protoSel || !dport || !note) return;
 
+    const disInp = $("inbound-f-disabled");
     if (index === -1) {
       $("inbound-edit-index").value = "";
       $("inbound-editor-title").textContent = "Add rule";
       protoSel.value = "tcp";
       dport.value = "";
       note.value = "";
+      if (disInp) disInp.checked = false;
     } else {
       const r = cfg.input_allows[index];
       if (!r) return;
@@ -997,6 +1096,7 @@
       protoSel.value = p === "udp" ? "udp" : "tcp";
       dport.value = r.dport || "";
       note.value = r.note || "";
+      if (disInp) disInp.checked = !!r.disabled;
     }
     const modal = $("inbound-modal");
     if (modal) {
@@ -1020,12 +1120,16 @@
       setInboundMsg("Protocol must be tcp or udp.", true);
       return;
     }
-    if (!dport) {
+    const disEl = $("inbound-f-disabled");
+    const disabled = disEl && disEl.checked;
+    if (!disabled && !dport) {
       setInboundMsg("Destination port is required.", true);
       return;
     }
-    const entry = { proto, dport };
+    const entry = { proto };
+    if (dport) entry.dport = dport;
     if (note) entry.note = note;
+    if (disabled) entry.disabled = true;
     const idxRaw = $("inbound-edit-index").value;
     if (idxRaw === "") cfg.input_allows.push(entry);
     else cfg.input_allows[+idxRaw] = entry;

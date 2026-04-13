@@ -105,6 +105,17 @@ func TestValidateDisabledRouteSkipped(t *testing.T) {
 	}
 }
 
+func TestValidateDisabledInputAllowSkipped(t *testing.T) {
+	c := sampleBase()
+	c.InputAllows = []AllowRule{
+		{Proto: "tcp", DPort: "22"},
+		{Proto: "tcp", DPort: "22;", Disabled: true},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func sampleBase() *Config {
 	return &Config{
 		WireGuard: WireGuard{

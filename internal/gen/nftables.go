@@ -66,6 +66,9 @@ func nftablesRoutes(c *config.Config) (string, error) {
 `)
 
 	for _, a := range c.InputAllows {
+		if a.Disabled {
+			continue
+		}
 		line, err := allowRuleLine(a)
 		if err != nil {
 			return "", err
