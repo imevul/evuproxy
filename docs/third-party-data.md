@@ -18,4 +18,4 @@ For IPDeny’s licensing, privacy, and acceptable use, see their site: [copyrigh
 
 ## Optional: MaxMind GeoLite2 for log flags
 
-If you set **`EVUPROXY_GEOLITE_MMDB`** to the path of a [MaxMind GeoLite2 Country](https://dev.maxmind.com/geoip/docs/databases/city-and-country) **`.mmdb`** file (no runtime HTTP API), the admin **Logs** table shows a flag emoji next to SRC/DST derived from that database. Follow MaxMind’s license and attribution for GeoLite2.
+If you set **`EVUPROXY_GEOLITE_MMDB`** to the path of a [MaxMind GeoLite2 Country](https://dev.maxmind.com/geoip/docs/databases/city-and-country) **`.mmdb`** file (no runtime HTTP API), the admin **Logs** table shows a flag emoji next to SRC/DST derived from that database. If the file is missing or invalid, **`evuproxy serve`** prints a clear message to **stderr** (visible in **`journalctl -u evuproxy-api`**) and still starts the API without **`line_geo`**. Follow MaxMind’s license and attribution for GeoLite2.

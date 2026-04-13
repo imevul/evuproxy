@@ -5,6 +5,7 @@
 ## Binding, CORS, and authentication
 
 - **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment variable **`EVUPROXY_API_TOKEN`** or **`evuproxy serve --token-file`** (default `/etc/evuproxy/api.token`).
+- **GeoLite2 (log flags):** Optional **`EVUPROXY_GEOLITE_MMDB`** path to a Country **`.mmdb`** file. If the file cannot be opened, **`evuproxy serve`** writes an explanation to **stderr** (see **`journalctl -u evuproxy-api`**) and starts without **`line_geo`** on **`GET /api/v1/logs`**. Details: [Third-party data](third-party-data.md).
 - **Cross-origin UI:** If the admin UI is opened from another origin (different scheme/host/port than the API), the browser needs CORS. Enable with **`evuproxy serve --cors-origins`**: a comma-separated list of exact `Origin` values (for example `https://myui.example.com,http://10.0.0.2:9080`), or `*` to allow any origin. The API remains protected by the bearer token; prefer an explicit list over `*` when the API is reachable from untrusted networks. With `*`, any website the operator opens could send credentialed requests if the token is stored in the UI — keep the API on localhost or use an explicit origin list when the browser can load untrusted pages.
 - **Auth:** `Authorization: Bearer …` or `X-API-Token` on `/api/v1/*` routes. **`GET /healthz`** is unauthenticated (for probes). **Reverse proxies** should not log `Authorization` or `X-API-Token` values (redact or omit these headers in access logs).
 

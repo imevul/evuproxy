@@ -125,10 +125,15 @@ func cmdServe() *cobra.Command {
 			if geopath != "" {
 				r, err := geoip2.Open(geopath)
 				if err != nil {
-					return fmt.Errorf("open EVUPROXY_GEOLITE_MMDB %q: %w", geopath, err)
+					// systemd often surfaces only the unit state in status output; stderr is in journal.
+					fmt.Fprintf(os.Stderr,
+						"evuproxy serve: cannot open GeoIP database (EVUPROXY_GEOLITE_MMDB=%q): %v\n"+
+							"Starting without log country flags; GET /api/v1/logs will omit line_geo.\n",
+						geopath, err)
+				} else {
+					defer r.Close()
+					s.GeoIP = r
 				}
-				defer r.Close()
-				s.GeoIP = r
 			}
 			return s.Run()
 		},
