@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/imevul/evuproxy/compare/v0.7.0...v0.8.0) (2026-04-13)
+
+
+### Features
+
+* **geo:** optional apply geoblocking to input_allows ([c81880a](https://github.com/imevul/evuproxy/commit/c81880afc00ad675bb9d4af7a65aa243d2b52df6))
+
+
+### Bug Fixes
+
+* **ui:** geoblocking unsaved indicator; geo config roundtrip tests ([fa8932e](https://github.com/imevul/evuproxy/commit/fa8932ea3ff0cb426bef42d1b8d6fba5549d8f70))
+
 ## [0.7.0](https://github.com/imevul/evuproxy/compare/v0.6.0...v0.7.0) (2026-04-13)
 
 
