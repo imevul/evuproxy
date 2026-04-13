@@ -20,3 +20,8 @@ env/
 .eggs/
 dist/
 build/
+
+# CodeQL
+.codeql-evuproxy-db/
+.codeql-security-extended.csv
+.codeql-code-scanning.sarif
