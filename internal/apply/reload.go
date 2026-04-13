@@ -77,6 +77,9 @@ func Reload(cfgPath string) error {
 	if err := RecordAppliedConfigHash(cfgPath); err != nil {
 		return fmt.Errorf("record apply state: %w", err)
 	}
+	if err := RecordAppliedConfigSnapshot(cfgPath); err != nil {
+		return fmt.Errorf("record config snapshot: %w", err)
+	}
 	return nil
 }
 

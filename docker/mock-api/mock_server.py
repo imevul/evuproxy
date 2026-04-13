@@ -72,8 +72,9 @@ MOCK_CONFIG = {
 
 MOCK_APPLIED_SHA: str | None = None
 
-# Snapshot before last PUT /config (for POST /config/undo swap).
-MOCK_CONFIG_BACKUP: dict | None = None
+# Last distinct applied config (updated on POST /reload); .bak.1 … .bak.5 in MOCK_BAK_SLOTS[0..4].
+MOCK_BAK: dict | None = None
+MOCK_BAK_SLOTS: list[dict | None] = [None, None, None, None, None]
 
 MOCK_PREFS: dict = {
     "peer_tunnel_subnet_cidr": "",
@@ -92,9 +93,32 @@ def _normalize_prefs(d: dict) -> dict:
     return out
 
 
-def _disk_config_sha() -> str:
-    blob = json.dumps(MOCK_CONFIG, sort_keys=True, separators=(",", ":")).encode()
+def _config_sha(cfg: dict) -> str:
+    blob = json.dumps(cfg, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(blob).hexdigest()
+
+
+def _disk_config_sha() -> str:
+    return _config_sha(MOCK_CONFIG)
+
+
+def _mock_record_applied_snapshot() -> None:
+    """Match RecordAppliedConfigSnapshot: rotate .bak chain when applied config differs from .bak."""
+    global MOCK_BAK, MOCK_BAK_SLOTS
+    cur = copy.deepcopy(MOCK_CONFIG)
+    if MOCK_BAK is None:
+        MOCK_BAK = cur
+        return
+    if _config_sha(cur) == _config_sha(MOCK_BAK):
+        return
+    for i in range(4, 0, -1):
+        MOCK_BAK_SLOTS[i] = (
+            copy.deepcopy(MOCK_BAK_SLOTS[i - 1])
+            if MOCK_BAK_SLOTS[i - 1] is not None
+            else None
+        )
+    MOCK_BAK_SLOTS[0] = copy.deepcopy(MOCK_BAK)
+    MOCK_BAK = cur
 
 
 def _baseline_config_sha() -> str:
@@ -383,6 +407,15 @@ class Handler(BaseHTTPRequestHandler):
             _ensure_mock_apply_bootstrap()
             disk = _disk_config_sha()
             pending = disk != MOCK_APPLIED_SHA
+            discard_available = bool(
+                MOCK_BAK is not None and _disk_config_sha() != _config_sha(MOCK_BAK)
+            )
+            restore_previous_applied_available = False
+            if MOCK_BAK is not None:
+                for slot in MOCK_BAK_SLOTS:
+                    if slot is not None and _config_sha(slot) != _config_sha(MOCK_BAK):
+                        restore_previous_applied_available = True
+                        break
             return self._send_json(
                 200,
                 {
@@ -391,7 +424,8 @@ class Handler(BaseHTTPRequestHandler):
                     "applied_config_sha256": MOCK_APPLIED_SHA,
                     "nftables": _nft_from_config(MOCK_CONFIG),
                     "nftables_baseline": _nft_from_config(MOCK_CONFIG_BASELINE),
-                    "config_backup_available": MOCK_CONFIG_BACKUP is not None,
+                    "discard_available": discard_available,
+                    "restore_previous_applied_available": restore_previous_applied_available,
                 },
             )
         if path == "/api/v1/preferences":
@@ -440,8 +474,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json_body()
         if not isinstance(body, dict):
             return self._send_json(400, {"error": "invalid json body"})
-        global MOCK_CONFIG, MOCK_CONFIG_BACKUP
-        MOCK_CONFIG_BACKUP = copy.deepcopy(MOCK_CONFIG)
+        global MOCK_CONFIG
         MOCK_CONFIG = copy.deepcopy(body)
         return self._send_json(
             200,
@@ -458,7 +491,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/v1/update-geo",
             "/api/v1/backup",
             "/api/v1/restore",
-            "/api/v1/config/undo",
+            "/api/v1/config/discard",
+            "/api/v1/config/restore-previous-applied",
         ):
             return self._send_json(404, {"error": "not found"})
         length = int(self.headers.get("Content-Length", 0) or 0)
@@ -466,26 +500,46 @@ class Handler(BaseHTTPRequestHandler):
             self.rfile.read(length)
         if not _auth_ok(self):
             return self._send_json(401, {"error": "unauthorized"})
-        if path == "/api/v1/config/undo":
-            global MOCK_CONFIG, MOCK_CONFIG_BACKUP
-            if MOCK_CONFIG_BACKUP is None:
+        global MOCK_CONFIG, MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE
+        if path == "/api/v1/config/discard":
+            if MOCK_BAK is None:
                 return self._send_json(
-                    400, {"error": "could not undo configuration"}
+                    400, {"error": "could not discard pending changes"}
                 )
-            cur, bak = MOCK_CONFIG, MOCK_CONFIG_BACKUP
-            MOCK_CONFIG = copy.deepcopy(bak)
-            MOCK_CONFIG_BACKUP = copy.deepcopy(cur)
+            if _disk_config_sha() == _config_sha(MOCK_BAK):
+                return self._send_json(
+                    400, {"error": "could not discard pending changes"}
+                )
+            MOCK_CONFIG = copy.deepcopy(MOCK_BAK)
             return self._send_json(
                 200,
                 {
-                    "result": "undone",
+                    "result": "discarded",
                     "hint": "Review GET /api/v1/pending or POST /api/v1/reload",
                 },
             )
+        if path == "/api/v1/config/restore-previous-applied":
+            if MOCK_BAK is None:
+                return self._send_json(
+                    400, {"error": "could not restore previous applied configuration"}
+                )
+            for slot in MOCK_BAK_SLOTS:
+                if slot is not None and _config_sha(slot) != _config_sha(MOCK_BAK):
+                    MOCK_CONFIG = copy.deepcopy(slot)
+                    return self._send_json(
+                        200,
+                        {
+                            "result": "restored",
+                            "hint": "Review GET /api/v1/pending or POST /api/v1/reload",
+                        },
+                    )
+            return self._send_json(
+                400, {"error": "could not restore previous applied configuration"}
+            )
         if path == "/api/v1/reload":
-            global MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE
             MOCK_APPLIED_SHA = _disk_config_sha()
             MOCK_CONFIG_BASELINE = copy.deepcopy(MOCK_CONFIG)
+            _mock_record_applied_snapshot()
             return self._send_json(200, {"result": "reloaded"})
         if path == "/api/v1/update-geo":
             return self._send_json(200, {"result": "geo_updated"})

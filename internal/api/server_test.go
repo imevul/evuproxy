@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -186,9 +187,14 @@ func TestCORSPreflight_allowsConfiguredOrigin(t *testing.T) {
 
 func writeMinimalConfig(t *testing.T, path string) {
 	t.Helper()
-	b := []byte(`wireguard:
+	writeMinimalConfigPort(t, path, 51830)
+}
+
+func writeMinimalConfigPort(t *testing.T, path string, listenPort int) {
+	t.Helper()
+	b := fmt.Appendf(nil, `wireguard:
   interface: evu0
-  listen_port: 51830
+  listen_port: %d
   private_key_file: /etc/k
   address: 10.100.0.1/24
 network:
@@ -208,16 +214,18 @@ peers:
   - name: p1
     public_key: aN1ZvFJyNFsFtXZjMKtQRGQB+YWY6NxcCX79QbRhP0k=
     tunnel_ip: 10.100.0.2/32
-`)
+`, listenPort)
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestConfigUndo_backupFlagAndRoundTrip(t *testing.T) {
+func TestConfigDiscard_pendingFlagAndRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "c.yaml")
 	writeMinimalConfig(t, cfgPath)
+	bakPath := cfgPath + ".bak"
+	writeMinimalConfigPort(t, bakPath, 51829)
 
 	s := &Server{
 		Token:  "t",
@@ -226,40 +234,6 @@ func TestConfigUndo_backupFlagAndRoundTrip(t *testing.T) {
 	}
 	ts := httptest.NewServer(s.Routes())
 	t.Cleanup(ts.Close)
-
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/config", nil)
-	req.Header.Set("Authorization", "Bearer t")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("get config %d", resp.StatusCode)
-	}
-	var c config.Config
-	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
-		t.Fatal(err)
-	}
-	if c.WireGuard.ListenPort != 51830 {
-		t.Fatalf("unexpected initial port %d", c.WireGuard.ListenPort)
-	}
-	c.WireGuard.ListenPort = 51831
-	putBody, err := json.Marshal(&c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reqPut, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v1/config", bytes.NewReader(putBody))
-	reqPut.Header.Set("Authorization", "Bearer t")
-	reqPut.Header.Set("Content-Type", "application/json")
-	respPut, err := http.DefaultClient.Do(reqPut)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer respPut.Body.Close()
-	if respPut.StatusCode != http.StatusOK {
-		t.Fatalf("put config %d", respPut.StatusCode)
-	}
 
 	reqPen, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/pending", nil)
 	reqPen.Header.Set("Authorization", "Bearer t")
@@ -272,24 +246,66 @@ func TestConfigUndo_backupFlagAndRoundTrip(t *testing.T) {
 		t.Fatalf("pending %d", respPen.StatusCode)
 	}
 	var pen struct {
-		ConfigBackupAvailable bool `json:"config_backup_available"`
+		DiscardAvailable bool `json:"discard_available"`
 	}
 	if err := json.NewDecoder(respPen.Body).Decode(&pen); err != nil {
 		t.Fatal(err)
 	}
-	if !pen.ConfigBackupAvailable {
-		t.Fatal("expected config_backup_available after put")
+	if !pen.DiscardAvailable {
+		t.Fatal("expected discard_available when yaml differs from .bak")
 	}
 
-	reqUndo, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/config/undo", nil)
-	reqUndo.Header.Set("Authorization", "Bearer t")
-	respUndo, err := http.DefaultClient.Do(reqUndo)
+	reqDis, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/config/discard", nil)
+	reqDis.Header.Set("Authorization", "Bearer t")
+	respDis, err := http.DefaultClient.Do(reqDis)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer respUndo.Body.Close()
-	if respUndo.StatusCode != http.StatusOK {
-		t.Fatalf("undo %d", respUndo.StatusCode)
+	defer respDis.Body.Close()
+	if respDis.StatusCode != http.StatusOK {
+		t.Fatalf("discard %d", respDis.StatusCode)
+	}
+
+	reqAfter, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/config", nil)
+	reqAfter.Header.Set("Authorization", "Bearer t")
+	respAfter, err := http.DefaultClient.Do(reqAfter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respAfter.Body.Close()
+	var c2 config.Config
+	if err := json.NewDecoder(respAfter.Body).Decode(&c2); err != nil {
+		t.Fatal(err)
+	}
+	if c2.WireGuard.ListenPort != 51829 {
+		t.Fatalf("after discard want port from .bak 51829, got %d", c2.WireGuard.ListenPort)
+	}
+}
+
+func TestConfigRestorePreviousApplied_roundTrip(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	writeMinimalConfigPort(t, cfgPath+".bak", 51831)
+	writeMinimalConfig(t, cfgPath+".bak.1")
+	writeMinimalConfigPort(t, cfgPath, 51899)
+
+	s := &Server{
+		Token:  "t",
+		Config: cfgPath,
+		Listen: "127.0.0.1:0",
+	}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	reqRes, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/config/restore-previous-applied", nil)
+	reqRes.Header.Set("Authorization", "Bearer t")
+	respRes, err := http.DefaultClient.Do(reqRes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer respRes.Body.Close()
+	if respRes.StatusCode != http.StatusOK {
+		t.Fatalf("restore %d", respRes.StatusCode)
 	}
 
 	reqAfter, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/config", nil)
@@ -304,14 +320,21 @@ func TestConfigUndo_backupFlagAndRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c2.WireGuard.ListenPort != 51830 {
-		t.Fatalf("after undo want port 51830, got %d", c2.WireGuard.ListenPort)
+		t.Fatalf("after restore want port 51830 from .bak.1, got %d", c2.WireGuard.ListenPort)
 	}
 }
 
-func TestConfigUndo_failsWithoutBackup(t *testing.T) {
+func TestConfigRestorePreviousApplied_failsWithoutHistory(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "c.yaml")
 	writeMinimalConfig(t, cfgPath)
+	cur, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath+".bak", cur, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	s := &Server{
 		Token:  "t",
@@ -321,15 +344,15 @@ func TestConfigUndo_failsWithoutBackup(t *testing.T) {
 	ts := httptest.NewServer(s.Routes())
 	t.Cleanup(ts.Close)
 
-	reqUndo, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/config/undo", nil)
-	reqUndo.Header.Set("Authorization", "Bearer t")
-	respUndo, err := http.DefaultClient.Do(reqUndo)
+	reqRes, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/config/restore-previous-applied", nil)
+	reqRes.Header.Set("Authorization", "Bearer t")
+	respRes, err := http.DefaultClient.Do(reqRes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer respUndo.Body.Close()
-	if respUndo.StatusCode != http.StatusBadRequest {
-		t.Fatalf("undo %d want 400", respUndo.StatusCode)
+	defer respRes.Body.Close()
+	if respRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("restore %d want 400", respRes.StatusCode)
 	}
 }
 

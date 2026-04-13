@@ -29,8 +29,8 @@ type Server struct {
 	CORSOrigins string
 
 	// applyMu serializes mutating operations that touch config on disk, nftables, or WireGuard
-	// (reload, update-geo, backup, restore, PUT /config, POST /config/undo). A second concurrent request fails fast
-	// with HTTP 503 and does not queue.
+	// (reload, update-geo, backup, restore, PUT /config, POST /config/discard, POST /config/restore-previous-applied).
+	// A second concurrent request fails fast with HTTP 503 and does not queue.
 	applyMu sync.Mutex
 }
 
@@ -83,7 +83,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.handleOverview))
 	mux.HandleFunc("GET /api/v1/config", s.auth(s.handleConfigGet))
 	mux.HandleFunc("PUT /api/v1/config", s.auth(s.handleConfigPut))
-	mux.HandleFunc("POST /api/v1/config/undo", s.auth(s.handleConfigUndo))
+	mux.HandleFunc("POST /api/v1/config/discard", s.auth(s.handleConfigDiscard))
+	mux.HandleFunc("POST /api/v1/config/restore-previous-applied", s.auth(s.handleConfigRestorePreviousApplied))
 	mux.HandleFunc("GET /api/v1/pending", s.auth(s.handlePending))
 	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
 	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
@@ -177,17 +178,30 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	s.jsonOK(w, map[string]string{"result": "saved", "hint": "Review and apply from GET /api/v1/pending or POST /api/v1/reload"})
 }
 
-func (s *Server) handleConfigUndo(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleConfigDiscard(w http.ResponseWriter, r *http.Request) {
 	if !s.tryMutatingLock(w) {
 		return
 	}
 	defer s.applyMu.Unlock()
-	if err := apply.UndoConfigYAML(s.Config); err != nil {
-		s.logErr("config undo", err)
-		s.jsonErr(w, http.StatusBadRequest, "could not undo configuration")
+	if err := apply.DiscardPendingConfigYAML(s.Config); err != nil {
+		s.logErr("config discard", err)
+		s.jsonErr(w, http.StatusBadRequest, "could not discard pending changes")
 		return
 	}
-	s.jsonOK(w, map[string]string{"result": "undone", "hint": "Review GET /api/v1/pending or POST /api/v1/reload"})
+	s.jsonOK(w, map[string]string{"result": "discarded", "hint": "Review GET /api/v1/pending or POST /api/v1/reload"})
+}
+
+func (s *Server) handleConfigRestorePreviousApplied(w http.ResponseWriter, r *http.Request) {
+	if !s.tryMutatingLock(w) {
+		return
+	}
+	defer s.applyMu.Unlock()
+	if err := apply.RestorePreviousAppliedConfigYAML(s.Config); err != nil {
+		s.logErr("config restore previous", err)
+		s.jsonErr(w, http.StatusBadRequest, "could not restore previous applied configuration")
+		return
+	}
+	s.jsonOK(w, map[string]string{"result": "restored", "hint": "Review GET /api/v1/pending or POST /api/v1/reload"})
 }
 
 func (s *Server) handlePending(w http.ResponseWriter, r *http.Request) {

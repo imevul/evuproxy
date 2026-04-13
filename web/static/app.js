@@ -1854,16 +1854,20 @@
       }
       lastPendingBaseline = p.nftables_baseline != null ? String(p.nftables_baseline) : "";
       lastPendingNew = p.nftables != null ? String(p.nftables) : "";
-      const undoBtn = $("pending-undo");
-      if (undoBtn) undoBtn.disabled = !p.config_backup_available;
+      const discardBtn = $("pending-discard");
+      if (discardBtn) discardBtn.disabled = !p.discard_available;
+      const restoreBtn = $("pending-restore-previous");
+      if (restoreBtn) restoreBtn.disabled = !p.restore_previous_applied_available;
       renderPendingDiffPanel();
     } catch (e) {
       status.textContent = "";
       status.classList.remove("pending-yes", "pending-no");
       lastPendingBaseline = "";
       lastPendingNew = "";
-      const undoBtnErr = $("pending-undo");
-      if (undoBtnErr) undoBtnErr.disabled = true;
+      const discardErr = $("pending-discard");
+      if (discardErr) discardErr.disabled = true;
+      const restoreErr = $("pending-restore-previous");
+      if (restoreErr) restoreErr.disabled = true;
       panel.innerHTML = "";
       setApiStatus(false, String(e.message || e));
       setPendingMsg(String(e.message || e), true);
@@ -2531,19 +2535,43 @@
     }
   });
 
-  const pendingUndo = $("pending-undo");
-  if (pendingUndo) {
-    pendingUndo.addEventListener("click", () => {
+  const pendingDiscard = $("pending-discard");
+  if (pendingDiscard) {
+    pendingDiscard.addEventListener("click", () => {
       openConfirmModal({
-        title: "Undo last config save?",
+        title: "Discard pending?",
         message:
-          "This replaces the saved config.yaml with the previous version from config.yaml.bak, and stores the current file as the new backup (run again to toggle back). The host is not updated until you apply or reload.",
-        confirmLabel: "Undo",
+          "Replace the saved config.yaml with config.yaml.bak (the last applied snapshot). Unsaved edits that differ from that snapshot are lost. The host is not updated until you apply or reload.",
+        confirmLabel: "Discard pending",
         onConfirm: async () => {
           setPendingMsg("…");
           try {
-            await api("/v1/config/undo", { method: "POST" });
-            setPendingMsg("Config reverted to backup. Apply or reload when ready.");
+            await api("/v1/config/discard", { method: "POST" });
+            setPendingMsg("Pending changes discarded. Apply or reload when ready.");
+            await refreshPendingPage();
+            await refreshPendingBadge();
+            setApiStatus(true);
+          } catch (e) {
+            setPendingMsg(String(e.message || e), true);
+          }
+        },
+      });
+    });
+  }
+
+  const pendingRestore = $("pending-restore-previous");
+  if (pendingRestore) {
+    pendingRestore.addEventListener("click", () => {
+      openConfirmModal({
+        title: "Restore previous applied?",
+        message:
+          "Replace config.yaml with the first older snapshot in config.yaml.bak.1 … .bak.5 that differs from config.yaml.bak. Any current config.yaml content is overwritten (including edits not yet applied to the host). The host is not updated until you apply or reload.",
+        confirmLabel: "Restore",
+        onConfirm: async () => {
+          setPendingMsg("…");
+          try {
+            await api("/v1/config/restore-previous-applied", { method: "POST" });
+            setPendingMsg("Restored previous applied config. Apply or reload when ready.");
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);

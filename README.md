@@ -45,7 +45,8 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 | `evuproxy serve`                  | Local HTTP API on `127.0.0.1:9847` (token in `/etc/evuproxy/api.token`)                                  |
 | `evuproxy backup --dest PATH`     | Tarball of `/etc/evuproxy`                                                                               |
 | `evuproxy restore --archive PATH` | Extract tarball into `/etc/evuproxy`, then run `reload`                                                  |
-| `evuproxy undo-last-change`       | Swap `config.yaml` with `config.yaml.bak` (one-level undo/redo); run `reload` to apply to the host       |
+| `evuproxy discard-pending`        | Replace `config.yaml` with `config.yaml.bak` when they differ; run `reload` to apply to the host         |
+| `evuproxy restore-previous-applied` | Replace `config.yaml` from `config.yaml.bak.N` history (see docs); run `reload` to apply              |
 
 
 ## Local HTTP API and web UI

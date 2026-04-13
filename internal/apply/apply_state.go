@@ -90,8 +90,10 @@ type PendingInfo struct {
 	NFTables            string `json:"nftables"`
 	// NFTablesBaseline is the contents of generated/nftables.nft when readable (last written by reload).
 	NFTablesBaseline string `json:"nftables_baseline"`
-	// ConfigBackupAvailable is true when ConfigYAMLBackupPath exists (from a prior save that replaced the file).
-	ConfigBackupAvailable bool `json:"config_backup_available"`
+	// DiscardAvailable is true when .bak exists and config.yaml differs from it (pending edits vs last applied snapshot).
+	DiscardAvailable bool `json:"discard_available"`
+	// RestorePreviousAppliedAvailable is true when some .bak.N differs from .bak.
+	RestorePreviousAppliedAvailable bool `json:"restore_previous_applied_available"`
 }
 
 // PendingSummary loads the on-disk config, compares its hash to last apply, and renders nftables preview.
@@ -124,8 +126,16 @@ func PendingSummary(cfgPath string) (PendingInfo, error) {
 	} else if !os.IsNotExist(err) {
 		slog.Debug("pending: could not read nftables baseline file", "path", nftPath, "err", err)
 	}
-	if _, err := os.Stat(ConfigYAMLBackupPath(cfgPath)); err == nil {
-		out.ConfigBackupAvailable = true
+	if bakBytes, err := os.ReadFile(ConfigYAMLBackupPath(cfgPath)); err == nil {
+		bh := sha256.Sum256(bakBytes)
+		bakHex := hex.EncodeToString(bh[:])
+		out.DiscardAvailable = cur != bakHex
+		ra, err := RestorePreviousAppliedAvailable(cfgPath)
+		if err != nil {
+			slog.Debug("pending: restore-previous check", "err", err)
+		} else {
+			out.RestorePreviousAppliedAvailable = ra
+		}
 	}
 	return out, nil
 }

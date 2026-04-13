@@ -33,7 +33,8 @@ func main() {
 		cmdServe(),
 		cmdBackup(),
 		cmdRestore(),
-		cmdUndoLastChange(),
+		cmdDiscardPending(),
+		cmdRestorePreviousApplied(),
 	)
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -148,12 +149,22 @@ func cmdRestore() *cobra.Command {
 	return c
 }
 
-func cmdUndoLastChange() *cobra.Command {
+func cmdDiscardPending() *cobra.Command {
 	return &cobra.Command{
-		Use:   "undo-last-change",
-		Short: "Swap config.yaml with config.yaml.bak (one-level undo/redo toggle)",
+		Use:   "discard-pending",
+		Short: "Replace config.yaml with config.yaml.bak when they differ",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return apply.UndoConfigYAML(cfgPath)
+			return apply.DiscardPendingConfigYAML(cfgPath)
+		},
+	}
+}
+
+func cmdRestorePreviousApplied() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restore-previous-applied",
+		Short: "Replace config.yaml with the first config.yaml.bak.N that differs from .bak (see docs)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apply.RestorePreviousAppliedConfigYAML(cfgPath)
 		},
 	}
 }

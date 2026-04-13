@@ -115,17 +115,25 @@ Non-disabled peers must have a non-empty `name`, `public_key`, and `tunnel_ip`.
 
 After editing `config.yaml`, run **`evuproxy reload --config /etc/evuproxy/config.yaml`** (or use the HTTP API) so WireGuard and nftables are regenerated. The admin UI can edit and save via **`PUT /api/v1/config`** (YAML is rewritten from the structured config; comments and unknown keys are not preserved).
 
-### Undo last save (`config.yaml.bak`)
+### Applied snapshots (`config.yaml.bak` and `config.yaml.bak.1` … `.bak.5`)
 
-Each successful **`PUT /api/v1/config`** that **replaces an existing file** writes the previous contents to **`config.yaml.bak`** beside the config (same directory).
+After each **successful** **`evuproxy reload`** (or **`POST /api/v1/reload`**), EvuProxy updates history from the current **`config.yaml`**:
 
-- **`evuproxy undo-last-change --config /etc/evuproxy/config.yaml`** swaps **`config.yaml`** with **`config.yaml.bak`**: the backup becomes the live file, and the file you replaced is stored as the new **`.bak`**. Run the command again to swap back (single-step undo/redo). The backup must be valid YAML for the EvuProxy schema or the command fails.
-- The host still runs the last applied rules until you **`evuproxy reload`**, use **Pending changes → Apply** in the UI, or **`POST /api/v1/reload`**.
+- If **`config.yaml.bak`** is missing, it is created with the current file bytes (first successful apply).
+- If the current **`config.yaml`** bytes **equal** **`config.yaml.bak`**, nothing else changes (avoids history noise on identical re-applies).
+- If they **differ**, the chain rotates: **`config.yaml.bak`** → **`config.yaml.bak.1`** → … → **`config.yaml.bak.5`** (oldest dropped), then **`config.yaml.bak`** is replaced with the config that was just applied.
+
+**`PUT /api/v1/config`** (and the admin UI) only change **`config.yaml`**; they do **not** update **`.bak*`** files. Saved edits can **drift** from **`.bak`** until you apply.
+
+- **`evuproxy discard-pending --config …`**: replace **`config.yaml`** with **`config.yaml.bak`** when they differ (revert saved YAML to the last distinct applied snapshot). **`POST /api/v1/config/discard`** does the same.
+- **`evuproxy restore-previous-applied --config …`**: replace **`config.yaml`** with the first **`config.yaml.bak.N`** (`N` = 1…5) whose contents **differ** from **`config.yaml.bak`**. Current **`config.yaml`** content is overwritten (including edits not yet reflected in **`.bak`**). No **`.bak*`** files are modified. **`POST /api/v1/config/restore-previous-applied`** does the same.
+
+The host still runs the last applied rules until you reload again, use **Pending changes → Apply**, or **`POST /api/v1/reload`**.
 
 ---
 
 ## Related files
 
 - **`ui-preferences.json`** next to the config file stores admin UI-only settings (not part of this schema).
-- **`config.yaml.bak`** holds the previous config after a structured save (API/UI); optional one-level rollback via **`evuproxy undo-last-change`** or **`POST /api/v1/config/undo`**.
+- **`config.yaml.bak`** and **`config.yaml.bak.1`** … **`.bak.5`**: last applied snapshot and rotated history (maintained on successful reload only).
 - Generated artifacts (e.g. WireGuard config under `config`’s directory layout) are produced by `evuproxy reload`; do not hand-edit generated files.
