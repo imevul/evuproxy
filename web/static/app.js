@@ -1433,8 +1433,9 @@
   }
 
   const PENDING_DIFF_MODE_KEY = "evuproxy_pending_diff_mode";
-  const LINE_DIFF_MAX_CELLS = 4_000_000;
-  const LINE_DIFF_MAX_SIDE = 12_000;
+  /** Production nftables can be much larger than dev mocks; cap limits memory (~lcsLen + dirs). */
+  const LINE_DIFF_MAX_CELLS = 12_000_000;
+  const LINE_DIFF_MAX_SIDE = 6000;
   const CHAR_DIFF_MAX_CELLS = 500_000;
   const CHAR_DIFF_MAX_LEN = 4096;
 
@@ -1483,43 +1484,47 @@
     if (m > LINE_DIFF_MAX_SIDE || n > LINE_DIFF_MAX_SIDE || m * n > LINE_DIFF_MAX_CELLS) {
       return null;
     }
-    const cols = n + 1;
-    const idx = (i, j) => i * cols + j;
-    const lcsLen = new Uint32Array((m + 1) * (n + 1));
-    const dirs = new Int8Array((m + 1) * (n + 1));
-    for (let i = 1; i <= m; i++) {
-      for (let j = 1; j <= n; j++) {
-        if (oldLines[i - 1] === newLines[j - 1]) {
-          lcsLen[idx(i, j)] = lcsLen[idx(i - 1, j - 1)] + 1;
-          dirs[idx(i, j)] = 1;
-        } else if (lcsLen[idx(i - 1, j)] >= lcsLen[idx(i, j - 1)]) {
-          lcsLen[idx(i, j)] = lcsLen[idx(i - 1, j)];
-          dirs[idx(i, j)] = 2;
-        } else {
-          lcsLen[idx(i, j)] = lcsLen[idx(i, j - 1)];
-          dirs[idx(i, j)] = 3;
+    try {
+      const cols = n + 1;
+      const idx = (i, j) => i * cols + j;
+      const lcsLen = new Uint32Array((m + 1) * (n + 1));
+      const dirs = new Int8Array((m + 1) * (n + 1));
+      for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+          if (oldLines[i - 1] === newLines[j - 1]) {
+            lcsLen[idx(i, j)] = lcsLen[idx(i - 1, j - 1)] + 1;
+            dirs[idx(i, j)] = 1;
+          } else if (lcsLen[idx(i - 1, j)] >= lcsLen[idx(i, j - 1)]) {
+            lcsLen[idx(i, j)] = lcsLen[idx(i - 1, j)];
+            dirs[idx(i, j)] = 2;
+          } else {
+            lcsLen[idx(i, j)] = lcsLen[idx(i, j - 1)];
+            dirs[idx(i, j)] = 3;
+          }
         }
       }
-    }
-    const ops = [];
-    let i = m;
-    let j = n;
-    while (i > 0 || j > 0) {
-      if (i > 0 && j > 0 && dirs[idx(i, j)] === 1) {
-        ops.unshift({ type: "equal", oldLine: oldLines[i - 1], newLine: newLines[j - 1] });
-        i--;
-        j--;
-      } else if (j > 0 && (i === 0 || dirs[idx(i, j)] === 3)) {
-        ops.unshift({ type: "insert", line: newLines[j - 1] });
-        j--;
-      } else if (i > 0) {
-        ops.unshift({ type: "delete", line: oldLines[i - 1] });
-        i--;
-      } else {
-        break;
+      const ops = [];
+      let i = m;
+      let j = n;
+      while (i > 0 || j > 0) {
+        if (i > 0 && j > 0 && dirs[idx(i, j)] === 1) {
+          ops.unshift({ type: "equal", oldLine: oldLines[i - 1], newLine: newLines[j - 1] });
+          i--;
+          j--;
+        } else if (j > 0 && (i === 0 || dirs[idx(i, j)] === 3)) {
+          ops.unshift({ type: "insert", line: newLines[j - 1] });
+          j--;
+        } else if (i > 0) {
+          ops.unshift({ type: "delete", line: oldLines[i - 1] });
+          i--;
+        } else {
+          break;
+        }
       }
+      return ops;
+    } catch (e) {
+      return null;
     }
-    return ops;
   }
 
   function computeCharDiff(oldStr, newStr) {
@@ -1747,9 +1752,24 @@
     right.addEventListener("scroll", () => syncFrom(right, left), { passive: true });
   }
 
-  function renderPendingDiffTooLarge(oldText, newText) {
+  function renderPendingDiffTooLarge(oldText, newText, mode, oldLineCount, newLineCount) {
+    const lc =
+      oldLineCount != null && newLineCount != null
+        ? ` (${oldLineCount} vs ${newLineCount} lines — product exceeds browser limit).`
+        : ".";
+    const hint =
+      `<p class="hint pending-diff-same">Diff too large to compute in the browser${lc} Showing full texts below; use an external diff if you need line-level detail.</p>`;
+    if (mode === "split") {
+      return (
+        hint +
+        `<div class="pending-diff-split-view">` +
+        `<div class="pending-diff-split-pane" data-pending-split-pane="left" tabindex="-1"><pre class="code-block pending-raw-diff-pre" tabindex="0">${escapeHtml(oldText)}</pre></div>` +
+        `<div class="pending-diff-split-pane" data-pending-split-pane="right" tabindex="-1"><pre class="code-block pending-raw-diff-pre" tabindex="0">${escapeHtml(newText)}</pre></div>` +
+        `</div>`
+      );
+    }
     return (
-      `<p class="hint pending-diff-same">Diff too large to compute in the browser. Showing both texts.</p>` +
+      hint +
       `<h4 class="pending-diff-raw-h">Baseline (<code>generated/nftables.nft</code>)</h4>` +
       `<pre class="code-block pending-nft-pre" tabindex="0">${escapeHtml(oldText)}</pre>` +
       `<h4 class="pending-diff-raw-h">Proposed (current saved config)</h4>` +
@@ -1772,6 +1792,10 @@
     panel.setAttribute("aria-labelledby", mode === "unified" ? "pending-mode-unified" : "pending-mode-split");
     const oldText = lastPendingBaseline;
     const newText = lastPendingNew;
+    const baselineHint =
+      oldText === "" && newText !== ""
+        ? `<p class="hint pending-diff-baseline-missing">No readable on-disk <code class="inline">generated/nftables.nft</code> (missing, unreadable, or API older than baseline support). The left column compares against an empty baseline; reload the host after a successful apply to populate the file.</p>`
+        : "";
     if (oldText === newText) {
       let body = `<p class="hint pending-diff-same">No differences.</p>`;
       if (newText) {
@@ -1784,14 +1808,16 @@
     const newLines = splitLines(newText);
     const ops = computeLineDiff(oldLines, newLines);
     if (!ops) {
-      panel.innerHTML = renderPendingDiffTooLarge(oldText, newText);
+      panel.innerHTML =
+        baselineHint + renderPendingDiffTooLarge(oldText, newText, mode, oldLines.length, newLines.length);
+      if (mode === "split") setupPendingSplitScrollSync(panel);
       return;
     }
     if (mode === "split") {
-      panel.innerHTML = renderSplitDiffHtml(ops);
+      panel.innerHTML = baselineHint + renderSplitDiffHtml(ops);
       setupPendingSplitScrollSync(panel);
     } else {
-      panel.innerHTML = renderUnifiedDiffHtml(ops);
+      panel.innerHTML = baselineHint + renderUnifiedDiffHtml(ops);
     }
   }
 

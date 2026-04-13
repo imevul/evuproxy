@@ -275,6 +275,7 @@ body.app .toggle-switch .toggle-switch-input[type="checkbox"] {
   padding: 1.25rem;
   overflow: auto;
   max-width: 1200px;
+  min-width: 0;
 }
 
 .page-title {
@@ -814,7 +815,8 @@ table.data button {
   border: 1px solid #30363d;
   border-radius: 6px;
   background: #0d1117;
-  overflow: hidden;
+  overflow: auto;
+  min-width: 0;
 }
 
 .pending-diff-scroll {
@@ -935,6 +937,8 @@ table.data button {
   display: flex;
   max-height: min(55vh, 28rem);
   min-height: 0;
+  min-width: 0;
+  width: 100%;
 }
 
 .pending-diff-split-pane {
@@ -1052,6 +1056,12 @@ table.data button {
 .pending-diff-split-side .diff-ch-strong.diff-ch-ins {
   background: rgba(63, 185, 80, 0.45);
   border-radius: 2px;
+}
+
+.pending-raw-diff-pre {
+  margin: 0;
+  white-space: pre;
+  word-break: normal;
 }
 
 .logs-pre {
