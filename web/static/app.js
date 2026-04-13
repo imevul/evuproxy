@@ -622,6 +622,57 @@
     teaser.hidden = adv;
   }
 
+  function geoblockingFormSnapshotForCompare() {
+    return {
+      enabled: !!($("geo-f-enabled") && $("geo-f-enabled").checked),
+      mode: getGeoListMode(),
+      countries: geoSelectedCodes
+        .slice()
+        .map((c) => String(c).trim().toLowerCase())
+        .filter(Boolean)
+        .sort(),
+      set_name: (($("geo-f-set-name") && $("geo-f-set-name").value) || "").trim(),
+      zone_dir: (($("geo-f-zone-dir") && $("geo-f-zone-dir").value) || "").trim(),
+      apply_to_input_allows: !!($("geo-f-apply-input-allows") && $("geo-f-apply-input-allows").checked),
+    };
+  }
+
+  function geoblockingServerSnapshotForCompare() {
+    if (!lastConfig) return null;
+    const g = lastConfig.geo || {};
+    return {
+      enabled: !!g.enabled,
+      mode: String(g.mode || "allow").toLowerCase() === "block" ? "block" : "allow",
+      countries: (Array.isArray(g.countries) ? g.countries : [])
+        .map((c) => String(c).trim().toLowerCase())
+        .filter(Boolean)
+        .sort(),
+      set_name: String(g.set_name || "").trim(),
+      zone_dir: String(g.zone_dir || "").trim(),
+      apply_to_input_allows: !!g.apply_to_input_allows,
+    };
+  }
+
+  function syncGeoUnsavedIndicator() {
+    const el = $("geo-unsaved-msg");
+    if (!el) return;
+    const srv = geoblockingServerSnapshotForCompare();
+    if (!srv) {
+      el.hidden = true;
+      el.textContent = "";
+      return;
+    }
+    const cur = geoblockingFormSnapshotForCompare();
+    const dirty = JSON.stringify(cur) !== JSON.stringify(srv);
+    if (dirty) {
+      el.hidden = false;
+      el.textContent = "You have unsaved changes — click Save to write them to the server config.";
+    } else {
+      el.hidden = true;
+      el.textContent = "";
+    }
+  }
+
   function setAuthMsg(text, isErr) {
     const el = $("auth-msg");
     el.textContent = text;
@@ -1529,6 +1580,7 @@
       box.appendChild(tag);
     }
     updateGeoTagsEditCount();
+    syncGeoUnsavedIndicator();
   }
 
   function geoFormFromConfig(cfg) {
@@ -1547,6 +1599,7 @@
       ? g.countries.map((c) => String(c).trim().toLowerCase()).filter(Boolean)
       : [];
     renderGeoTags();
+    syncGeoUnsavedIndicator();
   }
 
   function openGeoCountryModal() {
@@ -1636,6 +1689,7 @@
       setGeoMsg("Saved. Review Pending changes, then Apply to host.");
       setApiStatus(true);
       refreshPendingBadge();
+      syncGeoUnsavedIndicator();
     } catch (e) {
       setGeoMsg(String(e.message || e), true);
     }
@@ -2933,16 +2987,26 @@
   $("geo-save").addEventListener("click", saveGeoblocking);
   $("geo-refresh").addEventListener("click", refreshGeoblockingPage);
   $("geo-update-lists").addEventListener("click", geoUpdateLists);
+  const geoEn = $("geo-f-enabled");
+  if (geoEn) geoEn.addEventListener("change", syncGeoUnsavedIndicator);
+  const geoSn = $("geo-f-set-name");
+  if (geoSn) geoSn.addEventListener("input", syncGeoUnsavedIndicator);
+  const geoZd = $("geo-f-zone-dir");
+  if (geoZd) geoZd.addEventListener("input", syncGeoUnsavedIndicator);
+  const geoApplyInputAllows = $("geo-f-apply-input-allows");
+  if (geoApplyInputAllows) geoApplyInputAllows.addEventListener("change", syncGeoUnsavedIndicator);
   const geoModeBlock = $("geo-mode-block");
   const geoModeAllow = $("geo-mode-allow");
   if (geoModeBlock) {
     geoModeBlock.addEventListener("click", () => {
       setGeoListMode("block");
+      syncGeoUnsavedIndicator();
     });
   }
   if (geoModeAllow) {
     geoModeAllow.addEventListener("click", () => {
       setGeoListMode("allow");
+      syncGeoUnsavedIndicator();
     });
   }
   const geoTagsEdit = $("geo-tags-edit");

@@ -303,6 +303,11 @@ tr.is-filter-hidden {
   color: #58a6ff;
 }
 
+.msg.geo-unsaved-msg {
+  color: #d29922;
+  margin: 0.35rem 0 0;
+}
+
 body.app .toggle-switch .toggle-switch-input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;

@@ -481,7 +481,7 @@
               <p class="hint meta" style="margin: 0.35rem 0 0">
                 When off (default), SSH, HTTP, and other <code class="inline">input_allows</code> stay reachable from any
                 source IPv4 even if geoblocking is on. When on, those ports use the same allow-list or block-list rules
-                as forwarded services. Save this page, then <strong>Apply</strong> on the host.
+                as forwarded services. Click <strong>Save</strong> to store changes, then <strong>Apply</strong> on the host.
               </p>
             </div>
           </div>
@@ -494,6 +494,7 @@
             <button type="button" class="btn-quiet" id="geo-refresh">Refresh</button>
             <button type="button" class="btn-primary" id="geo-update-lists">Update geo lists</button>
           </div>
+          <p id="geo-unsaved-msg" class="msg geo-unsaved-msg meta" hidden aria-live="polite"></p>
           <p id="geo-msg" class="msg" aria-live="polite"></p>
         </div>
 
