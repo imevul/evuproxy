@@ -4,6 +4,8 @@
 
 Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**, with a declarative config and optional **GeoIP** country filtering (**allow** or **block** mode in config). The supported interface is this repository’s **YAML config**, the **`evuproxy` CLI**, the **local HTTP API**, and an optional **Docker admin UI**.
 
+**More documentation:** [docs/README.md](docs/README.md) (HTTP API, web UI, security, third-party data).
+
 ## Prerequisites
 
 
@@ -13,7 +15,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 | **Go (optional)**           | **[Go 1.22+](https://go.dev/dl/)** on your **PATH** if you want `scripts/install.sh` to compile `evuproxy` from this repo. Without Go, place a prebuilt **`evuproxy`** binary at `/usr/local/bin/evuproxy` (or set `PREFIX`) after install.        |
 | **Build from source (dev)** | Go **1.22+** and this repository; run `go build` from the repo root (see [Building from source](#building-from-source)).                                                                                                                           |
 | **Web UI**                  | **[Docker](https://docs.docker.com/engine/install/)** and **Docker Compose** (v2 plugin: `docker compose`) to build and run the admin UI container.                                                                                                |
-| **Geo / IP lists**          | Outbound **HTTPS** to [ipdeny.com](https://www.ipdeny.com/ipblocks/data/countries/) (default zone source) for `update-geo` and first-time zone fetch on `reload`.                                                                                  |
+| **Geo / IP lists**          | Outbound **HTTPS** to [ipdeny.com](https://www.ipdeny.com/ipblocks/data/countries/) (default zone source) for `update-geo` and first-time zone fetch on `reload`. See [docs/third-party-data.md](docs/third-party-data.md) for attribution and limits.                                                                                  |
 
 
 ## Quick start (VPS)
@@ -45,80 +47,12 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 | `evuproxy restore --archive PATH` | Extract tarball into `/etc/evuproxy`, then run `reload`                                                  |
 
 
-## Local HTTP API
+## Local HTTP API and web UI
 
-### Binding, CORS, and authentication
-
-- **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment variable **`EVUPROXY_API_TOKEN`** or **`evuproxy serve --token-file`** (default `/etc/evuproxy/api.token`).
-- **Cross-origin UI:** If the admin UI is opened from another origin (different scheme/host/port than the API), the browser needs CORS. Enable with **`evuproxy serve --cors-origins`**: a comma-separated list of exact `Origin` values (for example `https://myui.example.com,http://10.0.0.2:9080`), or `*` to allow any origin. The API remains protected by the bearer token; prefer an explicit list over `*` when the API is reachable from untrusted networks. With `*`, any website the operator opens could send credentialed requests if the token is stored in the UI — keep the API on localhost or use an explicit origin list when the browser can load untrusted pages.
-- **Auth:** `Authorization: Bearer …` or `X-API-Token` on `/api/v1/*` routes. **`GET /healthz`** is unauthenticated (for probes). **Reverse proxies** should not log `Authorization` or `X-API-Token` values (redact or omit these headers in access logs).
-
-### Mutating operations (serialization)
-
-These endpoints change on-disk config, backups, or live nftables / WireGuard: **`PUT /config`**, **`POST /reload`**, **`POST /update-geo`**, **`POST /backup`**, **`POST /restore`**. Only one runs at a time; a second concurrent request gets **HTTP 503** with a stable error message (no queue). Use retries with backoff on the client.
-
-### Backup and restore paths
-
-**`POST /backup?path=…`** and **`POST /restore?path=…`** only accept absolute paths that resolve under the backup allow directory (default **`/var/backups`**). Override the directory with environment variable **`EVUPROXY_BACKUP_DIR`** (must be absolute). Paths are canonicalized; locations outside the allow tree return **4xx**. Treat the backup directory like sensitive storage: a **local attacker** who can create symlinks there could in theory race the API between path check and `tar` (narrow window); use a dedicated directory with restrictive permissions.
-
-### Privacy and telemetry
-
-- **No project telemetry:** EvuProxy does not phone home or report usage to the authors. Outbound connections are **operational only** (e.g. GeoIP zone downloads to IPDeny or your configured source, HTTPS for install scripts if you use them).
-- **Logs and stats:** **`GET /logs`** returns recent firewall-related journal lines (may include source/destination IPs). **`GET /stats`** and **`GET /metrics`** expose WireGuard and nftables-derived data (keys, endpoints, counters). Treat API responses and host logs as **sensitive** in multi-tenant or shared-log environments.
-- **Geo fetches:** Zone downloads are made from the **server’s public IP** (or the egress used for HTTPS). See [Third-party data](#third-party-data-and-attribution) for IPDeny terms.
-
-### Security roadmap (scoped access)
-
-**Deferred:** separate read vs write API tokens, CSRF hardening beyond bearer tokens, and a strict **Content-Security-Policy** for the static UI are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost.
-
-### Endpoints
-
-All paths below are under **`/api/v1`** unless noted.
-
-
-| Method        | Path                                                            | Purpose                                                                                                                                                   |
-| ------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET` / `PUT` | `/config`                                                       | Read or replace full config. **`PUT`** accepts JSON, validates, writes **YAML** to disk; **does not** reload WireGuard/nftables until **`POST /reload`**. |
-| `GET`         | `/pending`                                                      | Compare on-disk config to last successful apply. **`nftables`** in the JSON is the **generated ruleset text** from the current on-disk config whenever NFTables generation succeeds (independent of whether a reload has applied it yet). |
-| `GET` / `PUT` | `/preferences`                                                  | UI helper fields (e.g. tunnel subnet CIDR, WireGuard endpoint for client snippets).                                                                       |
-| `POST`        | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config.                                                                                                    |
-| `POST`        | `/update-geo`                                                   | Download zones and refresh geo sets in nftables.                                                                                                          |
-| `GET`         | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`, `/about` | Diagnostics, config summary, **`/metrics`** text for both **inet evuproxy** forward and input chains (either `nft list` failure → 5xx), host stats, recent firewall-related journal lines, version info.                                             |
-| `POST`        | `/backup?path=…`, `/restore?path=…`                             | Archive or restore under `/etc/evuproxy`. Paths must resolve under **`EVUPROXY_BACKUP_DIR`** (default `/var/backups`). **`backup`** defaults `path` to `/var/backups/evuproxy-config.tgz` if omitted; **`restore`** requires `path`.   |
-| `GET`         | `/healthz`                                                      | Plain `ok` (no `/api/v1` prefix, no token).                                                                                                               |
-
-
-**`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
-
-## Web UI (Docker)
-
-The admin UI is intended to run **in Docker only**. From the repo:
-
-```bash
-docker compose up --build
-```
-
-Browse `http://127.0.0.1:9080`. On a remote VPS, use an **SSH tunnel** instead of exposing the UI publicly. The UI container uses **host networking** so nginx can proxy `/api` to **`127.0.0.1:9847`** without binding the API on `0.0.0.0`. Override **`EVUPROXY_UI_LISTEN`** (e.g. `0.0.0.0:9080`) only for temporary LAN tests — the UI then listens on all interfaces; combine with firewall rules and treat the token like a password. **Host network is Linux-oriented**; use the dev mock stack on other setups if needed. Docker Compose defines an optional **`healthcheck`** against **`GET /healthz`** on the UI nginx port.
-
-### Local UI with mock API
-
-To try the admin UI **without** `evuproxy serve` on the host (no WireGuard or nftables changes), use the dev stack: a stub API in Docker plus the same UI image, wired on the compose network.
-
-```bash
-docker compose -f docker-compose.dev.yml up --build
-```
-
-Open `http://127.0.0.1:9080` and enter API token **`dev`** (default), or set `MOCK_API_TOKEN` when starting compose and use that value in the UI. The mock implements the same HTTP paths and JSON shapes as the real API; config is kept **in memory** on `PUT`.
-
-**Live UI edits:** [docker-compose.dev.yml](docker-compose.dev.yml) bind-mounts [web/](web/) into the nginx container and [docker/mock-api/mock_server.py](docker/mock-api/mock_server.py) into the mock container. Edit static files or the mock script on the host, **reload the browser** for UI changes, or run `docker compose -f docker-compose.dev.yml restart mock-api` after Python edits. Rebuild images only when [docker/Dockerfile](docker/Dockerfile), [docker/nginx.conf](docker/nginx.conf), or [docker/entrypoint.sh](docker/entrypoint.sh) change. Dev nginx uses [docker/nginx.dev.conf](docker/nginx.dev.conf) (`Cache-Control: no-store`, fixed upstream to `mock-api`).
-
-## Security notes
-
-- After `reload`, nftables **INPUT** is restrictive; the example seed allows **TCP 22**, **80/443**, and **9080** (Docker UI) via **`input_allows`**. Remove **9080** there if you only use SSH tunnels to the UI.
-- Do not expose the API on `0.0.0.0` without TLS and strong auth.
-- Geo data is approximate; VPN users bypass country filters.
-- If geo sets are **empty** while geo is enabled, traffic may be blocked — check `journalctl` and run `evuproxy update-geo`.
-- **Reload diagnostics:** `nft delete table` before replace may fail when tables were never loaded (first install); that is expected. Enable **debug** logging to see those lines. Geo zone / loader warnings during reload are logged at **WARN**; fix by running **`evuproxy update-geo`** or fixing zone files.
+- **HTTP API** (bind address, auth, CORS, endpoints, backup paths): [docs/http-api.md](docs/http-api.md)
+- **Web UI** (Docker compose, mock dev stack): [docs/web-ui.md](docs/web-ui.md)
+- **Security and privacy** (telemetry, token storage, operational notes): [docs/security-and-privacy.md](docs/security-and-privacy.md)
+- **Third-party / IPDeny** (attribution, usage): [docs/third-party-data.md](docs/third-party-data.md)
 
 ## Uninstall
 
@@ -143,24 +77,6 @@ EvuProxy uses **SemVer** **`0.MINOR.PATCH`** while in beta (`0.x`). **Patch** re
 [Release Please](https://github.com/googleapis/release-please) drives releases from [Conventional Commits](https://www.conventionalcommits.org/) on `main` (for example `feat:` for features, `fix:` for fixes, and `feat!:` or a `BREAKING CHANGE:` footer for breaking changes). It opens a **release pull request** that bumps the version in [.release-please-manifest.json](.release-please-manifest.json), updates [CHANGELOG.md](CHANGELOG.md), and updates the embedded version in [cmd/evuproxy/main.go](cmd/evuproxy/main.go). Merging that PR creates the Git tag and **GitHub Release**. Another workflow then builds **Linux** binaries (`amd64`, `arm64`), a **`git archive`** source ZIP, and **SHA256SUMS**, and uploads them to the release.
 
 The running binary exposes its version via `evuproxy version`, `GET /api/v1/about`, and the admin UI sidebar.
-
-## Third-party data and attribution
-
-**Powered by [IPDENY.COM](https://www.ipdeny.com) IP database in the default configuration.**
-
-The default GeoIP country zone files are fetched from IPDeny’s public dataset at `https://www.ipdeny.com/ipblocks/data/countries/<cc>.zone` (see [`internal/gen/geo.go`](internal/gen/geo.go)).
-
-Further reading from IPDeny:
-
-- [Copyright notice](https://www.ipdeny.com/copyright.php)
-- [Link back / examples](https://www.ipdeny.com/linkback.php)
-- [Usage limits](https://www.ipdeny.com/usagelimits.php)
-
-`evuproxy` downloads zones **one at a time** (no parallel connections) and pauses **750ms** between successive requests to follow IPDeny’s suggested spacing. Together with the default **`evuproxy-geo.timer`** (about once per 24h) and typical `geo.countries` lists, usage stays well under their **5000 zone downloads per day per IP** guideline; see [usage limits](https://www.ipdeny.com/usagelimits.php) for the full policy. Downloads originate from your **server’s egress IP**; respect IPDeny’s terms and attribution when using their data.
-
-If you **copy or redistribute** downloaded `.zone` files, keep IPDeny’s **`Copyrights.txt`** with them as described in their [copyright notice](https://www.ipdeny.com/copyright.php). **Backups** of `/etc/evuproxy` may include downloaded zones and **`Copyrights.txt`** — preserve attribution when moving archives off-host.
-
-For IPDeny’s licensing, privacy, and acceptable use, see their site: [copyright](https://www.ipdeny.com/copyright.php), [usage limits](https://www.ipdeny.com/usagelimits.php), and related pages linked from [Third-party data](#third-party-data-and-attribution) above.
 
 ## License
 
