@@ -2275,6 +2275,33 @@
     return "—";
   }
 
+  /** ISO 3166-1 alpha-2 → regional indicator flag emoji (empty if invalid). */
+  function countryCodeToFlagEmoji(cc) {
+    if (cc == null || cc === "") return "";
+    const s = String(cc).trim();
+    if (s.length !== 2) return "";
+    const base = 0x1f1e6;
+    const u = s.toUpperCase();
+    const c1 = u.codePointAt(0);
+    const c2 = u.codePointAt(1);
+    if (c1 < 65 || c1 > 90 || c2 < 65 || c2 > 90) return "";
+    return String.fromCodePoint(base + (c1 - 65), base + (c2 - 65));
+  }
+
+  function logsIpCell(ip, cc) {
+    const ipPart = ip === "" ? "—" : escapeHtml(ip);
+    const code = cc && String(cc).trim();
+    if (!code) {
+      return '<td class="mono">' + ipPart + "</td>";
+    }
+    const flag = countryCodeToFlagEmoji(code);
+    const title = escapeHtml(code.toUpperCase());
+    const flagPart = flag
+      ? '<span class="logs-ip-flag" title="' + title + '">' + flag + "</span> "
+      : "";
+    return '<td class="mono logs-col-ip">' + flagPart + ipPart + "</td>";
+  }
+
   function setLogsViewMode(mode) {
     logsViewMode = mode === "raw" ? "raw" : "table";
     const bTable = $("logs-view-table");
@@ -2374,12 +2401,8 @@
           '<td class="logs-col-type">' +
           escapeHtml(tlabel) +
           "</td>" +
-          '<td class="mono">' +
-          cell(e.src) +
-          "</td>" +
-          '<td class="mono">' +
-          cell(e.dst) +
-          "</td>" +
+          logsIpCell(e.src, e.srcCC) +
+          logsIpCell(e.dst, e.dstCC) +
           "<td>" +
           cell(e.proto) +
           "</td>" +
@@ -2442,7 +2465,22 @@
         src.textContent = j.source ? "Source: " + j.source : "";
       }
       const lines = j.lines || [];
-      lastFirewallLogEntries = lines.map(parseFirewallLogLine);
+      const lineGeo = j.line_geo || [];
+      lastFirewallLogEntries = lines.map((raw, i) => {
+        const e = parseFirewallLogLine(raw);
+        const g = lineGeo[i];
+        if (g && typeof g === "object") {
+          if (g.src_cc) {
+            e.srcCC = g.src_cc;
+            e.searchBlob += " " + String(g.src_cc).toLowerCase();
+          }
+          if (g.dst_cc) {
+            e.dstCC = g.dst_cc;
+            e.searchBlob += " " + String(g.dst_cc).toLowerCase();
+          }
+        }
+        return e;
+      });
       renderLogsView();
     } catch (e) {
       if (seq !== logsRefreshSeq) return;

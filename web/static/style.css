@@ -1241,6 +1241,14 @@ table.data.logs-data .logs-col-type {
   white-space: nowrap;
 }
 
+.logs-ip-flag {
+  font-family: "Twemoji Mozilla", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+}
+
+table.data.logs-data .logs-col-ip {
+  white-space: nowrap;
+}
+
 .confirm-modal-body {
   margin: 0 0 1rem;
   color: #c9d1d9;

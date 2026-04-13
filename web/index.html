@@ -578,6 +578,8 @@
           <code class="inline">evuproxy-geo-block</code> (geoblocking drops) and
           <code class="inline">evuproxy-forward-drop</code> (forward-chain drops). The API reads
           <code class="inline">journalctl</code> (newest first) or falls back to <code class="inline">dmesg</code>.
+          Optional: set <code class="inline">EVUPROXY_GEOLITE_MMDB</code> to a MaxMind GeoLite2 Country
+          <code class="inline">.mmdb</code> file on the host so SRC/DST columns show country flags.
         </p>
         <div class="card">
           <div class="logs-toolbar-wrap">

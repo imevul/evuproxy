@@ -322,9 +322,15 @@ MOCK_STATS = {
 }
 
 MOCK_LOGS = [
-    "2026-01-15T10:00:01+00:00 host kernel: evuproxy-geo-block: IN=eth0 OUT= MAC= SRC=198.51.100.2 DST=…",
+    "2026-01-15T10:00:01+00:00 host kernel: evuproxy-geo-block: IN=eth0 OUT= MAC= SRC=198.51.100.2 DST=198.51.100.9",
     "2026-01-15T10:00:02+00:00 host kernel: evuproxy-forward-drop: IN=eth0 OUT=docker0 SRC=10.0.0.5 DST=172.17.0.2 LEN=60 PROTO=TCP SPT=45678 DPT=443 SYN",
     "2026-01-15T10:00:03+00:00 host kernel: evuproxy-geo-block: IN=eth0 OUT= MAC=ab:cd SRC=203.0.113.1 DST=198.51.100.1 LEN=97 PROTO=UDP SPT=30301 DPT=30301 LEN=77",
+]
+
+MOCK_LOG_LINE_GEO = [
+    {"src_cc": "us", "dst_cc": "us"},
+    {"src_cc": "us", "dst_cc": "us"},
+    {"src_cc": "us", "dst_cc": "us"},
 ]
 
 MOCK_EVENTS = [
@@ -519,7 +525,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/v1/logs":
             return self._send_json(
                 200,
-                {"lines": list(MOCK_LOGS), "source": "mock"},
+                {
+                    "lines": list(MOCK_LOGS),
+                    "line_geo": list(MOCK_LOG_LINE_GEO),
+                    "source": "mock",
+                },
             )
         if path == "/api/v1/events":
             return self._send_json(200, {"events": list(MOCK_EVENTS)})

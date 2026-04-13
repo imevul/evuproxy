@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/oschwald/geoip2-golang"
+	"github.com/spf13/cobra"
+
 	"github.com/imevul/evuproxy/internal/api"
 	"github.com/imevul/evuproxy/internal/apply"
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/logging"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -118,6 +120,15 @@ func cmdServe() *cobra.Command {
 				Logger:      slog.Default(),
 				Version:     version,
 				CORSOrigins: corsOrigins,
+			}
+			geopath := strings.TrimSpace(os.Getenv("EVUPROXY_GEOLITE_MMDB"))
+			if geopath != "" {
+				r, err := geoip2.Open(geopath)
+				if err != nil {
+					return fmt.Errorf("open EVUPROXY_GEOLITE_MMDB %q: %w", geopath, err)
+				}
+				defer r.Close()
+				s.GeoIP = r
 			}
 			return s.Run()
 		},

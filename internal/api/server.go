@@ -17,9 +17,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oschwald/geoip2-golang"
+
 	"github.com/imevul/evuproxy/internal/apply"
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/eventlog"
+	"github.com/imevul/evuproxy/internal/geoip"
 )
 
 type Server struct {
@@ -28,6 +31,10 @@ type Server struct {
 	Config  string
 	Logger  *slog.Logger
 	Version string
+	// GeoIP is an optional MaxMind GeoLite2 / GeoIP2 Country MMDB reader. When set, GET /api/v1/logs
+	// includes a line_geo array (same order as lines) with src_cc and dst_cc (lowercase ISO 3166-1 alpha-2).
+	// The caller should Close the reader when the process exits.
+	GeoIP *geoip2.Reader
 	// CORSOrigins is a comma-separated list of allowed browser Origin values, or "*" for any.
 	// Used when the web UI is served from a different host than the API.
 	CORSOrigins string
@@ -343,10 +350,28 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		s.jsonErr(w, http.StatusInternalServerError, "could not read firewall logs")
 		return
 	}
-	s.jsonOK(w, map[string]any{
+	out := map[string]any{
 		"lines":  lines,
 		"source": source,
-	})
+	}
+	if s.GeoIP != nil {
+		type lineGeo struct {
+			SrcCC string `json:"src_cc,omitempty"`
+			DstCC string `json:"dst_cc,omitempty"`
+		}
+		geo := make([]lineGeo, len(lines))
+		for i, line := range lines {
+			src, dst := apply.FirewallLogSrcDST(line)
+			if cc := geoip.CountryISOCodeLower(s.GeoIP, src); cc != "" {
+				geo[i].SrcCC = cc
+			}
+			if cc := geoip.CountryISOCodeLower(s.GeoIP, dst); cc != "" {
+				geo[i].DstCC = cc
+			}
+		}
+		out["line_geo"] = geo
+	}
+	s.jsonOK(w, out)
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
