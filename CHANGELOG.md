@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/imevul/evuproxy/compare/v0.4.0...v0.5.0) (2026-04-13)
+
+
+### Features
+
+* disable input_allows in config; unify disabled toggles in UI ([8b25598](https://github.com/imevul/evuproxy/commit/8b25598124c627448ca1ed1b02c3a0e0ba0dd2bb))
+
+
+### Bug Fixes
+
+* **ui:** pending diff for large nftables and empty baseline ([44228da](https://github.com/imevul/evuproxy/commit/44228da756d82a6f703d2233aee57107793cbdbb))
+* **ui:** revalidate cached static assets in production nginx ([744da9d](https://github.com/imevul/evuproxy/commit/744da9da0e942293123f688a8e57612aeaf94438))
+
 ## [0.4.0](https://github.com/imevul/evuproxy/compare/v0.3.0...v0.4.0) (2026-04-13)
 
 
