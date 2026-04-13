@@ -288,5 +288,42 @@ func (c *Config) validateForwardingRoutes() error {
 			return fmt.Errorf("forwarding.routes[%d]: target_ip %s must match a non-disabled peer tunnel_ip", i, tip)
 		}
 	}
+	return validateForwardingRoutePortOverlaps(c)
+}
+
+func validateForwardingRoutePortOverlaps(c *Config) error {
+	type protoPort struct {
+		proto string
+		port  uint16
+	}
+	claimed := map[protoPort]int{}
+	for i, r := range c.Forwarding.Routes {
+		if r.Disabled {
+			continue
+		}
+		protos, err := ParseRouteProtocols(r.Proto)
+		if err != nil {
+			return fmt.Errorf("forwarding.routes[%d]: %w", i, err)
+		}
+		ports, err := ExpandRoutePortNumbers(r.Ports)
+		if err != nil {
+			return fmt.Errorf("forwarding.routes[%d]: ports: %w", i, err)
+		}
+		if len(ports) == 0 {
+			continue
+		}
+		for _, proto := range protos {
+			for _, port := range ports {
+				k := protoPort{proto: proto, port: port}
+				if prev, ok := claimed[k]; ok {
+					return &ValidationError{
+						Code: "route_port_overlap",
+						Msg:  fmt.Sprintf("forwarding.routes[%d] and [%d] both use %s port %d", prev, i, proto, port),
+					}
+				}
+				claimed[k] = i
+			}
+		}
+	}
 	return nil
 }

@@ -13,6 +13,15 @@
       <p class="tagline">Admin — use only over SSH tunnel or trusted network.</p>
     </div>
     <div class="header-meta">
+      <label class="visually-hidden" for="global-table-search">Filter peers and routes tables</label>
+      <input
+        type="search"
+        id="global-table-search"
+        class="header-search"
+        placeholder="Filter peers/routes (press /)"
+        autocomplete="off"
+        spellcheck="false"
+      />
       <span id="api-status" class="pill pill-muted" aria-live="polite">API</span>
     </div>
   </header>
@@ -55,6 +64,12 @@
           </div>
           <p id="overview-action-msg" class="msg" aria-live="polite"></p>
         </div>
+        <div id="overview-events-card" class="card overview-events-card">
+          <h3>Recent activity</h3>
+          <p class="hint meta">From the host <code class="inline">state/events.jsonl</code> (append-only, size-capped). Polls while you stay on Overview.</p>
+          <ul id="overview-events-list" class="overview-events-list"></ul>
+          <p id="overview-events-empty" class="hint meta is-hidden">No events recorded yet.</p>
+        </div>
       </section>
 
       <section id="page-settings" class="page" hidden>
@@ -75,6 +90,7 @@
           <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
           <div class="btn-row" style="margin-top: 1rem">
             <button type="button" class="btn-primary" id="settings-save-prefs">Save preferences</button>
+            <button type="button" class="btn-quiet" id="settings-download-yaml">Download config.yaml</button>
           </div>
           <p id="settings-prefs-msg" class="msg" aria-live="polite"></p>
         </div>
@@ -240,6 +256,8 @@
                 <pre id="onboard-install-cmd" class="code-block onboard-install-cmd" aria-live="polite"></pre>
                 <div class="onboard-toolbar">
                   <button type="button" id="onboard-build" class="btn-primary">Build YAML + WireGuard config</button>
+                  <button type="button" id="onboard-download-conf" class="btn-quiet">Download .conf</button>
+                  <button type="button" id="onboard-download-sh" class="btn-quiet">Download install.sh snippet</button>
                 </div>
                 <p id="onboard-msg" class="msg" aria-live="polite"></p>
                 <pre id="onboard-out" class="code-block is-collapsed"></pre>
@@ -452,6 +470,16 @@
             <button type="button" class="btn-primary" id="geo-update-lists">Update geo lists</button>
           </div>
           <p id="geo-msg" class="msg" aria-live="polite"></p>
+        </div>
+
+        <div id="geo-zones-summary" class="card geo-zones-card">
+          <h3>Loaded zone files</h3>
+          <p class="hint meta">
+            Per-country counts come from on-disk <code class="inline">.zone</code> files. Totals are approximate; overlaps between countries are not subtracted. Optional
+            <strong>nft</strong> column reflects the merged set in the kernel when available.
+          </p>
+          <div id="geo-zones-table-wrap"></div>
+          <p id="geo-zones-msg" class="msg" aria-live="polite"></p>
         </div>
 
         <div

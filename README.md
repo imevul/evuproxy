@@ -47,6 +47,9 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 | `evuproxy restore --archive PATH` | Extract tarball into `/etc/evuproxy`, then run `reload`                                                  |
 | `evuproxy discard-pending`        | Replace `config.yaml` with `config.yaml.bak` when they differ; run `reload` to apply to the host         |
 | `evuproxy restore-previous-applied` | Replace `config.yaml` from `config.yaml.bak.N` history (see docs); run `reload` to apply              |
+| `evuproxy peer-add`                 | Append a WireGuard peer to `config.yaml` (optional key generation, auto tunnel IP); if you omit **`--public-key`**, set **`--private-key-out`** (0600 file) and/or **`--print-generated-key`** (stderr); **`--apply`** runs `reload` |
+
+**Environment (API):** **`EVUPROXY_LOG_DIR`** — if set (e.g. `/var/log/evuproxy`), `evuproxy serve` appends JSON logs to **`evuproxy.jsonl`** under that directory as well as stderr. **`EVUPROXY_EVENTS_MAX_BYTES`** — optional cap for **`state/events.jsonl`** (clamped; see [docs/http-api.md](docs/http-api.md)).
 
 
 ## Local HTTP API and web UI

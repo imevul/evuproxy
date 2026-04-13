@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/imevul/evuproxy/internal/atomicio"
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/gen"
 )
@@ -67,6 +68,10 @@ func Reload(cfgPath string) error {
 		}
 		if err := applyGeoLoader(c, base); err != nil {
 			slog.Warn("geo load failed; nft geo sets may be empty — run evuproxy update-geo", "err", err)
+		} else {
+			if err := WriteGeoLastSuccess(cfgPath, "reload"); err != nil {
+				slog.Warn("geo last-success metadata", "err", err)
+			}
 		}
 	}
 
@@ -152,32 +157,13 @@ func reloadWireGuard(iface, confPath string) error {
 	return nil
 }
 
+// WriteAtomic writes data to path using a temp file in the same directory and rename.
+func WriteAtomic(path string, data []byte, mode os.FileMode) error {
+	return writeAtomic(path, data, mode)
+}
+
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, ".evuproxy-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Chmod(mode); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return atomicio.WriteFile(path, data, mode)
 }
 
 // UpdateGeo downloads zones and loads geo sets (nftables must already define the sets).
@@ -193,7 +179,13 @@ func UpdateGeo(cfgPath string) error {
 		return err
 	}
 	base := filepath.Dir(cfgPath)
-	return applyGeoLoader(c, base)
+	if err := applyGeoLoader(c, base); err != nil {
+		return err
+	}
+	if err := WriteGeoLastSuccess(cfgPath, "update-geo"); err != nil {
+		slog.Warn("geo last-success metadata", "err", err)
+	}
+	return nil
 }
 
 // Status returns wg show and whether evuproxy tables exist.

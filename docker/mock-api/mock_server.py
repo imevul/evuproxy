@@ -6,10 +6,18 @@ import hashlib
 import ipaddress
 import json
 import os
+import sys
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-TOKEN = os.environ.get("MOCK_API_TOKEN", "dev")
+# Set from MOCK_API_TOKEN in __main__ before serve_forever (required non-empty).
+TOKEN = ""
 PORT = int(os.environ.get("PORT", "9847"))
+MAX_JSON_PUT = 2 << 20
+MAX_JSON_SMALL = 1 << 14
+_ROUTE_TEST_LIMIT = 30
+_ROUTE_TEST_WINDOW_SEC = 60.0
+_route_test_times: list[float] = []
 DEFAULT_PEER_TUNNEL_SUBNET_CIDR = "10.100.0.0/24"
 
 # Last "applied" snapshot (simulates generated/nftables.nft + apply state before current edits).
@@ -319,6 +327,19 @@ MOCK_LOGS = [
     "2026-01-15T10:00:03+00:00 host kernel: evuproxy-geo-block: IN=eth0 OUT= MAC=ab:cd SRC=203.0.113.1 DST=198.51.100.1 LEN=97 PROTO=UDP SPT=30301 DPT=30301 LEN=77",
 ]
 
+MOCK_EVENTS = [
+    {
+        "ts": "2026-01-15T12:00:00Z",
+        "event": "reload_ok",
+        "detail": "reload",
+    },
+    {
+        "ts": "2026-01-15T11:30:00Z",
+        "event": "config_put_ok",
+        "detail": "config saved",
+    },
+]
+
 
 def _overview_from_config(cfg: dict) -> dict:
     wg = cfg["wireguard"]
@@ -335,13 +356,37 @@ def _overview_from_config(cfg: dict) -> dict:
         "peer_names": peer_names,
         "server_public_key": "aN1ZvFJyNFsFtXZjMKtQRGQB+YWY6NxcCX79QbRhP0k=",
         "tunnel_subnet": "10.100.0.0/24",
+        "geo_last_success_utc": "2026-01-15T11:00:00Z",
+        "geo_last_success_source": "update-geo",
     }
     return o
 
 
+def _geo_summary_mock(cfg: dict) -> dict:
+    g = cfg.get("geo") or {}
+    if not g.get("enabled"):
+        return {"enabled": False, "countries": []}
+    countries = []
+    for cc in g.get("countries") or []:
+        countries.append(
+            {
+                "code": cc,
+                "cidr_lines": 42,
+                "approx_ipv4_addresses": 1024,
+                "zone_missing": False,
+                "zone_read_error": "",
+            }
+        )
+    return {
+        "enabled": True,
+        "mode": g.get("mode") or "allow",
+        "countries": countries,
+        "nft_set_elem_count": 5000,
+        "nft_set_count_source": "nft_json",
+    }
+
+
 def _auth_ok(handler: BaseHTTPRequestHandler) -> bool:
-    if not TOKEN:
-        return True
     auth = handler.headers.get("Authorization", "")
     tok = ""
     if auth.lower().startswith("bearer "):
@@ -349,6 +394,33 @@ def _auth_ok(handler: BaseHTTPRequestHandler) -> bool:
     if not tok:
         tok = handler.headers.get("X-API-Token", "").strip()
     return tok == TOKEN
+
+
+def _content_len(handler: BaseHTTPRequestHandler) -> int:
+    try:
+        return int(handler.headers.get("Content-Length", 0) or 0)
+    except ValueError:
+        return -1
+
+
+def _route_test_rate_ok() -> bool:
+    global _route_test_times
+    now = time.monotonic()
+    cut = now - _ROUTE_TEST_WINDOW_SEC
+    _route_test_times = [t for t in _route_test_times if t > cut]
+    if len(_route_test_times) >= _ROUTE_TEST_LIMIT:
+        return False
+    _route_test_times.append(now)
+    return True
+
+
+def _route_protos(route: dict) -> list[str]:
+    p = str(route.get("proto") or "tcp").strip().lower()
+    if p in ("both", "tcp+udp", "udp+tcp"):
+        return ["tcp", "udp"]
+    if p == "udp":
+        return ["udp"]
+    return ["tcp"]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -363,8 +435,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _read_json_body(self) -> object | None:
-        length = int(self.headers.get("Content-Length", 0) or 0)
+    def _read_json_body(self, max_bytes: int) -> object | None:
+        length = _content_len(self)
+        if length < 0:
+            return None
+        if length > max_bytes:
+            self.rfile.read(length)
+            return None
         if not length:
             return None
         raw = self.rfile.read(length)
@@ -444,6 +521,22 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 {"lines": list(MOCK_LOGS), "source": "mock"},
             )
+        if path == "/api/v1/events":
+            return self._send_json(200, {"events": list(MOCK_EVENTS)})
+        if path == "/api/v1/geo/summary":
+            return self._send_json(200, _geo_summary_mock(MOCK_CONFIG))
+        if path == "/api/v1/config.yaml":
+            data = (
+                "# mock config.yaml - use real API for on-disk bytes\n"
+                "wireguard:\n"
+                "  interface: mock\n"
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-yaml; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         return self._send_json(404, {"error": "not found"})
 
     def do_PUT(self) -> None:
@@ -451,7 +544,9 @@ class Handler(BaseHTTPRequestHandler):
         if not _auth_ok(self):
             return self._send_json(401, {"error": "unauthorized"})
         if path == "/api/v1/preferences":
-            body = self._read_json_body()
+            if _content_len(self) > MAX_JSON_SMALL:
+                return self._send_json(413, {"error": "request body too large"})
+            body = self._read_json_body(MAX_JSON_SMALL)
             if not isinstance(body, dict):
                 return self._send_json(400, {"error": "invalid json body"})
             cidr = (body.get("peer_tunnel_subnet_cidr") or "").strip()
@@ -472,7 +567,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200, _normalize_prefs(MOCK_PREFS))
         if path != "/api/v1/config":
             return self._send_json(404, {"error": "not found"})
-        body = self._read_json_body()
+        if _content_len(self) > MAX_JSON_PUT:
+            return self._send_json(413, {"error": "request body too large"})
+        body = self._read_json_body(MAX_JSON_PUT)
         if not isinstance(body, dict):
             return self._send_json(400, {"error": "invalid json body"})
         global MOCK_CONFIG
@@ -486,7 +583,52 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:
+        global MOCK_CONFIG, MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE
         path = self.path.split("?", 1)[0]
+        if not _auth_ok(self):
+            return self._send_json(401, {"error": "unauthorized"})
+        if path == "/api/v1/routes/test":
+            if not _route_test_rate_ok():
+                return self._send_json(
+                    429,
+                    {
+                        "error": "rate limit exceeded for route tests",
+                        "error_code": "rate_limit",
+                    },
+                )
+            if _content_len(self) > MAX_JSON_SMALL:
+                return self._send_json(413, {"error": "request body too large"})
+            body = self._read_json_body(MAX_JSON_SMALL)
+            idx = 0
+            if isinstance(body, dict) and isinstance(body.get("route_index"), int):
+                idx = body["route_index"]
+            routes = (MOCK_CONFIG.get("forwarding") or {}).get("routes") or []
+            port = 25565
+            tip = "10.100.0.10"
+            protos = ["tcp"]
+            if 0 <= idx < len(routes):
+                r = routes[idx]
+                tip = r.get("target_ip") or tip
+                protos = _route_protos(r)
+                ports = r.get("ports") or []
+                if ports:
+                    try:
+                        port = int(str(ports[0]).split("-", 1)[0].strip("{}"))
+                    except ValueError:
+                        port = 25565
+            results = []
+            for proto in protos:
+                results.append(
+                    {
+                        "proto": proto,
+                        "port": port,
+                        "target_ip": tip,
+                        "status": "inconclusive",
+                        "error_detail": "mock API - no real dial",
+                        "latency_ms": 0,
+                    }
+                )
+            return self._send_json(200, {"results": results})
         if path not in (
             "/api/v1/reload",
             "/api/v1/update-geo",
@@ -499,9 +641,6 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0) or 0)
         if length:
             self.rfile.read(length)
-        if not _auth_ok(self):
-            return self._send_json(401, {"error": "unauthorized"})
-        global MOCK_CONFIG, MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE
         if path == "/api/v1/config/discard":
             if MOCK_BAK is None:
                 return self._send_json(
@@ -553,9 +692,15 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    httpd = HTTPServer(("0.0.0.0", PORT), Handler)
-    print(
-        "mock EvuProxy API on 0.0.0.0:%s (MOCK_API_TOKEN %s)"
-        % (PORT, "set" if TOKEN else "unset")
-    )
+    tok = (os.environ.get("MOCK_API_TOKEN") or "").strip()
+    if not tok:
+        print(
+            "mock_server: MOCK_API_TOKEN must be set to a non-empty value",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    TOKEN = tok
+    bind = (os.environ.get("MOCK_API_BIND") or "0.0.0.0").strip() or "0.0.0.0"
+    httpd = HTTPServer((bind, PORT), Handler)
+    print("mock EvuProxy API on %s:%s (auth required)" % (bind, PORT))
     httpd.serve_forever()

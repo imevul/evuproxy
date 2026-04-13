@@ -25,8 +25,9 @@ else
   exit 1
 fi
 
-mkdir -p "$CONFIG_DIR/generated" "$CONFIG_DIR/geo-zones"
+mkdir -p "$CONFIG_DIR/generated" "$CONFIG_DIR/geo-zones" /var/log/evuproxy
 chmod 755 "$CONFIG_DIR"
+chmod 750 /var/log/evuproxy
 
 sysctl -w net.ipv4.ip_forward=1 >/dev/null
 cat >/etc/sysctl.d/99-evuproxy-forwarding.conf <<'EOF'

@@ -34,7 +34,8 @@ func FirewallDropLogs(ctx context.Context, limit int) ([]string, string, error) 
 }
 
 func journalctlDropLines(ctx context.Context) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "journalctl", "-b", "--no-pager", "-n", "25000", "-o", "short-iso", "-r")
+	// Cap journal lines read: filtering keeps only drop-related rows; lower -n reduces journal I/O.
+	cmd := exec.CommandContext(ctx, "journalctl", "-b", "--no-pager", "-n", "6000", "-o", "short-iso", "-r")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

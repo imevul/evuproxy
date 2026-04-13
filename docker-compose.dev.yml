@@ -2,7 +2,8 @@
 #
 #   docker compose -f docker-compose.dev.yml up --build
 #
-# Open http://127.0.0.1:9080 — use API token "dev" (or set MOCK_API_TOKEN).
+# Open http://127.0.0.1:9080 — MOCK_API_TOKEN is required (default "dev" below).
+# Optional: MOCK_API_BIND=127.0.0.1 for loopback-only mock (not reachable from the UI container).
 #
 # UI and mock script are bind-mounted: edit web/* or mock_server.py, reload browser
 # or `docker compose -f docker-compose.dev.yml restart mock-api` — no rebuild.

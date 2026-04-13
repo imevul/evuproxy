@@ -12,6 +12,8 @@ Production nginx sends **`Cache-Control: no-cache, private, must-revalidate`** f
 
 See also [Security and privacy](security-and-privacy.md) and [Local HTTP API](http-api.md).
 
+The UI is **dark-themed** only. **Overview** shows recent **audit events** (from the API) and geo list freshness when available. **Settings** can download raw **`config.yaml`**. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API.
+
 ## Local UI with mock API
 
 To try the admin UI **without** `evuproxy serve` on the host (no WireGuard or nftables changes), use the dev stack: a stub API in Docker plus the same UI image, wired on the compose network.

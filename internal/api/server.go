@@ -6,9 +6,12 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/imevul/evuproxy/internal/apply"
 	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/eventlog"
 )
 
 type Server struct {
@@ -32,6 +36,10 @@ type Server struct {
 	// (reload, update-geo, backup, restore, PUT /config, POST /config/discard, POST /config/restore-previous-applied).
 	// A second concurrent request fails fast with HTTP 503 and does not queue.
 	applyMu sync.Mutex
+
+	EventLog  *eventlog.Logger
+	routeTest *slidingLimiter
+	logsRL    *slidingLimiter
 }
 
 func tokenMatch(got, want string) bool {
@@ -41,6 +49,14 @@ func tokenMatch(got, want string) bool {
 	g := sha256.Sum256([]byte(got))
 	w := sha256.Sum256([]byte(want))
 	return subtle.ConstantTimeCompare(g[:], w[:]) == 1
+}
+
+func bearerTokenFromRequest(r *http.Request) string {
+	authz := strings.TrimSpace(r.Header.Get("Authorization"))
+	if len(authz) >= 7 && strings.EqualFold(authz[:7], "Bearer ") {
+		return strings.TrimSpace(authz[7:])
+	}
+	return strings.TrimSpace(r.Header.Get("X-API-Token"))
 }
 
 // tryMutatingLock acquires applyMu or responds with 503 and returns false.
@@ -58,10 +74,7 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			s.jsonErr(w, http.StatusServiceUnavailable, "API token not configured")
 			return
 		}
-		tok := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-		if tok == "" {
-			tok = r.Header.Get("X-API-Token")
-		}
+		tok := bearerTokenFromRequest(r)
 		if !tokenMatch(tok, s.Token) {
 			s.jsonErr(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -71,6 +84,12 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) Routes() http.Handler {
+	if s.routeTest == nil {
+		s.routeTest = newSlidingLimiter()
+	}
+	if s.logsRL == nil {
+		s.logsRL = newSlidingLimiter()
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -81,7 +100,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/status", s.auth(s.handleStatus))
 	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.handleMetrics))
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.handleOverview))
+	mux.HandleFunc("GET /api/v1/events", s.auth(s.handleEventsGet))
+	mux.HandleFunc("GET /api/v1/geo/summary", s.auth(s.handleGeoSummary))
+	mux.HandleFunc("GET /api/v1/config.yaml", s.auth(s.handleConfigYAMLGet))
 	mux.HandleFunc("GET /api/v1/config", s.auth(s.handleConfigGet))
+	mux.HandleFunc("POST /api/v1/routes/test", s.auth(s.handleRouteTest))
 	mux.HandleFunc("PUT /api/v1/config", s.auth(s.handleConfigPut))
 	mux.HandleFunc("POST /api/v1/config/discard", s.auth(s.handleConfigDiscard))
 	mux.HandleFunc("POST /api/v1/config/restore-previous-applied", s.auth(s.handleConfigRestorePreviousApplied))
@@ -101,11 +124,15 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.applyMu.Unlock()
+	s.emit(eventlog.Record{Event: "reload_started", Detail: "reload"})
 	if err := apply.Reload(s.Config); err != nil {
 		s.logErr("reload", err)
+		s.emit(eventlog.Record{Event: "reload_failed", Detail: eventDetail(err.Error()), ErrorCode: "reload_error"})
 		s.jsonErr(w, http.StatusInternalServerError, "reload failed")
 		return
 	}
+	apply.InvalidateGeoSummaryCache()
+	s.emit(eventlog.Record{Event: "reload_ok", Detail: "reload"})
 	s.jsonOK(w, map[string]string{"result": "reloaded"})
 }
 
@@ -114,11 +141,15 @@ func (s *Server) handleUpdateGeo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.applyMu.Unlock()
+	s.emit(eventlog.Record{Event: "update_geo_started", Detail: "update-geo"})
 	if err := apply.UpdateGeo(s.Config); err != nil {
 		s.logErr("update-geo", err)
+		s.emit(eventlog.Record{Event: "update_geo_failed", Detail: eventDetail(err.Error()), ErrorCode: "update_geo_error"})
 		s.jsonErr(w, http.StatusInternalServerError, "geo update failed")
 		return
 	}
+	apply.InvalidateGeoSummaryCache()
+	s.emit(eventlog.Record{Event: "update_geo_ok", Detail: "update-geo"})
 	s.jsonOK(w, map[string]string{"result": "geo_updated"})
 }
 
@@ -172,9 +203,17 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := apply.SaveConfigYAML(s.Config, &c); err != nil {
 		s.logErr("config put save", err)
+		var ve *config.ValidationError
+		if errors.As(err, &ve) {
+			s.emit(eventlog.Record{Event: "config_put_failed", Detail: eventDetail(ve.Msg), ErrorCode: ve.Code})
+			s.jsonAPIError(w, http.StatusBadRequest, ve.Msg, ve.Code)
+			return
+		}
+		s.emit(eventlog.Record{Event: "config_put_failed", Detail: "save failed", ErrorCode: "config_save_error"})
 		s.jsonErr(w, http.StatusBadRequest, "could not save configuration")
 		return
 	}
+	s.emit(eventlog.Record{Event: "config_put_ok", Detail: "config saved"})
 	s.jsonOK(w, map[string]string{"result": "saved", "hint": "Review and apply from GET /api/v1/pending or POST /api/v1/reload"})
 }
 
@@ -185,9 +224,11 @@ func (s *Server) handleConfigDiscard(w http.ResponseWriter, r *http.Request) {
 	defer s.applyMu.Unlock()
 	if err := apply.DiscardPendingConfigYAML(s.Config); err != nil {
 		s.logErr("config discard", err)
+		s.emit(eventlog.Record{Event: "config_discard_failed", Detail: eventDetail(err.Error())})
 		s.jsonErr(w, http.StatusBadRequest, "could not discard pending changes")
 		return
 	}
+	s.emit(eventlog.Record{Event: "config_discard_ok", Detail: "discarded pending"})
 	s.jsonOK(w, map[string]string{"result": "discarded", "hint": "Review GET /api/v1/pending or POST /api/v1/reload"})
 }
 
@@ -198,9 +239,11 @@ func (s *Server) handleConfigRestorePreviousApplied(w http.ResponseWriter, r *ht
 	defer s.applyMu.Unlock()
 	if err := apply.RestorePreviousAppliedConfigYAML(s.Config); err != nil {
 		s.logErr("config restore previous", err)
+		s.emit(eventlog.Record{Event: "config_restore_previous_failed", Detail: eventDetail(err.Error())})
 		s.jsonErr(w, http.StatusBadRequest, "could not restore previous applied configuration")
 		return
 	}
+	s.emit(eventlog.Record{Event: "config_restore_previous_ok", Detail: "restored previous applied"})
 	s.jsonOK(w, map[string]string{"result": "restored", "hint": "Review GET /api/v1/pending or POST /api/v1/reload"})
 }
 
@@ -278,6 +321,14 @@ func (s *Server) handleAbout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	rateKey := bearerTokenFromRequest(r)
+	if rateKey == "" {
+		rateKey = "."
+	}
+	if !s.logsRL.allow(rateKey, 20, 0, time.Minute) {
+		s.jsonAPIError(w, http.StatusTooManyRequests, "rate limit exceeded for firewall logs", "rate_limit")
+		return
+	}
 	limit := 200
 	if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
 		if n, err := strconv.Atoi(q); err == nil && n > 0 {
@@ -328,9 +379,11 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := apply.Backup(s.Config, path); err != nil {
 		s.logErr("backup", err)
+		s.emit(eventlog.Record{Event: "backup_failed", Detail: eventDetail(err.Error())})
 		s.jsonErr(w, http.StatusInternalServerError, "backup failed")
 		return
 	}
+	s.emit(eventlog.Record{Event: "backup_ok", Detail: eventDetail(path)})
 	s.jsonOK(w, map[string]string{"archive": path})
 }
 
@@ -352,10 +405,162 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := apply.Restore(s.Config, path); err != nil {
 		s.logErr("restore", err)
+		s.emit(eventlog.Record{Event: "restore_failed", Detail: eventDetail(err.Error())})
 		s.jsonErr(w, http.StatusInternalServerError, "restore failed")
 		return
 	}
+	s.emit(eventlog.Record{Event: "restore_ok", Detail: eventDetail(path)})
 	s.jsonOK(w, map[string]string{"result": "restored", "hint": "run evuproxy reload"})
+}
+
+func eventDetail(s string) string {
+	return apply.TruncateForLog(s, 512)
+}
+
+func (s *Server) emit(rec eventlog.Record) {
+	if s.EventLog == nil {
+		return
+	}
+	if err := s.EventLog.Append(rec); err != nil && s.Logger != nil {
+		s.Logger.Warn("eventlog append", "err", err)
+	}
+}
+
+func (s *Server) jsonAPIError(w http.ResponseWriter, status int, msg, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	out := map[string]string{"error": msg}
+	if code != "" {
+		out["error_code"] = code
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) handleConfigYAMLGet(w http.ResponseWriter, r *http.Request) {
+	b, err := os.ReadFile(s.Config)
+	if err != nil {
+		s.logErr("config yaml get", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not read configuration file")
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-yaml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="config.yaml"`)
+	_, _ = w.Write(b)
+}
+
+func (s *Server) handleEventsGet(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if q := strings.TrimSpace(r.URL.Query().Get("limit")); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 1 || n > 200 {
+			s.jsonAPIError(w, http.StatusBadRequest, "invalid limit (use 1-200)", "invalid_limit")
+			return
+		}
+		limit = n
+	}
+	if s.EventLog == nil {
+		s.jsonOK(w, map[string]any{"events": []any{}})
+		return
+	}
+	recs, err := s.EventLog.ReadTail(limit)
+	if err != nil {
+		s.logErr("events get", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not read events")
+		return
+	}
+	type row struct {
+		Ts         string `json:"ts"`
+		Event      string `json:"event"`
+		Detail     string `json:"detail,omitempty"`
+		HTTPStatus int    `json:"http_status,omitempty"`
+		ErrorCode  string `json:"error_code,omitempty"`
+	}
+	out := make([]row, 0, len(recs))
+	for _, e := range recs {
+		out = append(out, row{
+			Ts:         e.Ts.UTC().Format(time.RFC3339),
+			Event:      e.Event,
+			Detail:     e.Detail,
+			HTTPStatus: e.HTTPStatus,
+			ErrorCode:  e.ErrorCode,
+		})
+	}
+	s.jsonOK(w, map[string]any{"events": out})
+}
+
+func (s *Server) handleGeoSummary(w http.ResponseWriter, r *http.Request) {
+	g, err := apply.GeoSummary(s.Config)
+	if err != nil {
+		s.logErr("geo summary", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not build geo summary")
+		return
+	}
+	s.jsonOK(w, g)
+}
+
+func (s *Server) handleRouteTest(w http.ResponseWriter, r *http.Request) {
+	rateKey := bearerTokenFromRequest(r)
+	if rateKey == "" {
+		rateKey = "."
+	}
+	if !s.routeTest.allow(rateKey, 10, 0, time.Minute) {
+		s.jsonAPIError(w, http.StatusTooManyRequests, "rate limit exceeded for route tests", "rate_limit")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<14)
+	defer r.Body.Close()
+	var body struct {
+		RouteIndex int `json:"route_index"`
+		Port       int `json:"port"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<14)).Decode(&body); err != nil {
+		s.jsonErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if !s.applyMu.TryLock() {
+		s.jsonErr(w, http.StatusServiceUnavailable, "another configuration or apply operation is in progress")
+		return
+	}
+	c, err := config.Load(s.Config)
+	s.applyMu.Unlock()
+	if err != nil {
+		s.logErr("route test load config", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not load configuration")
+		return
+	}
+	res, err := apply.ProbeForwardingRoute(r.Context(), c, body.RouteIndex, body.Port)
+	if err != nil {
+		s.logErr("route test probe", err)
+		s.jsonErr(w, http.StatusBadRequest, routeTestClientMsg(err))
+		return
+	}
+	s.jsonOK(w, map[string]any{"results": res})
+}
+
+func routeTestClientMsg(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "probe timed out or canceled"
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "invalid route_index"):
+		return "invalid route index"
+	case strings.Contains(msg, "route is disabled"):
+		return "route is disabled"
+	case strings.Contains(msg, "route has no ports"):
+		return "route has no ports"
+	case strings.Contains(msg, "port not in route"):
+		return "port not in route"
+	case strings.Contains(msg, "invalid target_ip"):
+		return "invalid target IP"
+	case strings.Contains(msg, "invalid proto"):
+		return "invalid route protocol"
+	default:
+		return "route test failed"
+	}
 }
 
 func (s *Server) jsonOK(w http.ResponseWriter, v any) {
@@ -383,6 +588,11 @@ func (s *Server) Run() error {
 	}
 	if err := apply.EnsureApplyStateFromDisk(s.Config); err != nil {
 		s.Logger.Warn("apply state bootstrap", "err", err)
+	}
+	if el, err := eventlog.New(filepath.Dir(s.Config), eventlog.MaxBytesFromEnv()); err != nil {
+		s.Logger.Warn("event log disabled", "err", err)
+	} else {
+		s.EventLog = el
 	}
 	handler := http.Handler(s.Routes())
 	if cors := parseCORSOrigins(s.CORSOrigins); cors != nil {

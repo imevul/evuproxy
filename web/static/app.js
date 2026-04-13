@@ -27,7 +27,7 @@
 
   const peerInstallScriptUrl =
     window.EVUPROXY_PEER_INSTALL_SCRIPT_URL ||
-    "https://raw.githubusercontent.com/imevul/evuproxy/main/scripts/peer-install.sh";
+    "https://raw.githubusercontent.com/imevul/evuproxy/v0.5.0/scripts/peer-install.sh";
   const tokenKey = "evuproxy_api_token";
   const endpointKey = "evuproxy_onboard_endpoint";
   const peerSubnetKey = "evuproxy_peer_subnet_cidr";
@@ -60,6 +60,8 @@
   let logsSearchDebounceTimer = null;
   /** Ignores stale responses when multiple refreshLogsPage calls overlap. */
   let logsRefreshSeq = 0;
+
+  let overviewEventsTimer = null;
 
   const pages = [
     "overview",
@@ -128,6 +130,151 @@
     const h = { Accept: "application/json", "Content-Type": "application/json" };
     if (t) h["X-API-Token"] = t;
     return h;
+  }
+
+  function headersDownload() {
+    const t = token();
+    const h = { Accept: "*/*" };
+    if (t) h["X-API-Token"] = t;
+    return h;
+  }
+
+  function downloadTextFile(filename, text, mime) {
+    const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function stopOverviewEventsPolling() {
+    if (overviewEventsTimer) {
+      clearInterval(overviewEventsTimer);
+      overviewEventsTimer = null;
+    }
+  }
+
+  function restartOverviewEventsPolling() {
+    stopOverviewEventsPolling();
+    void refreshOverviewEventsList();
+    overviewEventsTimer = setInterval(refreshOverviewEventsList, 30000);
+  }
+
+  async function refreshOverviewEventsList() {
+    const ul = $("overview-events-list");
+    const empty = $("overview-events-empty");
+    const card = $("overview-events-card");
+    if (!ul || !empty) return;
+    if (!token().trim()) {
+      ul.innerHTML = "";
+      empty.classList.remove("is-hidden");
+      if (card) card.hidden = true;
+      return;
+    }
+    if (card) card.hidden = false;
+    try {
+      const data = await api("/v1/events?limit=25");
+      const evs = data.events || [];
+      if (!evs.length) {
+        ul.innerHTML = "";
+        empty.classList.remove("is-hidden");
+        return;
+      }
+      empty.classList.add("is-hidden");
+      ul.innerHTML = evs
+        .map(
+          (e) =>
+            "<li><span class=\"overview-ev-ts\">" +
+            escapeHtml(e.ts || "") +
+            "</span> <strong>" +
+            escapeHtml(e.event || "") +
+            "</strong>" +
+            (e.detail ? " — " + escapeHtml(e.detail) : "") +
+            (e.error_code ? " <code class=\"inline\">" + escapeHtml(e.error_code) + "</code>" : "") +
+            "</li>"
+        )
+        .join("");
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  function applyPeersRoutesTableFilter() {
+    const q = ($("global-table-search") && $("global-table-search").value.trim().toLowerCase()) || "";
+    document.querySelectorAll("#peers-table-wrap tbody tr[data-filter]").forEach((tr) => {
+      const h = tr.getAttribute("data-filter") || "";
+      tr.classList.toggle("is-filter-hidden", !!q && !h.includes(q));
+    });
+    document.querySelectorAll("#routes-table-wrap tbody tr[data-filter]").forEach((tr) => {
+      const h = tr.getAttribute("data-filter") || "";
+      tr.classList.toggle("is-filter-hidden", !!q && !h.includes(q));
+    });
+  }
+
+  async function refreshGeoZonesTable() {
+    const wrap = $("geo-zones-table-wrap");
+    const msg = $("geo-zones-msg");
+    if (!wrap || !msg) return;
+    msg.textContent = "";
+    msg.classList.remove("err");
+    try {
+      const s = await api("/v1/geo/summary");
+      if (!s.enabled) {
+        wrap.innerHTML = "<p class=\"hint meta\">Geoblocking is off in config.</p>";
+        return;
+      }
+      const rows = (s.countries || [])
+        .map((c) => {
+          const miss = c.zone_missing ? " <span class=\"meta\">(zone file missing)</span>" : "";
+          return (
+            "<tr><td class=\"mono\">" +
+            escapeHtml(c.code) +
+            "</td><td>" +
+            escapeHtml(String(c.cidr_lines)) +
+            "</td><td>" +
+            escapeHtml(String(c.approx_ipv4_addresses)) +
+            "</td><td>" +
+            (c.zone_read_error ? escapeHtml(c.zone_read_error) : "—") +
+            miss +
+            "</td></tr>"
+          );
+        })
+        .join("");
+      let foot = "";
+      if (s.nft_set_elem_count != null) {
+        foot =
+          "<p class=\"hint meta\">Merged <code class=\"inline\">inet</code> set element count: " +
+          escapeHtml(String(s.nft_set_elem_count)) +
+          (s.nft_set_count_source ? " (" + escapeHtml(s.nft_set_count_source) + ")" : "") +
+          "</p>";
+      }
+      wrap.innerHTML =
+        "<table class=\"data\"><thead><tr><th>Country</th><th>CIDR lines</th><th>Approx. IPv4</th><th>Note</th></tr></thead><tbody>" +
+        rows +
+        "</tbody></table>" +
+        foot;
+    } catch (e) {
+      msg.textContent = String(e.message || e);
+      msg.classList.add("err");
+      wrap.innerHTML = "";
+    }
+  }
+
+  async function runRouteProbe(index) {
+    setRoutesMsg("…");
+    try {
+      const res = await api("/v1/routes/test", {
+        method: "POST",
+        body: JSON.stringify({ route_index: index }),
+      });
+      const parts = (res.results || []).map(
+        (r) => r.proto + " port " + r.port + ": " + r.status + (r.error_detail ? " — " + r.error_detail : "")
+      );
+      setRoutesMsg(parts.join("; ") || "No results.");
+    } catch (e) {
+      setRoutesMsg(String(e.message || e), true);
+    }
   }
 
   function setApiStatus(ok, detail) {
@@ -202,7 +349,9 @@
           err = "HTTP " + r.status + ": unexpected HTML from server (check nginx/API upstream).";
         }
       }
-      throw new Error(err);
+      const ex = new Error(err);
+      if (body.error_code) ex.errorCode = body.error_code;
+      throw ex;
     }
     return body;
   }
@@ -253,7 +402,12 @@
     if (location.hash.replace(/^#\/?/, "") !== name) {
       location.hash = "#/" + name;
     }
-    if (name === "overview") await refreshOverviewPage();
+    if (name === "overview") {
+      await refreshOverviewPage();
+      restartOverviewEventsPolling();
+    } else {
+      stopOverviewEventsPolling();
+    }
     if (name === "settings") await refreshSettingsPage();
     if (name === "token") {
       refreshTokenPage();
@@ -329,6 +483,8 @@
         })
       );
       if (actionsCard) actionsCard.hidden = true;
+      const evCard0 = $("overview-events-card");
+      if (evCard0) evCard0.hidden = true;
       return;
     }
     try {
@@ -353,6 +509,15 @@
         )
       );
       grid.appendChild(elStat("Peers", String((o.peer_names || []).length)));
+      if (o.geo_last_success_utc) {
+        grid.appendChild(
+          elStat(
+            "Geo lists last loaded",
+            o.geo_last_success_utc + (o.geo_last_success_source ? " · " + o.geo_last_success_source : "")
+          )
+        );
+      }
+      void refreshOverviewEventsList();
     } catch (e) {
       if (seq !== overviewRefreshSeq) return;
       const errText = String(e.message || e);
@@ -367,6 +532,12 @@
           detail: errText,
         })
       );
+      const evUl = $("overview-events-list");
+      const evEmpty = $("overview-events-empty");
+      const evCard = $("overview-events-card");
+      if (evUl) evUl.innerHTML = "";
+      if (evEmpty) evEmpty.classList.remove("is-hidden");
+      if (evCard) evCard.hidden = true;
     }
   }
 
@@ -631,10 +802,12 @@
         : "";
     const pubMap = wgPeerPubKeyMap(wgStats);
     const rows = cfg.peers
-      .map(
-        (p, i) =>
-          `<tr><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
-      )
+      .map((p, i) => {
+        const f = [p.name, p.tunnel_ip, p.public_key].join(" ").toLowerCase();
+        return (
+          `<tr data-filter="${escapeHtml(f)}"><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+        );
+      })
       .join("");
     wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Status</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
@@ -650,6 +823,7 @@
         await patchPeerDisabled(idx, !inp.checked);
       });
     });
+    applyPeersRoutesTableFilter();
   }
 
   function escapeHtml(s) {
@@ -657,7 +831,9 @@
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
+      .replace(/\//g, "&#47;");
   }
 
   function trunc(s, n) {
@@ -939,14 +1115,19 @@
       return;
     }
     const rows = routes
-      .map(
-        (r, i) =>
-          `<tr><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td>${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
-      )
+      .map((r, i) => {
+        const f = [formatRouteProtoCell(r.proto), (r.ports || []).join(", "), r.target_ip].join(" ").toLowerCase();
+        return (
+          `<tr data-filter="${escapeHtml(f)}"><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td>${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-test="${i}" class="btn-quiet">Test</button> <button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+        );
+      })
       .join("");
     wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-route-edit]").forEach((b) => {
       b.addEventListener("click", () => openRouteEditor(+b.getAttribute("data-route-edit")));
+    });
+    wrap.querySelectorAll("[data-route-test]").forEach((b) => {
+      b.addEventListener("click", () => runRouteProbe(+b.getAttribute("data-route-test")));
     });
     wrap.querySelectorAll("[data-route-del]").forEach((b) => {
       b.addEventListener("click", () => removeRoute(+b.getAttribute("data-route-del")));
@@ -958,6 +1139,7 @@
         await patchRouteDisabled(idx, !inp.checked);
       });
     });
+    applyPeersRoutesTableFilter();
   }
 
   function openRouteEditor(index) {
@@ -1460,6 +1642,7 @@
       setGeoMsg(String(e.message || e), true);
     }
     syncGeoAdvancedFieldsVisibility();
+    void refreshGeoZonesTable();
   }
 
   async function geoUpdateLists() {
@@ -1949,7 +2132,7 @@
         const rows = st.wireguard_peers
           .map(
             (p) =>
-              `<tr><td class="mono">${escapeHtml(trunc(p.public_key, 24))}</td><td>${escapeHtml(p.endpoint || "—")}</td><td class="mono">${escapeHtml(fmtHandshake(p.latest_handshake_unix))}</td><td>${p.transfer_rx} / ${p.transfer_tx}</td></tr>`
+              `<tr><td class="mono">${escapeHtml(trunc(p.public_key, 24))}</td><td>${escapeHtml(p.endpoint || "—")}</td><td class="mono">${escapeHtml(fmtHandshake(p.latest_handshake_unix))}</td><td>${escapeHtml(String(p.transfer_rx ?? ""))} / ${escapeHtml(String(p.transfer_tx ?? ""))}</td></tr>`
           )
           .join("");
         wgW.innerHTML = `<table class="data"><thead><tr><th>Public key</th><th>Endpoint</th><th>Handshake</th><th>RX / TX</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -1960,7 +2143,7 @@
         const rows = st.nftables_counters
           .map(
             (r) =>
-              `<tr><td>${escapeHtml(r.family)}</td><td>${escapeHtml(r.table)}</td><td>${r.packets}</td><td>${r.bytes}</td><td class="mono" style="max-width:24rem;word-break:break-all">${escapeHtml(r.line)}</td></tr>`
+              `<tr><td>${escapeHtml(r.family)}</td><td>${escapeHtml(r.table)}</td><td>${escapeHtml(String(r.packets ?? ""))}</td><td>${escapeHtml(String(r.bytes ?? ""))}</td><td class="mono" style="max-width:24rem;word-break:break-all">${escapeHtml(r.line)}</td></tr>`
           )
           .join("");
         nftW.innerHTML = `<table class="data"><thead><tr><th>Family</th><th>Table</th><th>Packets</th><th>Bytes</th><th>Rule</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -2512,6 +2695,48 @@
   }
   syncContentWidthSelect();
 
+  const gSearch = $("global-table-search");
+  if (gSearch) {
+    gSearch.addEventListener("input", () => applyPeersRoutesTableFilter());
+  }
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    const tag = (ev.target && ev.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ev.target?.isContentEditable) return;
+    ev.preventDefault();
+    if (gSearch) gSearch.focus();
+  });
+
+  const dlYaml = $("settings-download-yaml");
+  if (dlYaml) {
+    dlYaml.addEventListener("click", async () => {
+      const msg = $("settings-prefs-msg");
+      if (msg) {
+        msg.textContent = "";
+        msg.classList.remove("err");
+      }
+      try {
+        const r = await fetch(getApiBase() + "/v1/config.yaml", { headers: headersDownload() });
+        if (!r.ok) {
+          const t = await r.text();
+          throw new Error(t || r.statusText);
+        }
+        const blob = await r.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "config.yaml";
+        a.click();
+        URL.revokeObjectURL(a.href);
+        if (msg) msg.textContent = "Download started.";
+      } catch (e) {
+        if (msg) {
+          msg.textContent = String(e.message || e);
+          msg.classList.add("err");
+        }
+      }
+    });
+  }
+
   $("save-token").addEventListener("click", () => {
     const t = $("token").value.trim();
     if (t) {
@@ -2563,7 +2788,12 @@
         peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr,
         wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
       };
-      if (msg) msg.textContent = "Preferences saved on server.";
+      if (msg) {
+        msg.textContent = "Preferences saved on server.";
+        if (!epRaw) {
+          msg.textContent += " Tip: add WireGuard server endpoint (host:port) for client snippets.";
+        }
+      }
       setApiStatus(true);
     } catch (e) {
       if (msg) {
@@ -2839,6 +3069,43 @@
     $("onboard-out").classList.remove("is-collapsed");
     setOnboardMsg("Output below.");
   });
+
+  function extractOnboardConfFromOutput() {
+    const out = ($("onboard-out") && $("onboard-out").textContent) || "";
+    const idx = out.indexOf("[Interface]");
+    if (idx < 0) return "";
+    return out.slice(idx).trim();
+  }
+
+  const obDlConf = $("onboard-download-conf");
+  if (obDlConf) {
+    obDlConf.addEventListener("click", () => {
+      const conf = extractOnboardConfFromOutput();
+      if (!conf) {
+        setOnboardMsg("Build YAML + WireGuard config first.", true);
+        return;
+      }
+      const name = ($("peer-f-name") && $("peer-f-name").value.trim()) || "peer";
+      const safe = name.replace(/[^a-zA-Z0-9._-]+/g, "-");
+      downloadTextFile("evuproxy-" + safe + ".conf", conf, "text/plain;charset=utf-8");
+      setOnboardMsg("Downloaded .conf");
+    });
+  }
+  const obDlSh = $("onboard-download-sh");
+  if (obDlSh) {
+    obDlSh.addEventListener("click", () => {
+      const pre = $("onboard-install-cmd");
+      const txt = pre && pre.textContent ? pre.textContent.trim() : "";
+      if (!txt || txt === onboardInstallCmdPlaceholder) {
+        setOnboardMsg("Install command not ready — fill peer fields first.", true);
+        return;
+      }
+      const name = ($("peer-f-name") && $("peer-f-name").value.trim()) || "peer";
+      const safe = name.replace(/[^a-zA-Z0-9._-]+/g, "-");
+      downloadTextFile("evuproxy-peer-" + safe + "-install.sh", txt + "\n", "text/x-shellscript;charset=utf-8");
+      setOnboardMsg("Downloaded install script text.");
+    });
+  }
 
   $("onboard-install-copy").addEventListener("click", () => {
     void copyOnboardInstallCmd();

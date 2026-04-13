@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/eventlog"
 )
 
 func TestAuth_unauthorizedWithoutTokenHeader(t *testing.T) {
@@ -34,6 +35,31 @@ func TestAuth_unauthorizedWithoutTokenHeader(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+}
+
+func TestAuth_okWithLowercaseBearerScheme(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	writeMinimalConfig(t, cfgPath)
+
+	s := &Server{
+		Token:  "secret-token",
+		Config: cfgPath,
+		Listen: "127.0.0.1:0",
+	}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/config", nil)
+	req.Header.Set("Authorization", "bearer secret-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
 }
@@ -353,6 +379,172 @@ func TestConfigRestorePreviousApplied_failsWithoutHistory(t *testing.T) {
 	defer respRes.Body.Close()
 	if respRes.StatusCode != http.StatusBadRequest {
 		t.Fatalf("restore %d want 400", respRes.StatusCode)
+	}
+}
+
+func TestEventsGet_invalidLimit(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	writeMinimalConfig(t, cfgPath)
+	el, err := eventlog.New(filepath.Dir(cfgPath), eventlog.DefaultMaxBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		Token:    "t",
+		Config:   cfgPath,
+		Listen:   "127.0.0.1:0",
+		EventLog: el,
+	}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/events?limit=999", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d want 400", resp.StatusCode)
+	}
+}
+
+func TestConfigYAMLGet_ok(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	writeMinimalConfig(t, cfgPath)
+	s := &Server{
+		Token:  "t",
+		Config: cfgPath,
+		Listen: "127.0.0.1:0",
+	}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/config.yaml", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "wireguard:") {
+		t.Fatalf("unexpected body %q", b)
+	}
+}
+
+func TestRouteTest_clientErrorStable(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	writeMinimalConfig(t, cfgPath)
+	s := &Server{
+		Token:  "t",
+		Config: cfgPath,
+		Listen: "127.0.0.1:0",
+	}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	body := strings.NewReader(`{"route_index": 99}`)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/routes/test", body)
+	req.Header.Set("Authorization", "Bearer t")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d want 400", resp.StatusCode)
+	}
+	var out map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out["error"] != "invalid route index" {
+		t.Fatalf("error %q", out["error"])
+	}
+}
+
+func TestRouteTest_rateLimit(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	writeMinimalConfig(t, cfgPath)
+	s := &Server{
+		Token:  "t",
+		Config: cfgPath,
+		Listen: "127.0.0.1:0",
+	}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	for i := 0; i < 10; i++ {
+		body := strings.NewReader(`{"route_index": 99}`)
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/routes/test", body)
+		req.Header.Set("Authorization", "Bearer t")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("iter %d status %d want 400", i, resp.StatusCode)
+		}
+	}
+	body := strings.NewReader(`{"route_index": 99}`)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/routes/test", body)
+	req.Header.Set("Authorization", "Bearer t")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status %d want 429", resp.StatusCode)
+	}
+}
+
+func TestLogs_rateLimit(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "c.yaml")
+	writeMinimalConfig(t, cfgPath)
+	s := &Server{
+		Token:  "t",
+		Config: cfgPath,
+		Listen: "127.0.0.1:0",
+	}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	for i := 0; i < 20; i++ {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/logs", nil)
+		req.Header.Set("Authorization", "Bearer t")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/logs", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status %d want 429", resp.StatusCode)
 	}
 }
 

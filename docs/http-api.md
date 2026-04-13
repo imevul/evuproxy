@@ -33,8 +33,24 @@ All paths below are under **`/api/v1`** unless noted.
 | `GET`         | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`, `/about` | Diagnostics, config summary, **`/metrics`** text for both **inet evuproxy** forward and input chains (either `nft list` failure → 5xx), host stats, recent firewall-related journal lines, version info.                                             |
 | `POST`        | `/backup?path=…`, `/restore?path=…`                             | Archive or restore under `/etc/evuproxy`. Paths must resolve under **`EVUPROXY_BACKUP_DIR`** (default `/var/backups`). **`backup`** defaults `path` to `/var/backups/evuproxy-config.tgz` if omitted; **`restore`** requires `path`.   |
 | `GET`         | `/healthz`                                                      | Plain `ok` (no `/api/v1` prefix, no token).                                                                                                               |
+| `GET`         | `/config.yaml`                                                  | Raw **`config.yaml` bytes** from disk (`Content-Disposition: attachment`). Same auth as **`GET /config`**.                                               |
+| `GET`         | `/events?limit=`                                                | Recent mutating-operation audit events (JSONL-backed, newest first; default **50**, max **200**). Omit **`limit`** or use **`1`–`200`**; other values return **400** with **`error_code`:** `invalid_limit`. |
+| `GET`         | `/geo/summary`                                                  | Per-country zone file stats (CIDR line counts, approximate IPv4 totals) and optional merged **`nft`** set size; short-lived server cache.                  |
+| `POST`        | `/routes/test`                                                  | On-demand **TCP/UDP** connect/probe from the host to a route’s **`target_ip`** and port (body: `{"route_index":0,"port":optional}`). Rate-limited.        |
 
 
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
+
+Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**) with HTTP **400** in addition to **`error`**.
+
+**`GET /api/v1/overview`** may include **`geo_last_success_utc`** and **`geo_last_success_source`** after a successful geo loader run.
+
+## File logging (`evuproxy serve`)
+
+When **`EVUPROXY_LOG_DIR`** is set (e.g. **`/var/log/evuproxy`**), **`evuproxy serve`** writes **JSON lines** to **`$EVUPROXY_LOG_DIR/evuproxy.jsonl`** in addition to **stderr** (journald). Unset in development to skip file logging. See [contrib/logrotate.d/evuproxy](../contrib/logrotate.d/evuproxy) for rotation notes.
+
+## Audit events file
+
+Mutations append JSON lines under **`/etc/evuproxy/state/events.jsonl`** (config-adjacent **`state/`** directory). Size is capped (**default 2 MiB**; override **`EVUPROXY_EVENTS_MAX_BYTES`**, clamped **256 KiB–8 MiB**). Only one **`evuproxy serve`** process should write this file unless you add external locking.
 
 **`POST /api/v1/config/discard`** and **`POST /api/v1/config/restore-previous-applied`** match **`evuproxy discard-pending`** and **`evuproxy restore-previous-applied`** (see [Applying changes](config.md#applying-changes)).

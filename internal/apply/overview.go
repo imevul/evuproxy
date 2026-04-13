@@ -23,6 +23,10 @@ type Overview struct {
 	ServerPublicKey string `json:"server_public_key,omitempty"`
 	// TunnelSubnet is the CIDR of the WireGuard interface address (for client AllowedIPs).
 	TunnelSubnet string `json:"tunnel_subnet,omitempty"`
+	// GeoLastSuccessUTC is RFC3339 UTC from geo-last-success.json when geo loader last succeeded; empty if never.
+	GeoLastSuccessUTC string `json:"geo_last_success_utc,omitempty"`
+	// GeoLastSuccessSource is "reload" or "update-geo" when GeoLastSuccessUTC is set.
+	GeoLastSuccessSource string `json:"geo_last_success_source,omitempty"`
 }
 
 func OverviewFromConfig(path string) (*Overview, error) {
@@ -48,6 +52,9 @@ func OverviewFromConfig(path string) (*Overview, error) {
 		o.TunnelSubnet = ipNet.String()
 	}
 	o.ServerPublicKey = wgPublicKeyFromFile(c.WireGuard.PrivateKeyFile)
+	g := ReadGeoLastSuccess(path)
+	o.GeoLastSuccessUTC = strings.TrimSpace(g.UTC)
+	o.GeoLastSuccessSource = strings.TrimSpace(g.Source)
 	return o, nil
 }
 

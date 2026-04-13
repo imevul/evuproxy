@@ -1,0 +1,12 @@
+# Example logrotate snippet for EvuProxy JSONL file logging (EVUPROXY_LOG_DIR=/var/log/evuproxy).
+# Prefer copytruncate-free rotation: use `create` + reload, or rotate by renaming and sending
+# SIGHUP if a future evuproxy version supports log reopen.
+/var/log/evuproxy/*.jsonl {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
