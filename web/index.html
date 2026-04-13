@@ -404,10 +404,13 @@
       <section id="page-geoblocking" class="page" hidden>
         <h2 class="page-title">Geoblocking</h2>
         <p class="hint" id="geo-page-hint">
-          When enabled, nftables restrict public forwarding and <code class="inline">input_allows</code> ports using
-          downloaded country zones. Choose whether the country list is an <strong>allow</strong> or <strong>block</strong>
-          list. Stored in <code class="inline">geo</code> in the main config. After saving, run
-          <strong>Update geo lists</strong> on this page or from Overview, then Apply on Pending changes.
+          When enabled, nftables restrict public forwarding using downloaded country zones. Inbound
+          <code class="inline">input_allows</code> (SSH, HTTP, etc.) follow the same rules only if you turn on
+          <strong>Apply geoblocking to inbound allow rules</strong> under the advanced fields below (default is off;
+          enable <a href="#/settings">Settings</a> → Advanced mode to show those fields). Choose whether the country
+          list is an <strong>allow</strong> or <strong>block</strong> list. Stored in <code class="inline">geo</code> in
+          the main config. After saving, run <strong>Update geo lists</strong> on this page or from Overview, then Apply
+          on Pending changes.
         </p>
         <div class="card">
           <div class="field">
@@ -459,10 +462,32 @@
               <input type="text" id="geo-f-zone-dir" placeholder="/etc/evuproxy/geo-zones" autocomplete="off" />
               <span class="meta">Directory for <code class="inline">.zone</code> files (required when enabled).</span>
             </div>
+            <div class="field">
+              <div class="toggle-switch-row">
+                <span class="toggle-switch-text" id="geo-f-apply-input-desc">
+                  Apply geoblocking to inbound allow rules (<code class="inline">input_allows</code>)
+                </span>
+                <label class="toggle-switch">
+                  <input
+                    type="checkbox"
+                    id="geo-f-apply-input-allows"
+                    class="toggle-switch-input"
+                    autocomplete="off"
+                    aria-labelledby="geo-f-apply-input-desc"
+                  />
+                  <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                </label>
+              </div>
+              <p class="hint meta" style="margin: 0.35rem 0 0">
+                When off (default), SSH, HTTP, and other <code class="inline">input_allows</code> stay reachable from any
+                source IPv4 even if geoblocking is on. When on, those ports use the same allow-list or block-list rules
+                as forwarded services. Save this page, then <strong>Apply</strong> on the host.
+              </p>
+            </div>
           </div>
           <p id="geo-advanced-fields-teaser" class="hint geo-advanced-teaser">
-            nftables set name and zone directory are hidden unless you need custom paths. Turn on Advanced mode in
-            <a href="#/settings">Settings</a> to edit them.
+            Set name, zone directory, and the <code class="inline">input_allows</code> geoblocking option are hidden
+            until you turn on Advanced mode in <a href="#/settings">Settings</a>.
           </p>
           <div class="btn-row">
             <button type="button" class="btn-primary" id="geo-save">Save</button>

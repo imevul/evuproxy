@@ -218,12 +218,28 @@ def _nft_from_config(cfg: dict) -> str:
             "",
         ]
     )
+    apply_geo_input = geo_enabled and bool(geo.get("apply_to_input_allows"))
     for a in cfg.get("input_allows") or []:
         if a.get("disabled"):
             continue
         p = (a.get("proto") or "").lower().strip()
         d = (a.get("dport") or "").strip()
-        if p in ("tcp", "udp") and d:
+        if p not in ("tcp", "udp") or not d:
+            continue
+        if apply_geo_input:
+            if block_listed:
+                lines.append(
+                    "        ip saddr @%s %s dport %s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop"
+                    % (geo_set, p, d)
+                )
+                lines.append("        %s dport %s accept" % (p, d))
+            else:
+                lines.append("        ip saddr @%s %s dport %s accept" % (geo_set, p, d))
+                lines.append(
+                    "        %s dport %s ip saddr != @%s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop"
+                    % (p, d, geo_set)
+                )
+        else:
             lines.append("        %s dport %s accept" % (p, d))
     lines.append("        udp dport %d accept" % wg_port)
 

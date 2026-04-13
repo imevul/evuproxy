@@ -59,6 +59,10 @@ type Geo struct {
 	SetName   string   `yaml:"set_name" json:"set_name"`
 	Countries []string `yaml:"countries" json:"countries"`
 	ZoneDir   string   `yaml:"zone_dir" json:"zone_dir"`
+	// ApplyToInputAllows, when true and geo is enabled, applies the same allow/block country logic to
+	// input_allows rules. When false (default), input_allows are unconditional accept lines (SSH, HTTP, etc.
+	// stay reachable from any source IPv4 regardless of geo mode).
+	ApplyToInputAllows bool `yaml:"apply_to_input_allows,omitempty" json:"apply_to_input_allows,omitempty"`
 }
 
 type AllowRule struct {

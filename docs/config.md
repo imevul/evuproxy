@@ -80,6 +80,7 @@ Controls whether forwarded traffic is restricted to source IPs in downloaded cou
 | `set_name` | string | nftables set name for IPv4 sources (default `geo_v4` when `enabled`). |
 | `countries` | list of strings | Lowercase ISO country codes (e.g. `se`, `no`). Required when `enabled` is true. |
 | `zone_dir` | string | Directory where per-country zone files are stored (e.g. `/etc/evuproxy/geo-zones`). Required when `enabled` is true. |
+| `apply_to_input_allows` | bool | If `true` and `enabled` is true, **`input_allows`** use the same geo allow/block logic as forwarded ports. Default **`false`**: **`input_allows`** stay plain INPUT accepts (SSH, HTTP, etc. remain reachable from any IPv4 source regardless of country lists). In the admin UI this appears on the **Geoblocking** page under advanced fields (enable **Advanced mode** in **Settings**). Geo rules use **`ip saddr`** (IPv4 only); IPv6 to the same TCP/UDP ports is not matched by those lines and may hit the chain **policy** (often **drop**)—plan separate rules if you need IPv6 admin access. **`network.admin_tcp_ports`** are still emitted as unconditional TCP accepts after **`input_allows`**; they are **not** wrapped by this option—avoid duplicating sensitive ports there if you expect geo to cover them. |
 
 When `geo.enabled` is true, `evuproxy reload` / `update-geo` expect zone files under `zone_dir`; empty or missing zones can block traffic when geo is enabled.
 

@@ -27,6 +27,7 @@ geo:
     - "no"
     - "se"
   zone_dir: /etc/evuproxy/geo-zones
+  # apply_to_input_allows: false # default; true = input_allows use the same geo rules as forwarded ports
 
 # Host INPUT allows (SSH, web, EvuProxy UI). Remove or edit entries you do not want (e.g. 9080 if UI is loopback-only).
 input_allows:

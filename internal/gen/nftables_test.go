@@ -192,6 +192,97 @@ func TestNFTablesSkipsDisabledInputAllow(t *testing.T) {
 	}
 }
 
+func TestNFTablesInputAllowsUnfilteredWhenGeoApplyOff(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		InputAllows: []config.AllowRule{
+			{Proto: "tcp", DPort: "2222"},
+		},
+		Geo: config.Geo{Enabled: true, SetName: "geo_v4", Countries: []string{"no"}, ZoneDir: "/z"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "tcp dport 2222 accept") {
+		t.Fatalf("input_allow must be plain accept when apply_to_input_allows is false: %s", s)
+	}
+	if strings.Contains(s, "ip saddr @geo_v4 tcp dport 2222") {
+		t.Fatalf("did not expect geo on input_allow 2222: %s", s)
+	}
+}
+
+func TestNFTablesInputAllowsGeoAllowMode(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		InputAllows: []config.AllowRule{
+			{Proto: "tcp", DPort: "2222"},
+		},
+		Geo: config.Geo{
+			Enabled:            true,
+			SetName:            "geo_v4",
+			Countries:          []string{"no"},
+			ZoneDir:            "/z",
+			ApplyToInputAllows: true,
+		},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport 2222 accept") {
+		t.Fatalf("expected geo allow on input 2222: %s", s)
+	}
+	if !strings.Contains(s, "tcp dport 2222 ip saddr != @geo_v4") {
+		t.Fatalf("expected geo drop for non-set on input 2222: %s", s)
+	}
+}
+
+func TestNFTablesInputAllowsGeoBlockMode(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		InputAllows: []config.AllowRule{
+			{Proto: "tcp", DPort: "2222"},
+		},
+		Geo: config.Geo{
+			Enabled:            true,
+			Mode:               "block",
+			SetName:            "geo_v4",
+			Countries:          []string{"ru"},
+			ZoneDir:            "/z",
+			ApplyToInputAllows: true,
+		},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport 2222 limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop") {
+		t.Fatalf("expected block-list geo drop on input 2222: %s", s)
+	}
+	if !strings.Contains(s, "tcp dport 2222 accept") {
+		t.Fatalf("expected accept after block rule for input 2222: %s", s)
+	}
+}
+
 func TestNFTablesForwardAllowDockerBridges(t *testing.T) {
 	c := &config.Config{
 		WireGuard: config.WireGuard{

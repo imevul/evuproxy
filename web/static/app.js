@@ -604,6 +604,7 @@
       /* ignore */
     }
     syncAdvancedSettingsToggle();
+    syncGeoAdvancedFieldsVisibility();
   }
 
   function syncAdvancedSettingsToggle() {
@@ -651,6 +652,7 @@
     const sep = $("settings-wg-endpoint");
     if (sep) sep.value = (lastUIPrefs.wireguard_server_endpoint || "").trim();
     syncAdvancedSettingsToggle();
+    syncGeoAdvancedFieldsVisibility();
     syncContentWidthSelect();
   }
 
@@ -1534,9 +1536,11 @@
     const en = $("geo-f-enabled");
     const sn = $("geo-f-set-name");
     const zd = $("geo-f-zone-dir");
+    const ap = $("geo-f-apply-input-allows");
     if (en) en.checked = !!g.enabled;
     if (sn) sn.value = g.set_name || "";
     if (zd) zd.value = g.zone_dir || "";
+    if (ap) ap.checked = !!g.apply_to_input_allows;
     const mode = String(g.mode || "allow").toLowerCase() === "block" ? "block" : "allow";
     setGeoListMode(mode);
     geoSelectedCodes = Array.isArray(g.countries)
@@ -1625,6 +1629,7 @@
     g.countries = geoSelectedCodes.slice().map((c) => c.toLowerCase());
     g.set_name = ($("geo-f-set-name") && $("geo-f-set-name").value.trim()) || "";
     g.zone_dir = ($("geo-f-zone-dir") && $("geo-f-zone-dir").value.trim()) || "";
+    g.apply_to_input_allows = !!($("geo-f-apply-input-allows") && $("geo-f-apply-input-allows").checked);
     try {
       await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
       lastConfig = cfg;

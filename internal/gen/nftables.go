@@ -65,15 +65,20 @@ func nftablesRoutes(c *config.Config) (string, error) {
 
 `)
 
+	applyGeoInput := c.Geo.Enabled && c.Geo.ApplyToInputAllows
 	for _, a := range c.InputAllows {
 		if a.Disabled {
 			continue
 		}
-		line, err := allowRuleLine(a)
+		proto, dport, err := inputAllowProtoPort(a)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("input_allows: %w", err)
 		}
-		fmt.Fprintf(&b, "        %s\n", line)
+		if applyGeoInput {
+			writeGeoProtoPortInputRules(&b, true, blockListed, geoSet, proto, dport)
+		} else {
+			fmt.Fprintf(&b, "        %s dport %s accept\n", proto, dport)
+		}
 	}
 
 	for _, port := range adminTCPPortsForInput(c) {
@@ -83,7 +88,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	fmt.Fprintf(&b, "        udp dport %d accept\n", c.WireGuard.ListenPort)
 
 	for _, r := range routes {
-		writeInputForwardPorts(&b, c.Geo.Enabled, blockListed, geoSet, r.proto, r.portExpr)
+		writeGeoProtoPortInputRules(&b, c.Geo.Enabled, blockListed, geoSet, r.proto, r.portExpr)
 	}
 
 	fmt.Fprintf(&b, `    }
@@ -199,7 +204,7 @@ func writeGeoSet(b *strings.Builder, geoSet string) {
 `, geoSet)
 }
 
-func writeInputForwardPorts(b *strings.Builder, geoEnabled, blockListed bool, geoSet, proto, portExpr string) {
+func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed bool, geoSet, proto, portExpr string) {
 	if portExpr == "" {
 		return
 	}
@@ -216,6 +221,18 @@ func writeInputForwardPorts(b *strings.Builder, geoEnabled, blockListed bool, ge
 	fmt.Fprintf(b, "        %s dport %s ip saddr != @%s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", proto, portExpr, geoSet)
 }
 
+func inputAllowProtoPort(a config.AllowRule) (proto, dport string, err error) {
+	p := strings.ToLower(strings.TrimSpace(a.Proto))
+	if p != "tcp" && p != "udp" {
+		return "", "", fmt.Errorf("proto must be tcp or udp")
+	}
+	d := strings.TrimSpace(a.DPort)
+	if d == "" {
+		return "", "", fmt.Errorf("dport is required")
+	}
+	return p, d, nil
+}
+
 func writeDnatRule(b *strings.Builder, geoEnabled, blockListed bool, geoSet, proto, portExpr, target string) {
 	if portExpr == "" {
 		return
@@ -230,21 +247,6 @@ func writeDnatRule(b *strings.Builder, geoEnabled, blockListed bool, geoSet, pro
 		return
 	}
 	fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", geoSet, proto, portExpr, target)
-}
-
-func allowRuleLine(a config.AllowRule) (string, error) {
-	p := strings.ToLower(strings.TrimSpace(a.Proto))
-	if p != "tcp" && p != "udp" {
-		return "", fmt.Errorf("input_allow proto must be tcp or udp")
-	}
-	d := strings.TrimSpace(a.DPort)
-	if d == "" {
-		return "", fmt.Errorf("input_allow dport is required")
-	}
-	if strings.ContainsAny(d, "{}") {
-		return fmt.Sprintf("%s dport %s accept", p, d), nil
-	}
-	return fmt.Sprintf("%s dport %s accept", p, d), nil
 }
 
 // formatPortSets turns YAML port entries into an nft list: { a-b, c }.
