@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/imevul/evuproxy/compare/v0.5.0...v0.6.0) (2026-04-13)
+
+
+### Features
+
+* **security:** implement CodeQL path sanitization in backup and restore functions ([ebf8354](https://github.com/imevul/evuproxy/commit/ebf835486f31d81d36de4765149a25606d40e00f))
+* **web:** client-side firewall log filtering and table view ([b06d97f](https://github.com/imevul/evuproxy/commit/b06d97f0ae33d4a6bac781b8e1f0b81d9c4105e5))
+* **web:** layout width setting, logs toolbar and date filters ([457d217](https://github.com/imevul/evuproxy/commit/457d217989e84b6001422a29564defabc1f882ba))
+
+
+### Bug Fixes
+
+* **security:** address CodeQL path, zip-slip, logging, and GHA permissions ([1775c7e](https://github.com/imevul/evuproxy/commit/1775c7e3357729161c5ce8cc36c012fd2a55f038))
+
 ## [0.5.0](https://github.com/imevul/evuproxy/compare/v0.4.0...v0.5.0) (2026-04-13)
 
 
