@@ -5,3 +5,18 @@
 # Private / local-only docs (not published in this repo)
 .cursor/
 local_docs/
+
+# Python (e.g. docker/mock-api when run locally)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
