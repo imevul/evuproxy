@@ -54,6 +54,30 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 - **Security and privacy** (telemetry, token storage, operational notes): [docs/security-and-privacy.md](docs/security-and-privacy.md)
 - **Third-party / IPDeny** (attribution, usage): [docs/third-party-data.md](docs/third-party-data.md)
 
+## Updating
+
+For installs that used **git clone** on the server and build from this repo, [scripts/update.sh](scripts/update.sh) refreshes the tree and binary:
+
+```bash
+cd /path/to/evuproxy   # repository root
+./scripts/update.sh
+```
+
+The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.22+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/`, restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file.
+
+**Limitations**
+
+- **`config.yaml` is yours:** the updater does not migrate, merge, or validate configuration. New releases may require new fields, renames, or stricter validation—read [CHANGELOG.md](CHANGELOG.md) and compare with [config/evuproxy.example.yaml](config/evuproxy.example.yaml), then run **`evuproxy reload`** (or fix issues before reloading) so you are not locked out.
+- **Local git changes:** `git pull` fails if you have uncommitted edits in the clone; commit, stash, or discard them first.
+- **Binary-only installs** (prebuilt `evuproxy` copied to `/usr/local/bin` without this repo) are not updated by this script—replace the binary from a [release](https://github.com/imevul/evuproxy/releases) and restart services manually.
+- **Peers and other hosts** are unchanged; client WireGuard configs are not updated by `update.sh`.
+
+**Backup and rollback**
+
+- Before updating, take a **config backup**: `evuproxy backup --dest /var/backups/evuproxy-pre-update.tgz` (or use the HTTP API—see [docs/http-api.md](docs/http-api.md) for path allowlisting), and/or copy `/etc/evuproxy/config.yaml` somewhere safe.
+- If something goes wrong after upgrade, **stop** the services, **restore** the archive with `evuproxy restore --archive …` (then `reload`), or put back the saved `config.yaml` and reinstall the **previous** binary (e.g. from an older GitHub release or `git checkout <tag>` + `sudo ./scripts/rebuild.sh --install`).
+- Keeping a copy of the old **`evuproxy` binary** under another name makes rollback faster than rebuilding from git history.
+
 ## Uninstall
 
 ```bash
