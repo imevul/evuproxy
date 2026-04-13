@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.0](https://github.com/imevul/evuproxy/compare/v0.6.0...v0.7.0) (2026-04-13)
+
+
+### Features
+
+* admin API enhancements, audit logging, and security hardening ([ddb5c89](https://github.com/imevul/evuproxy/commit/ddb5c8982b13fb6a2e62972f02682ffdb5016e37))
+* **logs:** optional GeoLite2 MMDB for SRC/DST country flags ([08d4296](https://github.com/imevul/evuproxy/commit/08d4296c83ef4e1e780df00de62c949d67cb6558))
+* **ui:** show country flags in geo zones summary table ([b131a2c](https://github.com/imevul/evuproxy/commit/b131a2c866d8d6720e6769357614e61ff266f36c))
+
+
+### Bug Fixes
+
+* **config:** allow port ranges up to 65535 distinct ports ([a41b73b](https://github.com/imevul/evuproxy/commit/a41b73bfc369cfa351c7df1fcb2da30531427747))
+* **serve:** tolerate unreadable GeoLite MMDB with stderr hint ([2ea90b9](https://github.com/imevul/evuproxy/commit/2ea90b91e04bbab5aa683724413ee743f78baa3c))
+
 ## [0.6.0](https://github.com/imevul/evuproxy/compare/v0.5.0...v0.6.0) (2026-04-13)
 
 
