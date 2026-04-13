@@ -3,6 +3,8 @@
   background: #0f1419;
   color: #e6edf3;
   line-height: 1.5;
+  /* Native UI (scrollbars, datetime picker, etc.) matches dark surfaces. */
+  color-scheme: dark;
 }
 
 * {
@@ -274,8 +276,16 @@ body.app .toggle-switch .toggle-switch-input[type="checkbox"] {
 .content {
   padding: 1.25rem;
   overflow: auto;
-  max-width: 1200px;
+  max-width: var(--evuproxy-content-max-width, 1200px);
   min-width: 0;
+}
+
+.settings-content-width-field {
+  margin-top: 1rem;
+}
+
+.settings-content-width-hint {
+  margin: 0.25rem 0 0.35rem;
 }
 
 .page-title {
@@ -1086,6 +1096,26 @@ table.data button {
   word-break: break-word;
 }
 
+.logs-toolbar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.logs-toolbar-wrap .logs-toolbar {
+  margin-bottom: 0;
+}
+
+.logs-toolbar-row {
+  width: 100%;
+}
+
+.logs-toolbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0.5rem;
+}
+
 .logs-toolbar {
   flex-wrap: wrap;
   align-items: flex-end;
@@ -1110,7 +1140,8 @@ table.data button {
 }
 
 .logs-field select,
-.logs-search-input {
+.logs-search-input,
+.logs-datetime-input {
   font: inherit;
   font-size: 0.9rem;
   color: #e6edf3;
@@ -1125,8 +1156,16 @@ table.data button {
   min-width: 0;
 }
 
-.logs-view-mode {
-  margin-left: auto;
+.logs-datetime-input {
+  min-width: 11.5rem;
+  color-scheme: dark;
+}
+
+/* Chromium/Safari: calendar glyph is tuned for light fields; invert for dark background. */
+.logs-datetime-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+  filter: invert(1);
 }
 
 .logs-count {

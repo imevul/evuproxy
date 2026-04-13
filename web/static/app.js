@@ -33,6 +33,13 @@
   const peerSubnetKey = "evuproxy_peer_subnet_cidr";
   const defaultPeerSubnetCidr = "10.100.0.0/24";
   const advancedSettingsKey = "evuproxy_advanced_settings";
+  const contentWidthKey = "evuproxy_content_width";
+  const contentWidthCssValues = {
+    small: "900px",
+    medium: "1200px",
+    large: "1400px",
+    full: "100%",
+  };
 
   const $ = (id) => document.getElementById(id);
 
@@ -371,6 +378,39 @@
   }
 
   /* ——— Settings ——— */
+  function getContentWidthPreset() {
+    try {
+      const v = localStorage.getItem(contentWidthKey);
+      if (v === "small" || v === "medium" || v === "large" || v === "full") return v;
+    } catch (e) {
+      /* ignore */
+    }
+    return "medium";
+  }
+
+  function applyContentMaxWidth(preset) {
+    const v = contentWidthCssValues[preset] || contentWidthCssValues.medium;
+    document.documentElement.style.setProperty("--evuproxy-content-max-width", v);
+  }
+
+  function setContentWidthPreset(preset) {
+    if (!Object.prototype.hasOwnProperty.call(contentWidthCssValues, preset)) preset = "medium";
+    try {
+      localStorage.setItem(contentWidthKey, preset);
+    } catch (e) {
+      /* ignore */
+    }
+    applyContentMaxWidth(preset);
+    syncContentWidthSelect();
+  }
+
+  function syncContentWidthSelect() {
+    const sel = $("settings-content-width");
+    if (!sel) return;
+    const p = getContentWidthPreset();
+    sel.value = Object.prototype.hasOwnProperty.call(contentWidthCssValues, p) ? p : "medium";
+  }
+
   function advancedSettingsEnabled() {
     try {
       return localStorage.getItem(advancedSettingsKey) === "1";
@@ -434,6 +474,7 @@
     const sep = $("settings-wg-endpoint");
     if (sep) sep.value = (lastUIPrefs.wireguard_server_endpoint || "").trim();
     syncAdvancedSettingsToggle();
+    syncContentWidthSelect();
   }
 
   function refreshTokenPage() {
@@ -1998,9 +2039,15 @@
       " " +
       flags.join(" ")
     ).toLowerCase();
+    let parsedTimeMs = NaN;
+    if (tsDisplay) {
+      const n = Date.parse(tsDisplay);
+      if (!Number.isNaN(n)) parsedTimeMs = n;
+    }
     return {
       raw: line,
       tsDisplay,
+      parsedTimeMs,
       kind,
       kv,
       flags,
@@ -2017,11 +2064,24 @@
     };
   }
 
-  function filterFirewallLogEntries(entries, typeFilter, needle) {
+  function logsDatetimeLocalInputMs(inp) {
+    if (!inp || !inp.value) return null;
+    const t = new Date(inp.value).getTime();
+    return Number.isNaN(t) ? null : t;
+  }
+
+  function filterFirewallLogEntries(entries, typeFilter, needle, rangeFromMs, rangeToMs) {
+    const fromActive = rangeFromMs != null && Number.isFinite(rangeFromMs);
+    const toActive = rangeToMs != null && Number.isFinite(rangeToMs);
     return entries.filter((e) => {
       if (typeFilter === "geo" && e.kind !== "geo") return false;
       if (typeFilter === "forward" && e.kind !== "forward") return false;
       if (needle && !e.searchBlob.includes(needle)) return false;
+      if (fromActive || toActive) {
+        if (!Number.isFinite(e.parsedTimeMs)) return false;
+        if (fromActive && e.parsedTimeMs < rangeFromMs) return false;
+        if (toActive && e.parsedTimeMs > rangeToMs) return false;
+      }
       return true;
     });
   }
@@ -2052,20 +2112,34 @@
     logsSearchDebounceTimer = null;
     const typeSel = $("logs-filter-type");
     const searchInp = $("logs-search");
+    const dateFrom = $("logs-date-from");
+    const dateTo = $("logs-date-to");
     if (typeSel) typeSel.value = "";
     if (searchInp) searchInp.value = "";
+    if (dateFrom) dateFrom.value = "";
+    if (dateTo) dateTo.value = "";
     renderLogsView();
   }
 
   function renderLogsView() {
     const typeSel = $("logs-filter-type");
     const searchInp = $("logs-search");
+    const dateFromInp = $("logs-date-from");
+    const dateToInp = $("logs-date-to");
     const wrap = $("logs-table-wrap");
     const pre = $("logs-pre");
     const countEl = $("logs-count");
     const typeF = typeSel ? String(typeSel.value || "") : "";
     const needle = (searchInp && searchInp.value.trim().toLowerCase()) || "";
-    const filtered = filterFirewallLogEntries(lastFirewallLogEntries, typeF, needle);
+    const rangeFromMs = logsDatetimeLocalInputMs(dateFromInp);
+    const rangeToMs = logsDatetimeLocalInputMs(dateToInp);
+    const filtered = filterFirewallLogEntries(
+      lastFirewallLogEntries,
+      typeF,
+      needle,
+      rangeFromMs,
+      rangeToMs
+    );
     const total = lastFirewallLogEntries.length;
     if (countEl) {
       if (!total) countEl.textContent = "";
@@ -2431,6 +2505,13 @@
   }
   syncAdvancedSettingsToggle();
 
+  applyContentMaxWidth(getContentWidthPreset());
+  const contentWidthSel = $("settings-content-width");
+  if (contentWidthSel) {
+    contentWidthSel.addEventListener("change", () => setContentWidthPreset(contentWidthSel.value));
+  }
+  syncContentWidthSelect();
+
   $("save-token").addEventListener("click", () => {
     const t = $("token").value.trim();
     if (t) {
@@ -2658,6 +2739,15 @@
   $("logs-refresh").addEventListener("click", refreshLogsPage);
   const logsFilterType = $("logs-filter-type");
   if (logsFilterType) logsFilterType.addEventListener("change", () => renderLogsView());
+  const logsDateFrom = $("logs-date-from");
+  const logsDateTo = $("logs-date-to");
+  function bindLogsDatetimeFilter(inp) {
+    if (!inp) return;
+    inp.addEventListener("change", () => renderLogsView());
+    inp.addEventListener("input", () => renderLogsView());
+  }
+  bindLogsDatetimeFilter(logsDateFrom);
+  bindLogsDatetimeFilter(logsDateTo);
   const logsSearch = $("logs-search");
   if (logsSearch) {
     logsSearch.addEventListener("input", () => {

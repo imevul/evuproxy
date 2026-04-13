@@ -96,6 +96,18 @@
               <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
             </label>
           </div>
+          <div class="field settings-content-width-field">
+            <label for="settings-content-width">Main content width</label>
+            <p class="hint meta settings-content-width-hint">
+              Max width of the main panel. Stored only in this browser (<code class="inline">localStorage</code>).
+            </p>
+            <select id="settings-content-width" autocomplete="off">
+              <option value="small">Small (900px)</option>
+              <option value="medium">Medium (1200px)</option>
+              <option value="large">Large (1400px)</option>
+              <option value="full">Full width (100%)</option>
+            </select>
+          </div>
         </div>
         <div class="card">
           <h3>Diagnostics</h3>
@@ -540,33 +552,58 @@
           <code class="inline">journalctl</code> (newest first) or falls back to <code class="inline">dmesg</code>.
         </p>
         <div class="card">
-          <div class="toolbar logs-toolbar">
-            <button type="button" class="btn-primary" id="logs-refresh">Refresh</button>
-            <label class="logs-field">
-              <span class="logs-field-label">Type</span>
-              <select id="logs-filter-type" aria-label="Filter by log type">
-                <option value="">All</option>
-                <option value="geo">Geoblock</option>
-                <option value="forward">Forward drop</option>
-              </select>
-            </label>
-            <label class="logs-field logs-field-grow">
-              <span class="logs-field-label">Search</span>
-              <input
-                type="search"
-                id="logs-search"
-                class="logs-search-input"
-                placeholder="IP, port, interface, raw text…"
-                autocomplete="off"
-                aria-label="Search log lines"
-              />
-            </label>
-            <button type="button" class="btn-quiet" id="logs-filter-clear">Clear filters</button>
-            <div class="geo-segmented logs-view-mode" role="group" aria-label="Log view mode">
-              <button type="button" class="geo-seg-btn is-active" id="logs-view-table" aria-pressed="true">
-                Table
-              </button>
-              <button type="button" class="geo-seg-btn" id="logs-view-raw" aria-pressed="false">Raw</button>
+          <div class="logs-toolbar-wrap">
+            <div class="toolbar logs-toolbar logs-toolbar-row">
+              <button type="button" class="btn-primary" id="logs-refresh">Refresh</button>
+              <button type="button" class="btn-quiet" id="logs-filter-clear">Clear filters</button>
+              <span class="logs-toolbar-spacer" aria-hidden="true"></span>
+              <div class="geo-segmented logs-view-mode" role="group" aria-label="Log view mode">
+                <button type="button" class="geo-seg-btn is-active" id="logs-view-table" aria-pressed="true">
+                  Table
+                </button>
+                <button type="button" class="geo-seg-btn" id="logs-view-raw" aria-pressed="false">Raw</button>
+              </div>
+            </div>
+            <div class="toolbar logs-toolbar logs-toolbar-row">
+              <label class="logs-field">
+                <span class="logs-field-label">Type</span>
+                <select id="logs-filter-type" aria-label="Filter by log type">
+                  <option value="">All</option>
+                  <option value="geo">Geoblock</option>
+                  <option value="forward">Forward drop</option>
+                </select>
+              </label>
+              <label class="logs-field">
+                <span class="logs-field-label">Date from</span>
+                <input
+                  type="datetime-local"
+                  id="logs-date-from"
+                  class="logs-datetime-input"
+                  autocomplete="off"
+                  aria-label="Show logs on or after this time"
+                />
+              </label>
+              <label class="logs-field">
+                <span class="logs-field-label">Date to</span>
+                <input
+                  type="datetime-local"
+                  id="logs-date-to"
+                  class="logs-datetime-input"
+                  autocomplete="off"
+                  aria-label="Show logs on or before this time"
+                />
+              </label>
+              <label class="logs-field logs-field-grow">
+                <span class="logs-field-label">Search</span>
+                <input
+                  type="search"
+                  id="logs-search"
+                  class="logs-search-input"
+                  placeholder="IP, port, interface, raw text…"
+                  autocomplete="off"
+                  aria-label="Search log lines"
+                />
+              </label>
             </div>
           </div>
           <p id="logs-source" class="hint meta" aria-live="polite"></p>
