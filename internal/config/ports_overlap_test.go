@@ -15,6 +15,19 @@ func TestExpandRoutePortNumbers_braceAndRange(t *testing.T) {
 	}
 }
 
+func TestExpandRoutePortNumbers_largeRange(t *testing.T) {
+	got, err := ExpandRoutePortNumbers([]string{"20000-40000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 20001 {
+		t.Fatalf("len %d want 20001", len(got))
+	}
+	if got[0] != 20000 || got[len(got)-1] != 40000 {
+		t.Fatalf("bounds %d..%d", got[0], got[len(got)-1])
+	}
+}
+
 func TestValidate_routePortOverlap(t *testing.T) {
 	c := &Config{
 		WireGuard: WireGuard{

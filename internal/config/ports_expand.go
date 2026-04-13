@@ -2,12 +2,13 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
 
-// maxExpandedPortsPerRoute limits DoS via huge port ranges in config validation.
-const maxExpandedPortsPerRoute = 4096
+// maxDistinctPortsPerRoute is the size of the UDP/TCP port number space (valid ports 1–65535).
+const maxDistinctPortsPerRoute = 65535
 
 // ExpandRoutePortNumbers expands forwarding route port entries into distinct UDP/TCP port numbers
 // using the same shapes as nftables formatPortSets: single ports, ranges, and brace lists.
@@ -31,8 +32,8 @@ func ExpandRoutePortNumbers(ports []string) ([]uint16, error) {
 				}
 				for _, p := range ps {
 					seen[p] = struct{}{}
-					if len(seen) > maxExpandedPortsPerRoute {
-						return nil, fmt.Errorf("too many distinct ports (max %d per route)", maxExpandedPortsPerRoute)
+					if len(seen) > maxDistinctPortsPerRoute {
+						return nil, fmt.Errorf("too many distinct ports (max %d per route)", maxDistinctPortsPerRoute)
 					}
 				}
 			}
@@ -44,8 +45,8 @@ func ExpandRoutePortNumbers(ports []string) ([]uint16, error) {
 		}
 		for _, p := range ps {
 			seen[p] = struct{}{}
-			if len(seen) > maxExpandedPortsPerRoute {
-				return nil, fmt.Errorf("too many distinct ports (max %d per route)", maxExpandedPortsPerRoute)
+			if len(seen) > maxDistinctPortsPerRoute {
+				return nil, fmt.Errorf("too many distinct ports (max %d per route)", maxDistinctPortsPerRoute)
 			}
 		}
 	}
@@ -53,14 +54,7 @@ func ExpandRoutePortNumbers(ports []string) ([]uint16, error) {
 	for p := range seen {
 		out = append(out, p)
 	}
-	// Deterministic order for stable errors
-	for i := 0; i < len(out); i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j] < out[i] {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out, nil
 }
 
@@ -81,9 +75,6 @@ func expandPortToken(tok string) ([]uint16, error) {
 		}
 		if a < 1 || b < 1 || a > 65535 || b > 65535 || a > b {
 			return nil, fmt.Errorf("invalid port range %q", tok)
-		}
-		if b-a+1 > maxExpandedPortsPerRoute {
-			return nil, fmt.Errorf("port range too large in %q (max %d ports)", tok, maxExpandedPortsPerRoute)
 		}
 		var out []uint16
 		for p := a; p <= b; p++ {
