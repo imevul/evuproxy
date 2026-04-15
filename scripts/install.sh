@@ -4,6 +4,9 @@ set -euo pipefail
 # EvuProxy install — idempotent baseline for a VPS.
 # Run as root. From repo: ./scripts/install.sh
 # Optional: EVUPROXY_SRC=/path/to/repo to build the binary with Go.
+# Optional: EVUPROXY_INSTALL_API — if set, controls whether evuproxy-api.service is
+#   enabled (0 / false / no / off = disabled; anything else = enabled). When unset,
+#   an interactive TTY gets a prompt; non-interactive default is enable. See docs/http-api.md.
 
 PREFIX="${PREFIX:-/usr/local}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/evuproxy}"
@@ -69,10 +72,35 @@ for unit in evuproxy.service evuproxy-geo.service evuproxy-geo.timer evuproxy-ap
   install -m 0644 "$REPO_ROOT/templates/$unit" "/etc/systemd/system/$unit"
 done
 
+if [[ -n "${EVUPROXY_INSTALL_API+set}" ]]; then
+  _api_lc="$(printf '%s' "${EVUPROXY_INSTALL_API}" | tr '[:upper:]' '[:lower:]')"
+  case "$_api_lc" in
+  0 | false | no | off) INSTALL_API=0 ;;
+  *) INSTALL_API=1 ;;
+  esac
+elif [[ -t 0 ]]; then
+  read -r -p "Enable local HTTP API at boot (127.0.0.1:9847)? The unit file is always installed. [Y/n] " reply || true
+  _r_lc="$(printf '%s' "${reply:-y}" | tr '[:upper:]' '[:lower:]')"
+  case "$_r_lc" in
+  y | yes) INSTALL_API=1 ;;
+  n | no) INSTALL_API=0 ;;
+  *) INSTALL_API=1 ;;
+  esac
+else
+  INSTALL_API=1
+fi
+
 systemctl daemon-reload
 systemctl enable nftables.service 2>/dev/null || true
-systemctl enable evuproxy.service evuproxy-api.service evuproxy-geo.timer 2>/dev/null || true
+systemctl enable evuproxy.service evuproxy-geo.timer 2>/dev/null || true
+if [[ "$INSTALL_API" -eq 1 ]]; then
+  systemctl enable evuproxy-api.service 2>/dev/null || true
+fi
 
 echo "Installed EvuProxy tooling."
 echo "Edit $CONFIG_DIR/config.yaml, add peer keys, then: evuproxy reload --config $CONFIG_DIR/config.yaml"
-echo "API (optional): systemctl start evuproxy-api.service (token in $CONFIG_DIR/api.token)"
+if [[ "$INSTALL_API" -eq 1 ]]; then
+  echo "HTTP API: enabled at boot (token in $CONFIG_DIR/api.token). Start now: systemctl start evuproxy-api.service"
+else
+  echo "HTTP API: unit installed but not enabled. Enable later: systemctl enable --now evuproxy-api.service (token in $CONFIG_DIR/api.token; see docs/http-api.md)"
+fi

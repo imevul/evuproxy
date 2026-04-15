@@ -24,7 +24,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
   ```bash
    ./scripts/install.sh
   ```
-   If **Go 1.22+** is installed, the script builds `evuproxy` into `/usr/local/bin`. Otherwise copy a prebuilt binary to that path (see **Prerequisites**).
+   If **Go 1.22+** is installed, the script builds `evuproxy` into `/usr/local/bin`. Otherwise copy a prebuilt binary to that path (see **Prerequisites**). The **HTTP API** (`evuproxy-api.service`) is optional at install time (interactive prompt, or set **`EVUPROXY_INSTALL_API`** to override); see [docs/http-api.md](docs/http-api.md#install-script-and-optional-api-enable).
 2. Edit `/etc/evuproxy/config.yaml` (seeded from [config/evuproxy.example.yaml](config/evuproxy.example.yaml)): set `network.public_interface`, add **peers** (public keys, tunnel IPs), then **`forwarding.routes`** (each `target_ip` must match a peer’s tunnel address). Adjust **`input_allows`** if you do not want the default SSH / web / UI ports.
 3. Apply:
   ```bash

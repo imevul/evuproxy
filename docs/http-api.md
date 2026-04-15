@@ -2,6 +2,52 @@
 
 `evuproxy serve` exposes a JSON API for automation and the admin UI. For privacy, telemetry, and token storage, see [Security and privacy](security-and-privacy.md). GeoIP data source and attribution: [Third-party data](third-party-data.md).
 
+## Install script and optional API enable
+
+[VPS install](../scripts/install.sh) always installs the **`evuproxy-api.service`** unit under `/etc/systemd/system/` together with the other EvuProxy units. Whether that unit is **enabled** at install time is optional.
+
+### Default / installer behavior
+
+- **Bind:** the packaged unit runs `evuproxy serve` on **`127.0.0.1:9847`** (see [`templates/evuproxy-api.service`](../templates/evuproxy-api.service)). Override by editing the unit or a drop-in.
+- **Token file:** `/etc/evuproxy/api.token` is created by the installer if missing (mode `0600`). The API uses **`--token-file`** pointing at that path.
+- **Interactive install (TTY):** the script asks whether to **enable** the HTTP API at boot. The **`evuproxy-api.service`** unit file is always installed; only **`systemctl enable`** is optional. Default is **yes** (same as previous behavior if you press Enter). Answers **`y`**, **`yes`**, or Enter mean enable; **`n`** or **`no`** mean do not enable.
+- **`EVUPROXY_INSTALL_API`:** if this variable is **set** in the environment (including when stdin **is** a TTY), it **overrides** the prompt. Use **`0`**, **`false`**, **`no`**, or **`off`** (case-insensitive) to skip enabling; any other value enables. If **unset** and stdin is **not** a TTY, the default is to **enable** (no prompt).
+- **Enable later:** if the unit was not enabled, after `systemctl daemon-reload` run:
+  ```bash
+  systemctl enable --now evuproxy-api.service
+  ```
+
+## Manual non-privileged service (advanced)
+
+The installer runs the API as **root** when enabled (full functionality). If you want the service to run under a **dedicated unprivileged account**, you must configure that yourself; the installer does **not** create users, groups, or permission changes for this.
+
+1. **Create a system user** (example name; pick your own), e.g.:
+   ```bash
+   useradd -r -s /usr/sbin/nologin -d /nonexistent evuproxy-api
+   ```
+   Use your distribution’s equivalent if `useradd` differs.
+
+2. **Override the unit** with `systemctl edit evuproxy-api.service` and set at least:
+   - **`User=`** and **`Group=`** to that account.
+
+   Verify with **`systemctl cat evuproxy-api.service`** and **`systemctl show -p User,Group evuproxy-api.service`**.
+
+3. **Filesystem access:** the process must read (and for a full admin experience, possibly write) files under **`/etc/evuproxy`**. Typical patterns:
+   - A dedicated Unix group (e.g. **`evuproxy`**) with **`chgrp`** / **`chmod`** on **`config.yaml`** and other paths the binary must read.
+   - Keep **`wg-private.key`** and similar material at **`0600` root** unless you explicitly accept the security tradeoff of letting the API user read them (needed only if your workflows require exposing key material through the API/UI).
+   - Alternatively, use **ACLs** (`setfacl`) on specific files instead of broad group permissions—tune to your threat model.
+
+4. **Journal (optional):** if you need endpoints that read systemd logs, you may need to add the service user to **`systemd-journal`** where your distro exposes that group; membership and behavior vary by distribution.
+
+5. **Capabilities:** some deployments grant **`CAP_NET_ADMIN`** (via systemd `AmbientCapabilities=` / `CapabilityBoundingSet=`) or use a **privileged helper** so a non-root process can affect networking. That is a **major security decision** for a long-lived HTTP service and is **not** automated or endorsed here—consult your distribution and operational requirements.
+
+## Limitations if running as non-root
+
+- **nftables / WireGuard:** applying reloads, updating rules, or changing interfaces usually requires privileges the unprivileged user does not have. Mutating API routes (**`POST /reload`**, **`POST /update-geo`**, etc.) may fail or return errors unless you provide a separate privileged path.
+- **Config and secrets:** read-only or partial access can break the web UI or API responses; write access to **`config.yaml`** may require loosening permissions with corresponding security implications.
+- **Host introspection:** **`journalctl`**, **`dmesg`**, metrics under **`/proc`**, or backup paths under **`/var/backups`** may be denied or incomplete for a non-root service user.
+- **Support:** behavior depends on kernel, systemd, and how much you relaxed permissions; treat this setup as **self-managed** / best-effort.
+
 ## Binding, CORS, and authentication
 
 - **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment variable **`EVUPROXY_API_TOKEN`** or **`evuproxy serve --token-file`** (default `/etc/evuproxy/api.token`).
