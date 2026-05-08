@@ -75,7 +75,7 @@ func Reload(cfgPath string) error {
 		}
 	}
 
-	if err := reloadWireGuard(c.WireGuard.Interface, wgPath); err != nil {
+	if err := reloadWireGuard(c.WireGuard.Interface, strings.TrimSpace(c.WireGuard.Address), wgPath); err != nil {
 		return err
 	}
 
@@ -126,7 +126,7 @@ func tryDeleteNFTTable(family, table string) {
 	}
 }
 
-func reloadWireGuard(iface, confPath string) error {
+func reloadWireGuard(iface, tunnelAddr, confPath string) error {
 	if _, err := os.Stat("/sys/class/net/" + iface); err == nil {
 		stripped, err := exec.Command("wg-quick", "strip", confPath).Output()
 		if err != nil {
@@ -147,6 +147,14 @@ func reloadWireGuard(iface, confPath string) error {
 		}
 		if out, err := exec.Command("wg", "syncconf", iface, tmp).CombinedOutput(); err != nil {
 			return fmt.Errorf("wg syncconf: %w\n%s", err, out)
+		}
+		// wg syncconf does not apply Address=/routing from wg-quick; without a tunnel IP,
+		// masquerade and some lookups behave oddly even when WireGuard installs peer /32 routes.
+		if tunnelAddr != "" {
+			cmd := exec.Command("ip", "-4", "addr", "replace", tunnelAddr, "dev", iface)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("ip addr replace tunnel address on %s: %w\n%s", iface, err, out)
+			}
 		}
 		return nil
 	}

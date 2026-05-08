@@ -166,7 +166,7 @@ func (c *Config) Validate() error {
 	if c.WireGuard.PrivateKeyFile == "" {
 		return fmt.Errorf("wireguard.private_key_file is required")
 	}
-	if c.WireGuard.Address == "" {
+	if strings.TrimSpace(c.WireGuard.Address) == "" {
 		return fmt.Errorf("wireguard.address is required")
 	}
 	if c.Network.PublicInterface == "" {
