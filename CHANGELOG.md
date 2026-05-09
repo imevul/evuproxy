@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/imevul/evuproxy/compare/v0.8.0...v0.9.0) (2026-05-09)
+
+
+### Features
+
+* SQLite peer metrics collector, API, and admin UI ([b3eb254](https://github.com/imevul/evuproxy/commit/b3eb2545a2ff65a987f3633eccb84aaa970888f8))
+
 ## [0.8.0](https://github.com/imevul/evuproxy/compare/v0.7.0...v0.8.0) (2026-04-13)
 
 
