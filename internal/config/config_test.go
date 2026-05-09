@@ -116,6 +116,50 @@ func TestValidateDisabledInputAllowSkipped(t *testing.T) {
 	}
 }
 
+func TestValidateRoutesSourceAllowCIDRs(t *testing.T) {
+	c := sampleBase()
+	c.Forwarding = Forwarding{
+		Routes: []ForwardRoute{
+			{
+				Proto:            "tcp",
+				Ports:            []string{"25565"},
+				TargetIP:         "10.100.0.2",
+				SourceAllowCIDRs: []string{"203.0.113.1", "198.51.100.0/24"},
+			},
+		},
+	}
+	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRoutesSourceAllowCIDRsRejectBad(t *testing.T) {
+	c := sampleBase()
+	c.Forwarding = Forwarding{
+		Routes: []ForwardRoute{
+			{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2", SourceAllowCIDRs: []string{"not-an-ip"}},
+		},
+	}
+	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error for bad source_allow_cidrs entry")
+	}
+}
+
+func TestValidateRoutesSourceAllowSkippedWhenDisabled(t *testing.T) {
+	c := sampleBase()
+	c.Forwarding = Forwarding{
+		Routes: []ForwardRoute{
+			{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.99.0.9", Disabled: true, SourceAllowCIDRs: []string{"bad"}},
+		},
+	}
+	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func sampleBase() *Config {
 	return &Config{
 		WireGuard: WireGuard{

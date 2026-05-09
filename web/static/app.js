@@ -49,6 +49,8 @@
   let apiConnectionOk = false;
   /** Last /v1/stats response for peer online/offline column (null if unavailable). */
   let lastPeerWgStats = null;
+  /** Map tunnel IPv4 host -> last /v1/metrics/peers row; null if not fetched. */
+  let lastPeerPingByTunnel = null;
   let peerOverviewFetchSeq = 0;
   let peerOverviewDebounceTimer = null;
   /** Ignores stale results when multiple refreshOverviewPage runs overlap (navigate + save-token, etc.). */
@@ -79,6 +81,7 @@
   let lastUIPrefs = {
     peer_tunnel_subnet_cidr: "",
     wireguard_server_endpoint: "",
+    metrics_collection_enabled: false,
   };
   let uiPrefsFetched = false;
 
@@ -106,6 +109,7 @@
     lastUIPrefs = {
       peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr,
       wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
+      metrics_collection_enabled: !!p.metrics_collection_enabled,
     };
     migrateFromLocalStorageIfEmpty();
   }
@@ -115,7 +119,7 @@
     try {
       await fetchUIPrefsFromServer();
     } catch {
-      lastUIPrefs = { peer_tunnel_subnet_cidr: "", wireguard_server_endpoint: "" };
+      lastUIPrefs = { peer_tunnel_subnet_cidr: "", wireguard_server_endpoint: "", metrics_collection_enabled: false };
       migrateFromLocalStorageIfEmpty();
     }
     uiPrefsFetched = true;
@@ -267,12 +271,108 @@
     }
   }
 
-  async function runRouteProbe(index) {
+  function expandRoutePortTokens(portsArr) {
+    /** Keep in sync with internal/config/ports_expand.go ExpandRoutePortNumbers. */
+    const MAX_DISTINCT = 65535;
+    let over = false;
+    const seen = new Set();
+    const addPort = (p) => {
+      const n = p | 0;
+      if (n >= 1 && n <= 65535) {
+        seen.add(n);
+        if (seen.size > MAX_DISTINCT) {
+          over = true;
+        }
+      }
+    };
+    const expandTok = (tok) => {
+      tok = String(tok || "").trim();
+      if (!tok) return;
+      const i = tok.indexOf("-");
+      if (i >= 0) {
+        const a = +tok.slice(0, i).trim();
+        const b = +tok.slice(i + 1).trim();
+        if (!(a >= 1 && b <= 65535 && a <= b && a === (a | 0) && b === (b | 0))) return;
+        for (let p = a; p <= b; p++) addPort(p);
+      } else {
+        const p = +tok;
+        if (p >= 1 && p <= 65535 && p === (p | 0)) addPort(p);
+      }
+    };
+    for (const raw of portsArr || []) {
+      let s = String(raw || "").trim();
+      if (!s) continue;
+      if (s.startsWith("{") && s.endsWith("}")) {
+        s = s.slice(1, -1);
+        for (const part of s.split(",")) expandTok(part.trim());
+      } else {
+        expandTok(s);
+      }
+    }
+    return over ? null : Array.from(seen).sort((a, b) => a - b);
+  }
+
+  let routeProbePending = null;
+
+  function closeRouteProbeModal() {
+    routeProbePending = null;
+    const m = $("route-probe-modal");
+    if (m) m.classList.add("is-hidden");
+  }
+
+  function openRouteProbeModal(index) {
+    const routes = lastConfig && lastConfig.forwarding && lastConfig.forwarding.routes;
+    if (!routes || routes[index] === undefined) return;
+    const r = routes[index];
+    if (r.disabled) {
+      setRoutesMsg("Route is disabled.", true);
+      return;
+    }
+    const expanded = expandRoutePortTokens(r.ports);
+    if (expanded === null) {
+      setRoutesMsg("This route expands to too many distinct ports to pick one here.", true);
+      return;
+    }
+    if (!expanded.length) {
+      setRoutesMsg("Route has no ports.", true);
+      return;
+    }
+    if (expanded.length === 1) {
+      void runRouteProbeWithPort(index, expanded[0]);
+      return;
+    }
+    routeProbePending = { index, portsSet: new Set(expanded) };
+    const hint = $("route-probe-modal-hint");
+    if (hint) {
+      hint.innerHTML =
+        "Target <span class=\"mono\">" +
+        escapeHtml(String(r.target_ip || "")) +
+        "</span> — " +
+        escapeHtml(formatRouteProtoCell(r.proto)) +
+        " — <strong>" +
+        expanded.length +
+        "</strong> ports.";
+    }
+    const num = $("route-probe-port-input");
+    if (num) {
+      num.value = String(expanded[0]);
+      num.min = "1";
+      num.max = "65535";
+    }
+    const modal = $("route-probe-modal");
+    if (modal) {
+      modal.classList.remove("is-hidden");
+      if (num) requestAnimationFrame(() => num.focus());
+    }
+  }
+
+  async function runRouteProbeWithPort(index, port) {
     setRoutesMsg("…");
     try {
+      const body = { route_index: index, port: port | 0 };
       const res = await api("/v1/routes/test", {
         method: "POST",
-        body: JSON.stringify({ route_index: index }),
+        body: JSON.stringify(body),
       });
       const parts = (res.results || []).map(
         (r) => r.proto + " port " + r.port + ": " + r.status + (r.error_detail ? " — " + r.error_detail : "")
@@ -281,6 +381,10 @@
     } catch (e) {
       setRoutesMsg(String(e.message || e), true);
     }
+  }
+
+  function runRouteProbe(index) {
+    openRouteProbeModal(index);
   }
 
   function setApiStatus(ok, detail) {
@@ -388,9 +492,15 @@
   async function navigate(name) {
     if (!pages.includes(name)) name = "overview";
     closeConfirmModal();
-    if (name !== "routes") closeRouteEditor();
+    if (name !== "routes") {
+      closeRouteProbeModal();
+      closeRouteEditor();
+    }
     if (name !== "inbound") closeInboundEditor();
-    if (name !== "peers") closePeerEditor();
+    if (name !== "peers") {
+      stopPeersPingPolling();
+      closePeerEditor();
+    }
     if (name !== "overview" && name !== "token") {
       const ok = await ensureApiGate();
       if (!ok) name = "overview";
@@ -494,7 +604,15 @@
       return;
     }
     try {
-      const o = await api("/v1/overview");
+      try {
+        await fetchUIPrefsFromServer();
+      } catch (e) {
+        /* keep lastUIPrefs; overview still useful */
+      }
+      const [o, met] = await Promise.all([
+        api("/v1/overview"),
+        api("/v1/metrics/peers").catch(() => null),
+      ]);
       if (seq !== overviewRefreshSeq) return;
       lastOverview = o;
       apiConnectionOk = true;
@@ -522,6 +640,19 @@
             o.geo_last_success_utc + (o.geo_last_success_source ? " · " + o.geo_last_success_source : "")
           )
         );
+      }
+      const cardLp = elStat("Peer latency (last ping)", "…");
+      const card10 = elStat("Peer latency (last 10 min)", "…");
+      grid.appendChild(cardLp);
+      grid.appendChild(card10);
+      const vLp = cardLp.querySelector(".value");
+      const v10 = card10.querySelector(".value");
+      if (met) {
+        vLp.textContent = formatDashboardMinAvgMax(met.dashboard && met.dashboard.last_ping, met.collection_disabled);
+        v10.textContent = formatDashboardMinAvgMax(met.dashboard && met.dashboard.last_10m, met.collection_disabled);
+      } else {
+        vLp.textContent = "—";
+        v10.textContent = "—";
       }
       void refreshOverviewEventsList();
     } catch (e) {
@@ -695,13 +826,15 @@
         msg.classList.add("err");
       }
       setApiStatus(false, String(e.message || e));
-      lastUIPrefs = { peer_tunnel_subnet_cidr: "", wireguard_server_endpoint: "" };
+      lastUIPrefs = { peer_tunnel_subnet_cidr: "", wireguard_server_endpoint: "", metrics_collection_enabled: false };
       migrateFromLocalStorageIfEmpty();
     }
     const cidr = $("peer-subnet-cidr");
     if (cidr) cidr.value = (lastUIPrefs.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr;
     const sep = $("settings-wg-endpoint");
     if (sep) sep.value = (lastUIPrefs.wireguard_server_endpoint || "").trim();
+    const spl = $("settings-metrics-collection");
+    if (spl) spl.checked = !!lastUIPrefs.metrics_collection_enabled;
     syncAdvancedSettingsToggle();
     syncGeoAdvancedFieldsVisibility();
     syncContentWidthSelect();
@@ -808,6 +941,61 @@
   /** Handshake age at or below this (seconds) counts as "online". */
   const PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC = 180;
 
+  let peersPingTimer = null;
+
+  function stopPeersPingPolling() {
+    if (peersPingTimer) {
+      clearInterval(peersPingTimer);
+      peersPingTimer = null;
+    }
+  }
+
+  function showPeersMetricsColumn() {
+    return !!lastUIPrefs.metrics_collection_enabled;
+  }
+
+  async function fetchPeerMetricsMap() {
+    const body = await api("/v1/metrics/peers");
+    const m = new Map();
+    for (const row of body.peers || []) {
+      const tip = String(row.tunnel_ip || "").trim();
+      if (tip) m.set(tip, row);
+    }
+    return m;
+  }
+
+  function formatDashboardMinAvgMax(block, collectionDisabled) {
+    if (block && typeof block.min_ms === "number" && typeof block.avg_ms === "number" && typeof block.max_ms === "number") {
+      return block.min_ms + " / " + block.avg_ms + " / " + block.max_ms + " ms";
+    }
+    if (collectionDisabled) return "Collection off";
+    return "—";
+  }
+
+  function tunnelHostOnly(tunnelIp) {
+    const s = String(tunnelIp || "").trim();
+    const m = s.match(/^([\d.]+)/);
+    return m ? m[1] : "";
+  }
+
+  function peerPingMsCell(peer, pingByTunnel) {
+    if (!showPeersMetricsColumn()) return "";
+    if (peer.disabled) {
+      return '<td class="mono peer-ping-cell" title="Peer disabled">—</td>';
+    }
+    if (!pingByTunnel) {
+      return '<td class="mono peer-ping-cell">…</td>';
+    }
+    const th = tunnelHostOnly(peer.tunnel_ip);
+    const row = th ? pingByTunnel.get(th) : null;
+    if (!row) return '<td class="mono peer-ping-cell">—</td>';
+    if (row.ok) {
+      return '<td class="mono peer-ping-cell">' + escapeHtml(String(row.latency_ms)) + " ms</td>";
+    }
+    const err = row.error ? String(row.error) : "unreachable";
+    return '<td class="mono peer-ping-cell" title="' + escapeHtml(err) + '">—</td>';
+  }
+
   function wgPeerPubKeyMap(st) {
     const m = new Map();
     if (!st || !Array.isArray(st.wireguard_peers)) return m;
@@ -848,9 +1036,10 @@
     return '<span class="peer-status peer-status-off" title="' + escapeHtml(title) + '">Offline</span>';
   }
 
-  function renderPeersTable(cfg, wgStats) {
-    const wrap = $("peers-table-wrap");
+  function renderPeersTable(cfg, wgStats, pingByTunnel) {
     if (wgStats === undefined) wgStats = lastPeerWgStats;
+    if (pingByTunnel === undefined) pingByTunnel = lastPeerPingByTunnel;
+    const wrap = $("peers-table-wrap");
     if (!cfg || !cfg.peers) {
       wrap.innerHTML = "<p class=\"hint\">No peers.</p>";
       return;
@@ -860,15 +1049,18 @@
         ? '<p class="hint">WireGuard peer status unavailable (<code>wg show</code> failed — interface down or tools missing).</p>'
         : "";
     const pubMap = wgPeerPubKeyMap(wgStats);
+    const pingOn = showPeersMetricsColumn();
+    const pingHead = pingOn ? "<th>Ping</th>" : "";
     const rows = cfg.peers
       .map((p, i) => {
         const f = [p.name, p.tunnel_ip, p.public_key].join(" ").toLowerCase();
+        const pingCell = peerPingMsCell(p, pingByTunnel);
         return (
-          `<tr data-filter="${escapeHtml(f)}"><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td><td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr data-filter="${escapeHtml(f)}"><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
         );
       })
       .join("");
-    wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th><th>Status</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th>${pingHead}<th>Status</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
       b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
     });
@@ -964,6 +1156,7 @@
 
   async function refreshPeersPage() {
     setPeersMsg("");
+    stopPeersPingPolling();
     try {
       const [cfgOut, stOut] = await Promise.allSettled([api("/v1/config"), api("/v1/stats")]);
       if (cfgOut.status !== "fulfilled") {
@@ -972,7 +1165,29 @@
       lastConfig = cfgOut.value;
       lastPeerWgStats = stOut.status === "fulfilled" ? stOut.value : null;
       setApiStatus(true);
-      renderPeersTable(lastConfig, lastPeerWgStats);
+      let pingMap = null;
+      if (showPeersMetricsColumn()) {
+        try {
+          pingMap = await fetchPeerMetricsMap();
+          lastPeerPingByTunnel = pingMap;
+        } catch {
+          lastPeerPingByTunnel = null;
+        }
+      } else {
+        lastPeerPingByTunnel = null;
+      }
+      renderPeersTable(lastConfig, lastPeerWgStats, pingMap !== null ? pingMap : lastPeerPingByTunnel);
+      if (showPeersMetricsColumn()) {
+        peersPingTimer = setInterval(async () => {
+          try {
+            const m = await fetchPeerMetricsMap();
+            lastPeerPingByTunnel = m;
+            if (lastConfig) renderPeersTable(lastConfig, lastPeerWgStats, m);
+          } catch {
+            /* keep last values */
+          }
+        }, 12000);
+      }
     } catch (e) {
       setApiStatus(false, String(e.message || e));
       setPeersMsg(String(e.message || e), true);
@@ -1151,6 +1366,15 @@
     $("route-f-proto-udp").checked = udp;
   }
 
+  function parseSourceAllowListInput(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return [];
+    return s
+      .split(/[\s,]+/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+
   function formatRouteProtoCell(p) {
     const raw = String(p || "").trim();
     if (!raw) return "—";
@@ -1176,12 +1400,21 @@
     const rows = routes
       .map((r, i) => {
         const f = [formatRouteProtoCell(r.proto), (r.ports || []).join(", "), r.target_ip].join(" ").toLowerCase();
+        const srcList = r.source_allow_cidrs || [];
+        const srcCell =
+          srcList.length > 0
+            ? '<td title="' +
+              escapeHtml(srcList.join(", ")) +
+              '"><span class="mono">' +
+              escapeHtml(String(srcList.length)) +
+              "</span> <span class=\"meta\">CIDR</span></td>"
+            : '<td><span class="meta">any</span></td>';
         return (
-          `<tr data-filter="${escapeHtml(f)}"><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td>${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-test="${i}" class="btn-quiet">Test</button> <button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr data-filter="${escapeHtml(f)}"><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td>${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-test="${i}" class="btn-quiet">Test</button> <button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
         );
       })
       .join("");
-    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Source</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
     wrap.querySelectorAll("[data-route-edit]").forEach((b) => {
       b.addEventListener("click", () => openRouteEditor(+b.getAttribute("data-route-edit")));
     });
@@ -1213,6 +1446,8 @@
       $("route-editor-title").textContent = "Add route";
       setRouteProtoCheckboxes("tcp");
       $("route-f-ports").value = "";
+      const sa0 = $("route-f-source-allow");
+      if (sa0) sa0.value = "";
     } else {
       const r = cfg.forwarding.routes[index];
       if (!r) return;
@@ -1221,6 +1456,8 @@
       setRouteProtoCheckboxes(r.proto);
       $("route-f-ports").value = (r.ports || []).join(", ");
       $("route-f-target").value = r.target_ip || "";
+      const sa = $("route-f-source-allow");
+      if (sa) sa.value = (r.source_allow_cidrs || []).join(", ");
       if (dis) dis.checked = !r.disabled;
     }
     const modal = $("route-modal");
@@ -1259,7 +1496,14 @@
       return;
     }
     const routeEn = $("route-f-disabled");
-    const entry = { proto, ports, target_ip: target, disabled: !(routeEn && routeEn.checked) };
+    const srcList = parseSourceAllowListInput(($("route-f-source-allow") && $("route-f-source-allow").value) || "");
+    const entry = {
+      proto,
+      ports,
+      target_ip: target,
+      disabled: !(routeEn && routeEn.checked),
+      source_allow_cidrs: srcList.length ? srcList : undefined,
+    };
     const idxRaw = $("route-edit-index").value;
     if (idxRaw === "") cfg.forwarding.routes.push(entry);
     else cfg.forwarding.routes[+idxRaw] = entry;
@@ -2880,16 +3124,19 @@
       return;
     }
     try {
+      const lat = $("settings-metrics-collection");
       const p = await api("/v1/preferences", {
         method: "PUT",
         body: JSON.stringify({
           peer_tunnel_subnet_cidr: cidrRaw,
           wireguard_server_endpoint: epRaw,
+          metrics_collection_enabled: !!(lat && lat.checked),
         }),
       });
       lastUIPrefs = {
         peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr,
         wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
+        metrics_collection_enabled: !!p.metrics_collection_enabled,
       };
       if (msg) {
         msg.textContent = "Preferences saved on server.";
@@ -3033,6 +3280,27 @@
   const routeModal = $("route-modal");
   const routeBackdrop = routeModal && routeModal.querySelector(".modal-backdrop");
   if (routeBackdrop) routeBackdrop.addEventListener("click", closeRouteEditor);
+  const routeProbeModal = $("route-probe-modal");
+  const routeProbeBackdrop = routeProbeModal && routeProbeModal.querySelector(".modal-backdrop");
+  if (routeProbeBackdrop) routeProbeBackdrop.addEventListener("click", closeRouteProbeModal);
+  const routeProbeRun = $("route-probe-run");
+  if (routeProbeRun) {
+    routeProbeRun.addEventListener("click", () => {
+      if (!routeProbePending) return;
+      const idx = routeProbePending.index;
+      const set = routeProbePending.portsSet;
+      const inp = $("route-probe-port-input");
+      const port = Math.floor(+(inp && inp.value));
+      if (!Number.isFinite(port) || !set.has(port)) {
+        setRoutesMsg("Enter a port that belongs to this route.", true);
+        return;
+      }
+      closeRouteProbeModal();
+      void runRouteProbeWithPort(idx, port);
+    });
+  }
+  const routeProbeCancel = $("route-probe-cancel");
+  if (routeProbeCancel) routeProbeCancel.addEventListener("click", closeRouteProbeModal);
   const peerModal = $("peer-modal");
   const peerBackdrop = peerModal && peerModal.querySelector(".modal-backdrop");
   if (peerBackdrop) peerBackdrop.addEventListener("click", closePeerEditor);
@@ -3056,6 +3324,12 @@
     const cm = $("confirm-modal");
     if (cm && !cm.classList.contains("is-hidden")) {
       closeConfirmModal();
+      ev.preventDefault();
+      return;
+    }
+    const rpm = $("route-probe-modal");
+    if (rpm && !rpm.classList.contains("is-hidden")) {
+      closeRouteProbeModal();
       ev.preventDefault();
       return;
     }

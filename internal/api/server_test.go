@@ -14,6 +14,7 @@ import (
 
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/eventlog"
+	"github.com/imevul/evuproxy/internal/metrics"
 )
 
 func TestAuth_unauthorizedWithoutTokenHeader(t *testing.T) {
@@ -563,5 +564,26 @@ func TestHealthz_unauthenticated(t *testing.T) {
 	b, _ := io.ReadAll(resp.Body)
 	if string(b) != "ok" {
 		t.Fatalf("body %q", b)
+	}
+}
+
+func TestMetricsOpenQuietReason(t *testing.T) {
+	if got := metricsOpenQuietReason("/x", nil); got != "" {
+		t.Fatalf("nil err: got %q", got)
+	}
+	p := filepath.Join(t.TempDir(), "no-such-dir", "metrics.sqlite")
+	_, err := metrics.OpenReader(p)
+	if err == nil {
+		t.Fatal("expected open error")
+	}
+	if got := metricsOpenQuietReason(p, err); got != "not_found" {
+		t.Fatalf("missing path: got %q want not_found (err=%v)", got, err)
+	}
+	wrapped := fmt.Errorf("wrapped: %w", metrics.ErrSchemaNotReady)
+	if got := metricsOpenQuietReason("/ignored", wrapped); got != "schema_not_initialized" {
+		t.Fatalf("schema: got %q", got)
+	}
+	if got := metricsOpenQuietReason("/x", os.ErrNotExist); got != "not_found" {
+		t.Fatalf("ErrNotExist: got %q", got)
 	}
 }

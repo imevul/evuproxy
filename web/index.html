@@ -83,12 +83,29 @@
             IPv4 CIDR used to pick the next free tunnel IP when you add a peer. Should match the WireGuard tunnel network. Server default is <code>10.100.0.0/24</code> when unset.
           </p>
           <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" />
-          <h3 style="margin-top: 1rem">WireGuard server endpoint</h3>
+          <h3 class="settings-block-gap">WireGuard server endpoint</h3>
           <p class="hint">
             Public address peers use to reach this VPN (<code>host:port</code> or <code>hostname:port</code>). Pre-filled in the peer form; port can be omitted if it matches the server listen port after you refresh server details.
           </p>
           <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
-          <div class="btn-row" style="margin-top: 1rem">
+          <div class="field settings-block-gap">
+            <div class="toggle-switch-row">
+              <span class="toggle-switch-text" id="settings-metrics-collection-desc"
+                >Collect peer ICMP metrics on the host (<code class="inline">evuproxy metrics</code> systemd service). Enables the Ping column on Peers; overview latency cards always load from stored metrics. Requires <code class="inline">ping</code> on the server.</span
+              >
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  id="settings-metrics-collection"
+                  class="toggle-switch-input"
+                  autocomplete="off"
+                  aria-labelledby="settings-metrics-collection-desc"
+                />
+                <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+              </label>
+            </div>
+          </div>
+          <div class="btn-row settings-block-gap">
             <button type="button" class="btn-primary" id="settings-save-prefs">Save preferences</button>
             <button type="button" class="btn-quiet" id="settings-download-yaml">Download config.yaml</button>
           </div>
@@ -156,7 +173,7 @@
 
       <section id="page-peers" class="page" hidden>
         <h2 class="page-title">Peers</h2>
-        <p class="hint">WireGuard peers (tunnel IPs and keys for each side). Changes are saved to config on the server; apply from Pending changes when ready. The Status column uses WireGuard handshakes from the host: Online when the last handshake was within about three minutes; Unknown if stats are unavailable.</p>
+        <p class="hint">WireGuard peers (tunnel IPs and keys for each side). Changes are saved to config on the server; apply from Pending changes when ready. The Status column uses WireGuard handshakes from the host: Online when the last handshake was within about three minutes; Unknown if stats are unavailable. Enable <strong>Collect peer ICMP metrics</strong> in Settings to show a Ping column (data from the metrics service / SQLite). Overview always shows latency summaries when the API returns metrics.</p>
         <div class="card">
           <div class="toolbar">
             <button type="button" class="btn-primary" id="peers-refresh">Refresh list</button>
@@ -269,7 +286,7 @@
 
       <section id="page-routes" class="page" hidden>
         <h2 class="page-title">Routes</h2>
-        <p class="hint">Map TCP/UDP ports to a peer tunnel IP (<code class="inline">forwarding.routes</code>). Turn off <strong>Enabled</strong> to keep a route in config but leave it out of generated nftables until you turn it on again.</p>
+        <p class="hint">Map TCP/UDP ports to a peer tunnel IP (<code class="inline">forwarding.routes</code>). Turn off <strong>Enabled</strong> to keep a route in config but leave it out of generated nftables until you turn it on again. Optional <strong>Source allowlist</strong> restricts which WAN IPv4 sources may use the port forward (nftables reload required). When geoblocking is on in <strong>block</strong> mode, country block rules run before the allowlist: a source in a blocked country is still dropped even if it is listed here.</p>
         <div class="card">
           <div class="toolbar">
             <button type="button" class="btn-primary" id="routes-refresh">Refresh</button>
@@ -306,6 +323,11 @@
               <div class="field">
                 <label for="route-f-target">Target peer IP</label>
                 <select id="route-f-target"></select>
+              </div>
+              <div class="field">
+                <label for="route-f-source-allow">Source allowlist <span class="meta">(optional, WAN IPv4)</span></label>
+                <textarea id="route-f-source-allow" rows="3" placeholder="Leave empty for any source, or e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
+                <span class="meta">Comma or whitespace separated. Applied on <strong>Apply to host</strong>; wrong entries can block legitimate traffic.</span>
               </div>
               <div class="field">
                 <div class="toggle-switch-row">
@@ -669,6 +691,36 @@
           <p id="logs-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>
+
+      <div
+        id="route-probe-modal"
+        class="modal is-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="route-probe-modal-title"
+      >
+        <button type="button" class="modal-backdrop" aria-label="Close dialog"></button>
+        <div class="modal-panel">
+          <h3 id="route-probe-modal-title">Test route</h3>
+          <p id="route-probe-modal-hint" class="hint meta"></p>
+          <div class="field" id="route-probe-field-port">
+            <label for="route-probe-port-input">Port to probe</label>
+            <input
+              type="number"
+              id="route-probe-port-input"
+              min="1"
+              max="65535"
+              step="1"
+              autocomplete="off"
+            />
+            <span class="meta">Must be one of this route’s ports (see the Ports column). Default is the first port in the list.</span>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="route-probe-run">Run test</button>
+            <button type="button" class="btn-quiet" id="route-probe-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
 
       <div
         id="confirm-modal"

@@ -419,7 +419,9 @@ body.app .toggle-switch .toggle-switch-input[type="checkbox"] {
 input[type="password"],
 input[type="text"],
 input[type="search"],
-select {
+input[type="number"],
+select,
+textarea {
   width: 100%;
   max-width: 100%;
   padding: 0.5rem 0.65rem;
@@ -427,6 +429,34 @@ select {
   border: 1px solid #30363d;
   background: #0d1117;
   color: inherit;
+}
+
+textarea {
+  display: block;
+  min-height: 5rem;
+  line-height: 1.45;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+input[type="password"]:focus-visible,
+input[type="text"]:focus-visible,
+input[type="search"]:focus-visible,
+input[type="number"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #388bfd;
+  outline-offset: 2px;
+}
+
+input[type="text"]::placeholder,
+input[type="password"]::placeholder,
+input[type="search"]::placeholder,
+input[type="number"]::placeholder,
+textarea::placeholder {
+  color: #6e7681;
+  opacity: 1;
 }
 
 /* Match text fields — native `search` styling is often light / high-contrast */
@@ -534,6 +564,16 @@ input.mono {
 
 .field {
   margin-bottom: 0.65rem;
+}
+
+/* Settings / forms: vertical rhythm without inline margin styles */
+.settings-block-gap {
+  margin-top: 1rem;
+}
+
+/* .card h3 margin shorthand zeros margin-top; beat it for stacked section titles. */
+.card h3.settings-block-gap {
+  margin-top: 1rem;
 }
 
 .field label {
@@ -818,6 +858,14 @@ table.data button {
 
 .route-editor h3 {
   margin-top: 0;
+}
+
+/* Hints under fields in modals: full width, readable on panel background */
+.modal-panel .field > .meta {
+  display: block;
+  margin-top: 0.35rem;
+  color: #8b949e;
+  line-height: 1.45;
 }
 
 .peer-editor {

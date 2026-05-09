@@ -74,7 +74,8 @@ All paths below are under **`/api/v1`** unless noted.
 | `POST`        | `/config/discard`                                               | Replace **`config.yaml`** with **`config.yaml.bak`** when they differ (validates `.bak`). **400** if no `.bak`, already in sync, or invalid backup. Does not reload the host. |
 | `POST`        | `/config/restore-previous-applied`                              | Replace **`config.yaml`** with the first **`config.yaml.bak.N`** (`N` = 1…5) whose contents differ from **`config.yaml.bak`**. Does not rotate or modify any **`.bak*`** files. **400** if no such history entry or invalid YAML. Does not reload the host. |
 | `GET`         | `/pending`                                                      | Compare on-disk config to last successful apply. **`nftables`** is the **generated ruleset text** from the current on-disk config. **`nftables_baseline`** is the contents of **`generated/nftables.nft`** when **`os.ReadFile`** succeeds (typically the ruleset last written by **`POST /reload`**); if the file is missing or unreadable (permissions, I/O), it is an empty string. **`discard_available`**: **`config.yaml.bak`** exists and its raw bytes differ from **`config.yaml`**. **`restore_previous_applied_available`**: **`.bak`** exists and some **`.bak.N`** differs from **`.bak`**. |
-| `GET` / `PUT` | `/preferences`                                                  | UI helper fields (e.g. tunnel subnet CIDR, WireGuard endpoint for client snippets).                                                                       |
+| `GET` / `PUT` | `/preferences`                                                   | UI helper fields in **`ui-preferences.json`**: tunnel subnet CIDR, WireGuard endpoint, **`metrics_collection_enabled`** (default false; **`PUT`** is partial merge; legacy **`show_peer_latency`** in JSON is migrated on read). |
+| `GET`         | `/metrics/peers`                                                | Stored peer ICMP metrics (**SQLite**, maintained by **`evuproxy metrics`**). JSON: **`peers`**, **`collection_disabled`**, **`collected_at_utc`**, **`dashboard`** (`last_ping` / `last_10m` min/avg/max ms). Read-only from API; **`serve --metrics-db`** overrides DB path (default **`metrics.sqlite`** beside `--config`). See **[Metrics peers semantics](#metrics-peers-semantics)**. |
 | `POST`        | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config. Also updates **`config.yaml.bak`** / rotation (see [Applying changes](config.md#applying-changes)). |
 | `POST`        | `/update-geo`                                                   | Download zones and refresh geo sets in nftables.                                                                                                          |
 | `GET`         | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`, `/about` | Diagnostics, config summary, **`/metrics`** text for both **inet evuproxy** forward and input chains (either `nft list` failure → 5xx), host stats, recent firewall-related journal lines, version info.                                             |
@@ -91,6 +92,12 @@ All paths below are under **`/api/v1`** unless noted.
 Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**) with HTTP **400** in addition to **`error`**.
 
 **`GET /api/v1/overview`** may include **`geo_last_success_utc`** and **`geo_last_success_source`** after a successful geo loader run.
+
+### Metrics peers semantics
+
+**`collected_at_utc`** is the newest **`ts_utc`** among **`peer_latest`** rows that parse as RFC3339 (written by the collector). If **`evuproxy metrics`** is idle, stopped, or nothing was written yet, this may be empty or lag behind wall clock.
+
+**`dashboard.last_10m`**, when present, aggregates **ok** samples from **`peer_sample`** over a **rolling ten minutes ending at request time** (`window_end_utc` / `window_start_utc`). Because the window is anchored to the API request, **`window_end_utc`** is often **newer** than **`collected_at_utc`** when the collector has been idle. If there are no samples in the window, **`last_10m`** may be omitted.
 
 ## File logging (`evuproxy serve`)
 

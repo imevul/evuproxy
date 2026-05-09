@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 )
@@ -136,4 +137,34 @@ func parsePort(s string) (int, error) {
 		return 0, fmt.Errorf("port %d out of range (1–65535)", n)
 	}
 	return n, nil
+}
+
+// MaxSourceAllowCIDRs caps forwarding.routes source_allow_cidrs entries per route.
+const MaxSourceAllowCIDRs = 64
+
+// ValidateSourceAllowCIDRs checks forwarding.routes[routeIndex].source_allow_cidrs entries.
+func ValidateSourceAllowCIDRs(routeIndex int, cidrs []string) error {
+	if len(cidrs) == 0 {
+		return nil
+	}
+	if len(cidrs) > MaxSourceAllowCIDRs {
+		return fmt.Errorf("forwarding.routes[%d]: source_allow_cidrs: at most %d entries", routeIndex, MaxSourceAllowCIDRs)
+	}
+	for _, raw := range cidrs {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			return fmt.Errorf("forwarding.routes[%d]: source_allow_cidrs: empty entry", routeIndex)
+		}
+		if strings.Contains(s, "/") {
+			ip, _, err := net.ParseCIDR(s)
+			if err != nil || ip == nil || ip.To4() == nil {
+				return fmt.Errorf("forwarding.routes[%d]: source_allow_cidrs: invalid IPv4 CIDR %q", routeIndex, s)
+			}
+			continue
+		}
+		if ip := net.ParseIP(s); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("forwarding.routes[%d]: source_allow_cidrs: invalid IPv4 %q", routeIndex, s)
+		}
+	}
+	return nil
 }

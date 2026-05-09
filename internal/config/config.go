@@ -51,6 +51,8 @@ type ForwardRoute struct {
 	Ports    []string `yaml:"ports" json:"ports"`                           // port/range/brace-list strings (nft dport set syntax)
 	TargetIP string   `yaml:"target_ip" json:"target_ip"`                   // IPv4, no CIDR
 	Disabled bool     `yaml:"disabled,omitempty" json:"disabled,omitempty"` // if true, omitted from generated nftables
+	// SourceAllowCIDRs restricts WAN sources for this route (IPv4 address or CIDR). Empty = any source.
+	SourceAllowCIDRs []string `yaml:"source_allow_cidrs,omitempty" json:"source_allow_cidrs,omitempty"`
 }
 
 type Geo struct {
@@ -290,6 +292,9 @@ func (c *Config) validateForwardingRoutes() error {
 		}
 		if _, ok := allowed[tip]; !ok {
 			return fmt.Errorf("forwarding.routes[%d]: target_ip %s must match a non-disabled peer tunnel_ip", i, tip)
+		}
+		if err := ValidateSourceAllowCIDRs(i, r.SourceAllowCIDRs); err != nil {
+			return err
 		}
 	}
 	return validateForwardingRoutePortOverlaps(c)

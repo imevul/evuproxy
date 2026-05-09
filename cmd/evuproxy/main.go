@@ -31,6 +31,7 @@ func main() {
 	root.PersistentFlags().StringVar(&cfgPath, "config", "/etc/evuproxy/config.yaml", "path to evuproxy config")
 
 	root.AddCommand(
+		cmdMetrics(),
 		cmdVersion(),
 		cmdReload(),
 		cmdUpdateGeo(),
@@ -93,7 +94,7 @@ func cmdStatus() *cobra.Command {
 }
 
 func cmdServe() *cobra.Command {
-	var listen, tokenFile, corsOrigins string
+	var listen, tokenFile, corsOrigins, metricsDB string
 	c := &cobra.Command{
 		Use:   "serve",
 		Short: "Run local HTTP API (bind127.0.0.1 by default)",
@@ -117,6 +118,7 @@ func cmdServe() *cobra.Command {
 				Listen:      listen,
 				Token:       tok,
 				Config:      cfgPath,
+				MetricsDB:   strings.TrimSpace(metricsDB),
 				Logger:      slog.Default(),
 				Version:     version,
 				CORSOrigins: corsOrigins,
@@ -141,6 +143,7 @@ func cmdServe() *cobra.Command {
 	c.Flags().StringVar(&listen, "listen", "127.0.0.1:9847", "listen address")
 	c.Flags().StringVar(&tokenFile, "token-file", "/etc/evuproxy/api.token", "file containing API bearer token")
 	c.Flags().StringVar(&corsOrigins, "cors-origins", "", "comma-separated allowed Origin values for cross-origin browser UIs; avoid * except local dev (token auth still required)")
+	c.Flags().StringVar(&metricsDB, "metrics-db", "", "peer metrics SQLite path (default: metrics.sqlite beside --config)")
 	return c
 }
 

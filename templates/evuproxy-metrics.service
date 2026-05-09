@@ -1,0 +1,19 @@
+[Unit]
+Description=EvuProxy peer metrics collector (SQLite)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/evuproxy metrics --config /etc/evuproxy/config.yaml --interval 30s
+Restart=on-failure
+
+# Optional: run as an unprivileged account (create the user/group first and fix ownership
+# on /etc/evuproxy/metrics.sqlite* so evuproxy serve can still read the DB).
+# User=evuproxy-metrics
+# Group=evuproxy-metrics
+
+# Metrics DB defaults to /etc/evuproxy/metrics.sqlite (beside config). Override with --db.
+# The API user must be able to read the same file (read-only open from evuproxy serve).
+
+[Install]
+WantedBy=multi-user.target

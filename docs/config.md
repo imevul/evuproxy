@@ -135,6 +135,7 @@ The host still runs the last applied rules until you reload again, use **Pending
 
 ## Related files
 
-- **`ui-preferences.json`** next to the config file stores admin UI-only settings (not part of this schema).
+- **`ui-preferences.json`** next to the config file stores admin UI-only settings (not part of this schema), including **`metrics_collection_enabled`** for the **`evuproxy metrics`** collector.
+- **`metrics.sqlite`** (default beside **`config.yaml`**) stores peer ICMP samples for **`GET /api/v1/metrics/peers`**. **`evuproxy metrics`** opens it read-write (WAL creates **`-wal`** / **`-shm`** siblings alongside the file). **`evuproxy serve`** needs read-only access for the same path; override the API’s file with **`evuproxy serve --metrics-db`**. If the collector and API run as different users, use a shared group or ACLs so both can access the DB files. See **`templates/evuproxy-metrics.service`** (optional **`User=`** / **`Group=`** when not running as root).
 - **`config.yaml.bak`** and **`config.yaml.bak.1`** … **`.bak.5`**: last applied snapshot and rotated history (maintained on successful reload only).
 - Generated artifacts (e.g. WireGuard config under `config`’s directory layout) are produced by `evuproxy reload`; do not hand-edit generated files.

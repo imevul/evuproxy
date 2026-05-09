@@ -353,3 +353,114 @@ func TestNFTablesAdminTCPPortsExplicit(t *testing.T) {
 		t.Fatalf("expected explicit admin_tcp_ports on INPUT: %s", s)
 	}
 }
+
+func TestNFTablesRouteSourceAllowlist(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		Forwarding: config.Forwarding{
+			Routes: []config.ForwardRoute{
+				{
+					Proto:            "tcp",
+					Ports:            []string{"25565"},
+					TargetIP:         "10.100.0.2",
+					SourceAllowCIDRs: []string{"203.0.113.0/24", "198.51.100.1"},
+				},
+			},
+		},
+		Geo:   config.Geo{Enabled: false},
+		Peers: []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "set route_src_0 {") || !strings.Contains(s, "203.0.113.0/24") {
+		t.Fatalf("expected route source set: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr @route_src_0 ip daddr 10.100.0.2 tcp dport { 25565 } accept") {
+		t.Fatalf("expected forward rule with source set: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport { 25565 } dnat to 10.100.0.2") {
+		t.Fatalf("expected dnat with source set: %s", s)
+	}
+}
+
+func TestNFTablesRouteSourceAllowlistGeoAllow(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		Forwarding: config.Forwarding{
+			Routes: []config.ForwardRoute{
+				{
+					Proto:            "tcp",
+					Ports:            []string{"443"},
+					TargetIP:         "10.100.0.2",
+					SourceAllowCIDRs: []string{"10.0.0.0/8"},
+				},
+			},
+		},
+		Geo:   config.Geo{Enabled: true, SetName: "geo_v4", Countries: []string{"no"}, ZoneDir: "/z"},
+		Peers: []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "ip saddr @route_src_0 ip saddr @geo_v4 tcp dport { 443 } accept") {
+		t.Fatalf("expected geo+source on input: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr @route_src_0 ip saddr @geo_v4 tcp dport { 443 } dnat to 10.100.0.2") {
+		t.Fatalf("expected geo+source on dnat: %s", s)
+	}
+}
+
+func TestNFTablesRouteSourceAllowlistGeoBlock(t *testing.T) {
+	c := &config.Config{
+		WireGuard: config.WireGuard{
+			Interface:      "wg0",
+			ListenPort:     51830,
+			PrivateKeyFile: "/k",
+			Address:        "10.100.0.1/24",
+		},
+		Network: config.Network{PublicInterface: "eth0"},
+		Forwarding: config.Forwarding{
+			Routes: []config.ForwardRoute{
+				{
+					Proto:            "tcp",
+					Ports:            []string{"443"},
+					TargetIP:         "10.100.0.2",
+					SourceAllowCIDRs: []string{"203.0.113.0/24"},
+				},
+			},
+		},
+		Geo:   config.Geo{Enabled: true, Mode: "block", SetName: "geo_v4", Countries: []string{"ru"}, ZoneDir: "/z"},
+		Peers: []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport { 443 } drop") {
+		t.Fatalf("expected geo block drop on dnat chain: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport { 443 } dnat to 10.100.0.2") {
+		t.Fatalf("expected whitelist-only dnat after geo drop: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport { 443 } limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop") {
+		t.Fatalf("expected geo block on input for published port: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport { 443 } accept") {
+		t.Fatalf("expected source allow on input after geo drop: %s", s)
+	}
+}

@@ -87,6 +87,7 @@ MOCK_BAK_SLOTS: list[dict | None] = [None, None, None, None, None]
 MOCK_PREFS: dict = {
     "peer_tunnel_subnet_cidr": "",
     "wireguard_server_endpoint": "",
+    "metrics_collection_enabled": True,
 }
 
 
@@ -98,7 +99,46 @@ def _normalize_prefs(d: dict) -> dict:
         peer = DEFAULT_PEER_TUNNEL_SUBNET_CIDR
     out["peer_tunnel_subnet_cidr"] = peer
     out["wireguard_server_endpoint"] = (out.get("wireguard_server_endpoint") or "").strip()
+    if "metrics_collection_enabled" not in out:
+        out["metrics_collection_enabled"] = False
+    else:
+        out["metrics_collection_enabled"] = bool(out["metrics_collection_enabled"])
     return out
+
+
+def _mock_metrics_peers() -> dict:
+    """Fake GET /api/v1/metrics/peers for UI dev."""
+    disabled = not MOCK_PREFS.get("metrics_collection_enabled")
+    return {
+        "collection_disabled": disabled,
+        "collected_at_utc": "2026-01-15T12:00:00Z",
+        "peers": [
+            {
+                "name": "laptop",
+                "tunnel_ip": "10.100.0.2",
+                "ok": True,
+                "latency_ms": 14,
+                "ts_utc": "2026-01-15T12:00:00Z",
+            },
+            {
+                "name": "phone",
+                "tunnel_ip": "10.100.0.3",
+                "ok": True,
+                "latency_ms": 28,
+                "ts_utc": "2026-01-15T12:00:00Z",
+            },
+        ],
+        "dashboard": {
+            "last_ping": {"min_ms": 14, "avg_ms": 21, "max_ms": 28},
+            "last_10m": {
+                "min_ms": 12,
+                "avg_ms": 23,
+                "max_ms": 41,
+                "window_start_utc": "2026-01-15T11:50:00Z",
+                "window_end_utc": "2026-01-15T12:00:00Z",
+            },
+        },
+    }
 
 
 def _config_sha(cfg: dict) -> str:
@@ -530,6 +570,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/v1/preferences":
             return self._send_json(200, _normalize_prefs(MOCK_PREFS))
+        if path == "/api/v1/metrics/peers":
+            return self._send_json(200, _mock_metrics_peers())
         if path == "/api/v1/about":
             return self._send_json(
                 200,
@@ -575,7 +617,23 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_json_body(MAX_JSON_SMALL)
             if not isinstance(body, dict):
                 return self._send_json(400, {"error": "invalid json body"})
-            cidr = (body.get("peer_tunnel_subnet_cidr") or "").strip()
+            global MOCK_PREFS
+            cur = copy.deepcopy(MOCK_PREFS)
+            if "peer_tunnel_subnet_cidr" in body:
+                cur["peer_tunnel_subnet_cidr"] = (
+                    body.get("peer_tunnel_subnet_cidr") or ""
+                ).strip()
+            if "wireguard_server_endpoint" in body:
+                cur["wireguard_server_endpoint"] = (
+                    body.get("wireguard_server_endpoint") or ""
+                ).strip()
+            if "metrics_collection_enabled" in body:
+                cur["metrics_collection_enabled"] = bool(
+                    body.get("metrics_collection_enabled")
+                )
+            elif "show_peer_latency" in body:
+                cur["metrics_collection_enabled"] = bool(body.get("show_peer_latency"))
+            cidr = (cur.get("peer_tunnel_subnet_cidr") or "").strip()
             if cidr:
                 try:
                     ipaddress.ip_network(cidr, strict=False)
@@ -583,13 +641,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json(
                         400, {"error": "invalid peer_tunnel_subnet_cidr: %s" % e}
                     )
-            global MOCK_PREFS
-            MOCK_PREFS = {
-                "peer_tunnel_subnet_cidr": cidr,
-                "wireguard_server_endpoint": (
-                    body.get("wireguard_server_endpoint") or ""
-                ).strip(),
-            }
+            MOCK_PREFS = cur
             return self._send_json(200, _normalize_prefs(MOCK_PREFS))
         if path != "/api/v1/config":
             return self._send_json(404, {"error": "not found"})
@@ -642,6 +694,15 @@ class Handler(BaseHTTPRequestHandler):
                         port = int(str(ports[0]).split("-", 1)[0].strip("{}"))
                     except ValueError:
                         port = 25565
+            override = None
+            if isinstance(body, dict):
+                op = body.get("port")
+                if isinstance(op, int) and op > 0:
+                    override = op
+                elif isinstance(op, str) and op.strip().isdigit():
+                    override = int(op.strip())
+            if override is not None:
+                port = override
             results = []
             for proto in protos:
                 results.append(

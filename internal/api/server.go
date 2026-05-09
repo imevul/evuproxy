@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,14 +24,37 @@ import (
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/eventlog"
 	"github.com/imevul/evuproxy/internal/geoip"
+	"github.com/imevul/evuproxy/internal/metrics"
 )
 
+// metricsOpenQuietReason maps open failures to a coarse log label (no raw driver strings).
+// path is the metrics DB path used for this attempt; SQLite often returns SQLITE_CANTOPEN
+// instead of os.ErrNotExist when the file or parent directory is missing, so we also os.Stat(path).
+func metricsOpenQuietReason(path string, err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, metrics.ErrSchemaNotReady) {
+		return "schema_not_initialized"
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return "not_found"
+	}
+	if strings.TrimSpace(path) != "" {
+		if _, statErr := os.Stat(path); statErr != nil && os.IsNotExist(statErr) {
+			return "not_found"
+		}
+	}
+	return "open_failed"
+}
+
 type Server struct {
-	Listen  string
-	Token   string
-	Config  string
-	Logger  *slog.Logger
-	Version string
+	Listen    string
+	Token     string
+	Config    string
+	MetricsDB string
+	Logger    *slog.Logger
+	Version   string
 	// GeoIP is an optional MaxMind GeoLite2 / GeoIP2 Country MMDB reader. When set, GET /api/v1/logs
 	// includes a line_geo array (same order as lines) with src_cc and dst_cc (lowercase ISO 3166-1 alpha-2).
 	// The caller should Close the reader when the process exits.
@@ -118,6 +142,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/pending", s.auth(s.handlePending))
 	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
 	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
+	mux.HandleFunc("GET /api/v1/metrics/peers", s.auth(s.handleMetricsPeers))
 	mux.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
 	mux.HandleFunc("GET /api/v1/about", s.auth(s.handleAbout))
 	mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleLogs))
@@ -277,30 +302,67 @@ func (s *Server) handlePreferencesGet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePreferencesPut(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<14)
 	defer r.Body.Close()
-	var p apply.UIPreferences
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+	var patch apply.UIPreferencesPatch
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		s.logErr("preferences decode", err)
 		s.jsonErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	p.PeerTunnelSubnetCIDR = strings.TrimSpace(p.PeerTunnelSubnetCIDR)
-	p.WireGuardServerEndpoint = strings.TrimSpace(p.WireGuardServerEndpoint)
-	if p.PeerTunnelSubnetCIDR != "" {
-		if _, _, err := net.ParseCIDR(p.PeerTunnelSubnetCIDR); err != nil {
+	cur, err := apply.LoadUIPreferences(s.Config)
+	if err != nil {
+		s.logErr("preferences load", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not load preferences")
+		return
+	}
+	out := apply.ApplyUIPreferencesPatch(cur, &patch)
+	if patch.PeerTunnelSubnetCIDR != nil && strings.TrimSpace(out.PeerTunnelSubnetCIDR) != "" {
+		if _, _, err := net.ParseCIDR(out.PeerTunnelSubnetCIDR); err != nil {
 			s.logErr("preferences cidr", err)
 			s.jsonErr(w, http.StatusBadRequest, "invalid peer_tunnel_subnet_cidr")
 			return
 		}
 	}
-	if err := apply.SaveUIPreferences(s.Config, &p); err != nil {
+	out = apply.NormalizeUIPreferences(out)
+	if err := apply.SaveUIPreferences(s.Config, &out); err != nil {
 		s.logErr("preferences save", err)
 		s.jsonErr(w, http.StatusInternalServerError, "could not save preferences")
 		return
 	}
-	out, err := apply.LoadUIPreferences(s.Config)
+	reloaded, err := apply.LoadUIPreferences(s.Config)
 	if err != nil {
 		s.logErr("preferences reload", err)
 		s.jsonErr(w, http.StatusInternalServerError, "could not load preferences")
+		return
+	}
+	s.jsonOK(w, reloaded)
+}
+
+func (s *Server) metricsDBPath() string {
+	if strings.TrimSpace(s.MetricsDB) != "" {
+		return filepath.Clean(s.MetricsDB)
+	}
+	return apply.MetricsDBDefaultPath(s.Config)
+}
+
+func (s *Server) handleMetricsPeers(w http.ResponseWriter, r *http.Request) {
+	prefs, err := apply.LoadUIPreferences(s.Config)
+	if err != nil {
+		s.logErr("metrics peers preferences", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not load preferences")
+		return
+	}
+	path := s.metricsDBPath()
+	var db *sql.DB
+	if d, err := metrics.OpenReader(path); err == nil {
+		db = d
+		defer db.Close()
+	} else {
+		s.Logger.Debug("metrics db unavailable", "reason", metricsOpenQuietReason(path, err))
+	}
+	out, err := metrics.BuildPeersResponse(r.Context(), db, !prefs.MetricsCollectionEnabled)
+	if err != nil {
+		s.logErr("metrics peers", err)
+		s.jsonErr(w, http.StatusInternalServerError, "metrics unavailable")
 		return
 	}
 	s.jsonOK(w, out)
