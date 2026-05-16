@@ -68,6 +68,11 @@
   /** WireGuard transfer_rx+transfer_tx totals per public_key for topology edge animation */
   let topologyPrevPeerBytes = new Map();
   let topologyRefreshInFlight = false;
+  /** Pan/zoom for topology SVG (user space / viewBox coordinates). */
+  let topologyPanX = 0;
+  let topologyPanY = 0;
+  let topologyZoomK = 1;
+  let topologyPanDrag = null;
 
   const pages = [
     "overview",
@@ -1587,6 +1592,137 @@
     return Math.max(52, Math.min(Math.ceil(w), maxW));
   }
 
+  const TOPO_ZOOM_MIN = 0.25;
+  const TOPO_ZOOM_MAX = 4;
+
+  function topologyViewTransformStr() {
+    return "translate(" + topologyPanX + "," + topologyPanY + ") scale(" + topologyZoomK + ")";
+  }
+
+  function applyTopologyPanZoomTransform(svg) {
+    const g = svg.querySelector("#topology-pan-zoom-layer");
+    if (g) g.setAttribute("transform", topologyViewTransformStr());
+  }
+
+  function resetTopologyView() {
+    topologyPanX = 0;
+    topologyPanY = 0;
+    topologyZoomK = 1;
+    topologyPanDrag = null;
+    const svg = $("topology-svg");
+    if (svg) {
+      applyTopologyPanZoomTransform(svg);
+      svg.classList.remove("topology-svg--panning");
+    }
+  }
+
+  function topologySvgPointFromClient(svg, clientX, clientY) {
+    if (!svg || typeof svg.createSVGPoint !== "function") return null;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const m = svg.getScreenCTM();
+    if (!m) return null;
+    try {
+      return pt.matrixTransform(m.inverse());
+    } catch {
+      return null;
+    }
+  }
+
+  function topologyEventHitsForeignObject(e) {
+    if (typeof e.composedPath === "function") {
+      const path = e.composedPath();
+      for (let i = 0; i < path.length; i++) {
+        const n = path[i];
+        if (n && String(n.tagName || "").toLowerCase() === "foreignobject") return true;
+      }
+    }
+    let t = e.target;
+    let hops = 0;
+    while (t && hops++ < 64) {
+      if (t.tagName && String(t.tagName).toLowerCase() === "foreignobject") return true;
+      t =
+        t.parentElement ||
+        (t.parentNode && t.parentNode.nodeType === 1 ? t.parentNode : null);
+    }
+    return false;
+  }
+
+  function initTopologyViewport() {
+    const svg = $("topology-svg");
+    if (!svg || svg.dataset.topologyViewportBound === "1") return;
+    svg.dataset.topologyViewportBound = "1";
+
+    svg.addEventListener(
+      "wheel",
+      (e) => {
+        if (!svg.querySelector("#topology-pan-zoom-layer")) return;
+        e.preventDefault();
+        const p = topologySvgPointFromClient(svg, e.clientX, e.clientY);
+        if (!p) return;
+        const mx = p.x;
+        const my = p.y;
+        const scale = Math.exp(-e.deltaY * 0.002);
+        let k2 = topologyZoomK * scale;
+        if (k2 < TOPO_ZOOM_MIN) k2 = TOPO_ZOOM_MIN;
+        if (k2 > TOPO_ZOOM_MAX) k2 = TOPO_ZOOM_MAX;
+        const k1 = topologyZoomK;
+        if (Math.abs(k2 - k1) < 1e-9) return;
+        const r = k2 / k1;
+        topologyPanX = mx - r * (mx - topologyPanX);
+        topologyPanY = my - r * (my - topologyPanY);
+        topologyZoomK = k2;
+        applyTopologyPanZoomTransform(svg);
+      },
+      { passive: false }
+    );
+
+    svg.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      if (topologyEventHitsForeignObject(e)) return;
+      if (!svg.querySelector("#topology-pan-zoom-layer")) return;
+      e.preventDefault();
+      const u0 = topologySvgPointFromClient(svg, e.clientX, e.clientY);
+      if (!u0) return;
+      topologyPanDrag = {
+        pointerId: e.pointerId,
+        u0,
+        tx0: topologyPanX,
+        ty0: topologyPanY,
+      };
+      try {
+        svg.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      svg.classList.add("topology-svg--panning");
+    });
+
+    svg.addEventListener("pointermove", (e) => {
+      if (!topologyPanDrag || e.pointerId !== topologyPanDrag.pointerId) return;
+      const u = topologySvgPointFromClient(svg, e.clientX, e.clientY);
+      if (!u) return;
+      topologyPanX = topologyPanDrag.tx0 + (u.x - topologyPanDrag.u0.x);
+      topologyPanY = topologyPanDrag.ty0 + (u.y - topologyPanDrag.u0.y);
+      applyTopologyPanZoomTransform(svg);
+    });
+
+    function endPan(e) {
+      if (!topologyPanDrag || e.pointerId !== topologyPanDrag.pointerId) return;
+      topologyPanDrag = null;
+      svg.classList.remove("topology-svg--panning");
+      try {
+        svg.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    svg.addEventListener("pointerup", endPan);
+    svg.addEventListener("pointercancel", endPan);
+  }
+
   function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
     if (pingByTunnel === undefined) pingByTunnel = null;
     const svg = $("topology-svg");
@@ -1596,7 +1732,10 @@
     if (!routes.length) {
       svg.setAttribute("viewBox", "0 0 780 120");
       svg.innerHTML =
-        '<title id="topology-svg-title">No routes in config</title><text x="390" y="60" text-anchor="middle" class="topology-empty-text">No routes in config</text>';
+        '<title id="topology-svg-title">No routes in config</title><g id="topology-pan-zoom-layer" class="topology-pan-zoom-layer">' +
+        '<rect class="topology-grid-bg" x="0" y="0" width="780" height="120" fill="#000000" fill-opacity="0" stroke="none" aria-hidden="true" />' +
+        '<text x="390" y="60" text-anchor="middle" class="topology-empty-text">No routes in config</text></g>';
+      applyTopologyPanZoomTransform(svg);
       return;
     }
 
@@ -1795,13 +1934,14 @@
     svg.innerHTML =
       '<title id="topology-svg-title">' +
       escapeHtml(summary) +
-      "</title><rect class=\"topology-grid-bg\" x=\"0\" y=\"0\" width=\"780\" height=\"" +
+      '</title><g id="topology-pan-zoom-layer" class="topology-pan-zoom-layer"><rect class="topology-grid-bg" x="0" y="0" width="780" height="' +
       totalH +
-      '" aria-hidden="true" /><g class="topology-edges" aria-hidden="true">' +
+      '" fill="#000000" fill-opacity="0" stroke="none" aria-hidden="true" /><g class="topology-edges" aria-hidden="true">' +
       edges.join("") +
       '</g><g class="topology-nodes">' +
       nodes.join("") +
-      "</g>";
+      "</g></g>";
+    applyTopologyPanZoomTransform(svg);
   }
 
   async function refreshTopologyPage() {
@@ -3829,8 +3969,11 @@
   $("peer-cancel").addEventListener("click", closePeerEditor);
 
   $("routes-refresh").addEventListener("click", refreshRoutesPage);
+  initTopologyViewport();
   const topoRef = $("topology-refresh");
   if (topoRef) topoRef.addEventListener("click", () => void refreshTopologyPage());
+  const topoCenter = $("topology-center");
+  if (topoCenter) topoCenter.addEventListener("click", resetTopologyView);
   $("routes-add").addEventListener("click", () => {
     if (!lastConfig) refreshRoutesPage().then(() => openRouteEditor(-1));
     else openRouteEditor(-1);
