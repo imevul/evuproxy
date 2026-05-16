@@ -44,8 +44,9 @@ MOCK_CONFIG_BASELINE = {
     "peers": [],
 }
 
-# In-memory "saved" config (what GET /config returns) — differs from baseline until POST /reload.
-MOCK_CONFIG = {
+# In-memory "saved" config (what GET /config returns). Seeded from MOCK_CONFIG_DEFAULT;
+# optionally overridden from MOCK_STATE_FILE on startup (docker-compose.dev: /data/mock-config.json).
+MOCK_CONFIG_DEFAULT = {
     "wireguard": {
         "interface": "evuproxy0",
         "listen_port": 51830,
@@ -57,10 +58,22 @@ MOCK_CONFIG = {
         "routes": [
             {
                 "proto": "tcp",
-                "ports": ["25565"],
+                "ports": ["25565", "25566", "25567"],
                 "target_ip": "10.100.0.10",
                 "disabled": False,
-            }
+            },
+            {
+                "proto": "tcp",
+                "ports": ["443"],
+                "target_ip": "10.100.0.10",
+                "disabled": False,
+            },
+            {
+                "proto": "udp",
+                "ports": ["53"],
+                "target_ip": "10.100.0.2",
+                "disabled": False,
+            },
         ]
     },
     "geo": {
@@ -75,8 +88,25 @@ MOCK_CONFIG = {
         {"proto": "tcp", "dport": "{ 80, 443 }", "note": "HTTP(S)"},
         {"proto": "tcp", "dport": "9080", "note": "EvuProxy admin UI (Docker)"},
     ],
-    "peers": [],
+    # Include at least one peer whose tunnel host matches forwarding.routes[].target_ip
+    # so the Routes table can show the peer name in the Target column.
+    "peers": [
+        {
+            "name": "game-server",
+            "tunnel_ip": "10.100.0.10/32",
+            "public_key": "YjK9ZqXvL3nH8mF5T4wR1sU0vX9yZ8aB7cD6eF8wQ=",
+            "disabled": False,
+        },
+        {
+            "name": "laptop",
+            "tunnel_ip": "10.100.0.2/32",
+            "public_key": "bPjX9K7vYqZ3L2nH8mF5T4wR1sU0vX9yZ8aB7cD6eF9wR=",
+            "disabled": False,
+        },
+    ],
 }
+
+MOCK_CONFIG = copy.deepcopy(MOCK_CONFIG_DEFAULT)
 
 MOCK_APPLIED_SHA: str | None = None
 
@@ -89,6 +119,9 @@ MOCK_PREFS: dict = {
     "wireguard_server_endpoint": "",
     "metrics_collection_enabled": True,
 }
+
+# Cumulative fake WG bytes per public key (GET /stats bumps; resets on process restart).
+_mock_wg_byte_totals: dict[str, int] = {}
 
 
 def _normalize_prefs(d: dict) -> dict:
@@ -371,11 +404,91 @@ def _nft_from_config(cfg: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-MOCK_STATS = {
-    "wireguard_interface": "evuproxy0",
-    "wireguard_peers": [],
-    "nftables_counters": [],
-}
+def _persist_mock_config() -> None:
+    path = (os.environ.get("MOCK_STATE_FILE") or "").strip()
+    if not path:
+        return
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(MOCK_CONFIG, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError as e:
+        print("mock: persist %s failed: %s" % (path, e), file=sys.stderr)
+
+
+def _load_mock_config_from_disk() -> None:
+    global MOCK_CONFIG
+    path = (os.environ.get("MOCK_STATE_FILE") or "").strip()
+    if not path or not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            MOCK_CONFIG = data
+            print("mock: loaded %s" % path)
+    except (OSError, json.JSONDecodeError, TypeError) as e:
+        print("mock: load %s: %s" % (path, e), file=sys.stderr)
+
+
+def _mock_peer_rx_tx(public_key: str) -> tuple[int, int]:
+    pk = (public_key or "").strip()
+    if not pk:
+        return 0, 0
+    cur = _mock_wg_byte_totals.get(pk)
+    if cur is None:
+        cur = 9000 + (abs(hash(pk)) % 5000)
+    cur += 400
+    _mock_wg_byte_totals[pk] = cur
+    half = cur // 2
+    return half, cur - half
+
+
+def _mock_wireguard_peers_payload() -> list[dict]:
+    now = int(time.time())
+    out: list[dict] = []
+    plist = list(MOCK_CONFIG.get("peers") or [])
+    for i, p in enumerate(plist):
+        pk = (p.get("public_key") or "").strip()
+        if not pk:
+            continue
+        if p.get("disabled"):
+            hand = 0
+        elif len(plist) >= 2 and i == len(plist) - 1:
+            hand = 0
+        else:
+            hand = now - 45
+        rx, tx = _mock_peer_rx_tx(pk)
+        tip = (p.get("tunnel_ip") or "").strip()
+        out.append(
+            {
+                "public_key": pk,
+                "endpoint": "198.51.100.%d:51820" % (10 + i),
+                "allowed_ips": tip,
+                "latest_handshake_unix": hand,
+                "transfer_rx": rx,
+                "transfer_tx": tx,
+            }
+        )
+    return out
+
+
+def _mock_stats_response() -> dict:
+    return {
+        "wireguard_interface": MOCK_CONFIG.get("wireguard", {}).get(
+            "interface", "evuproxy0"
+        ),
+        "wireguard_dump_failed": False,
+        "wireguard_peers": _mock_wireguard_peers_payload(),
+        "nftables_counters": [],
+    }
+
 
 MOCK_LOGS = [
     "2026-01-15T10:00:01+00:00 host kernel: evuproxy-geo-block: IN=eth0 OUT= MAC= SRC=198.51.100.2 DST=198.51.100.9",
@@ -540,9 +653,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
         if path == "/api/v1/stats":
-            st = copy.deepcopy(MOCK_STATS)
-            st["wireguard_interface"] = MOCK_CONFIG["wireguard"]["interface"]
-            return self._send_json(200, st)
+            return self._send_json(200, _mock_stats_response())
         if path == "/api/v1/pending":
             _ensure_mock_apply_bootstrap()
             disk = _disk_config_sha()
@@ -573,10 +684,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/v1/metrics/peers":
             return self._send_json(200, _mock_metrics_peers())
         if path == "/api/v1/about":
+            # Keep in sync with cmd/evuproxy main.version for sensible UI + update checks in dev.
             return self._send_json(
                 200,
                 {
-                    "version": "mock",
+                    "version": "0.8.0",
                     "repo_url": "https://github.com/imevul/evuproxy",
                 },
             )
@@ -652,6 +764,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(400, {"error": "invalid json body"})
         global MOCK_CONFIG
         MOCK_CONFIG = copy.deepcopy(body)
+        _persist_mock_config()
         return self._send_json(
             200,
             {
@@ -738,6 +851,7 @@ class Handler(BaseHTTPRequestHandler):
                     400, {"error": "could not discard pending changes"}
                 )
             MOCK_CONFIG = copy.deepcopy(MOCK_BAK)
+            _persist_mock_config()
             return self._send_json(
                 200,
                 {
@@ -753,6 +867,7 @@ class Handler(BaseHTTPRequestHandler):
             for slot in MOCK_BAK_SLOTS:
                 if slot is not None and _config_sha(slot) != _config_sha(MOCK_BAK):
                     MOCK_CONFIG = copy.deepcopy(slot)
+                    _persist_mock_config()
                     return self._send_json(
                         200,
                         {
@@ -787,6 +902,7 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     TOKEN = tok
+    _load_mock_config_from_disk()
     bind = (os.environ.get("MOCK_API_BIND") or "0.0.0.0").strip() or "0.0.0.0"
     httpd = HTTPServer((bind, PORT), Handler)
     print("mock EvuProxy API on %s:%s (auth required)" % (bind, PORT))

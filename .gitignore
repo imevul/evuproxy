@@ -6,6 +6,9 @@
 .cursor/
 local_docs/
 
+# Dev mock API persisted config (docker-compose.dev.yml bind-mount)
+docker/mock-api/state/
+
 # Python (e.g. docker/mock-api when run locally)
 __pycache__/
 *.py[cod]

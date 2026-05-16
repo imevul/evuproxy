@@ -64,6 +64,10 @@
   let logsRefreshSeq = 0;
 
   let overviewEventsTimer = null;
+  let topologyPollTimer = null;
+  /** WireGuard transfer_rx+transfer_tx totals per public_key for topology edge animation */
+  let topologyPrevPeerBytes = new Map();
+  let topologyRefreshInFlight = false;
 
   const pages = [
     "overview",
@@ -71,6 +75,7 @@
     "token",
     "peers",
     "routes",
+    "topology",
     "inbound",
     "geoblocking",
     "pending",
@@ -201,6 +206,13 @@
         .join("");
     } catch {
       /* non-fatal */
+    }
+  }
+
+  function stopTopologyPolling() {
+    if (topologyPollTimer) {
+      clearInterval(topologyPollTimer);
+      topologyPollTimer = null;
     }
   }
 
@@ -501,6 +513,9 @@
       stopPeersPingPolling();
       closePeerEditor();
     }
+    if (name !== "topology") {
+      stopTopologyPolling();
+    }
     if (name !== "overview" && name !== "token") {
       const ok = await ensureApiGate();
       if (!ok) name = "overview";
@@ -531,6 +546,13 @@
     }
     if (name === "peers") refreshPeersPage();
     if (name === "routes") refreshRoutesPage();
+    if (name === "topology") {
+      topologyPrevPeerBytes = new Map();
+      void refreshTopologyPage();
+      topologyPollTimer = setInterval(() => {
+        void refreshTopologyPage();
+      }, 4000);
+    }
     if (name === "inbound") refreshInboundPage();
     if (name === "geoblocking") await refreshGeoblockingPage();
     if (name === "pending") refreshPendingPage();
@@ -978,6 +1000,57 @@
     return m ? m[1] : "";
   }
 
+  /** Tunnel address without /prefix (for clipboard). */
+  function tunnelIpWithoutSuffix(tunnelIp) {
+    const s = String(tunnelIp ?? "").trim();
+    if (!s) return "";
+    const i = s.indexOf("/");
+    return (i >= 0 ? s.slice(0, i) : s).trim();
+  }
+
+  function monoIpCopyCellHtml(value, displayName) {
+    const raw = String(value ?? "").trim();
+    const display = escapeHtml(raw);
+    const copyVal = tunnelIpWithoutSuffix(raw);
+    const copyBtn = copyVal
+      ? `<button type="button" class="btn-quiet btn-tunnel-ip-copy" data-tunnel-ip-copy="${escapeHtml(copyVal)}" aria-label="Copy IP address" title="Copy IP (without subnet mask)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg></button>`
+      : "";
+    const label = String(displayName ?? "").trim();
+    const labelHtml = label ? `<span class="route-target-name">${escapeHtml(label)}</span>` : "";
+    const cellClass = label ? "mono tunnel-ip-cell route-target-cell" : "mono tunnel-ip-cell";
+    return `<td class="${cellClass}">${labelHtml}<span class="tunnel-ip-inner"><span class="tunnel-ip-text">${display}</span>${copyBtn}</span></td>`;
+  }
+
+  function bindTunnelIpCopyButtons(scope, setErrMsg) {
+    scope.querySelectorAll("[data-tunnel-ip-copy]").forEach((b) => {
+      b.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const text = b.getAttribute("data-tunnel-ip-copy") || "";
+        if (!text) return;
+        try {
+          if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+            setErrMsg("Clipboard is not available in this context (try HTTPS or localhost).", true);
+            return;
+          }
+          await navigator.clipboard.writeText(text);
+          b.classList.add("is-copied");
+          const prevTitle = b.title;
+          b.title = "Copied";
+          const prevTimer = b.getAttribute("data-copy-timer");
+          if (prevTimer) window.clearTimeout(Number(prevTimer));
+          const tid = window.setTimeout(() => {
+            b.classList.remove("is-copied");
+            b.title = prevTitle;
+            b.removeAttribute("data-copy-timer");
+          }, 1500);
+          b.setAttribute("data-copy-timer", String(tid));
+        } catch (e) {
+          setErrMsg(String(e.message || e), true);
+        }
+      });
+    });
+  }
+
   function peerPingMsCell(peer, pingByTunnel) {
     if (!showPeersMetricsColumn()) return "";
     if (peer.disabled) {
@@ -1056,11 +1129,14 @@
         const f = [p.name, p.tunnel_ip, p.public_key].join(" ").toLowerCase();
         const pingCell = peerPingMsCell(p, pingByTunnel);
         return (
-          `<tr data-filter="${escapeHtml(f)}"><td>${escapeHtml(p.name)}</td><td class="mono">${escapeHtml(p.tunnel_ip)}</td><td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr data-filter="${escapeHtml(f)}"><td>${escapeHtml(p.name)}</td>` +
+          monoIpCopyCellHtml(p.tunnel_ip) +
+          `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
         );
       })
       .join("");
     wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th>${pingHead}<th>Status</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    bindTunnelIpCopyButtons(wrap, setPeersMsg);
     wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
       b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
     });
@@ -1341,6 +1417,438 @@
     return m ? m[1] : "";
   }
 
+  /** Peer display name whose tunnel IPv4 host equals route target_ip. */
+  function peerNameForTargetHost(cfg, hostIp) {
+    const target = String(hostIp || "").trim();
+    if (!target || !cfg || !cfg.peers) return "";
+    for (const p of cfg.peers) {
+      const h = tunnelToHost(p.tunnel_ip);
+      if (h && h === target) {
+        const n = String(p.name || "").trim();
+        if (n) return n;
+      }
+    }
+    return "";
+  }
+
+  function peerWgTopologyState(peer, st) {
+    if (!peer) return "unknown";
+    if (peer.disabled) return "na";
+    if (!st || st.wireguard_dump_failed) return "unknown";
+    const pk = String(peer.public_key || "").trim();
+    const row = wgPeerPubKeyMap(st).get(pk);
+    if (!row) return "unknown";
+    const h = row.latest_handshake_unix;
+    if (!h || h <= 0) return "off";
+    const ago = Math.floor(Date.now() / 1000) - h;
+    if (ago <= PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC) return "on";
+    return "off";
+  }
+
+  function buildTopologyPeerSlots(cfg) {
+    const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
+    const peers = cfg.peers || [];
+    const slots = [];
+    const seen = new Set();
+    for (let i = 0; i < routes.length; i++) {
+      const r = routes[i];
+      const host = String(r.target_ip || "").trim();
+      let peer = null;
+      for (const p of peers) {
+        if (tunnelToHost(p.tunnel_ip) === host) {
+          peer = p;
+          break;
+        }
+      }
+      const key = peer ? String(peer.public_key || "").trim() || "peer-empty-key" : "orphan:" + host;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      slots.push({ peer, orphanHost: peer ? "" : host, anchorRouteIndex: i });
+    }
+    return slots;
+  }
+
+  function peerSlotIndexForRoute(routes, slots, host) {
+    const h = String(host || "").trim();
+    for (let j = 0; j < slots.length; j++) {
+      const s = slots[j];
+      if (s.peer) {
+        if (tunnelToHost(s.peer.tunnel_ip) === h) return j;
+      } else if (s.orphanHost === h) {
+        return j;
+      }
+    }
+    return Math.max(0, slots.length - 1);
+  }
+
+  function routeTopologyProtoUpperEscaped(r) {
+    const plain = routeProtoPlainText(r.proto);
+    if (!plain || plain === "—") return "—";
+    return escapeHtml(plain.toUpperCase());
+  }
+
+  /** Topology route card: show at most two ports, then ", ...". */
+  function routeTopologyPortsDisplayEscaped(r) {
+    const ports = (r.ports || []).map((x) => String(x).trim()).filter(Boolean);
+    if (ports.length === 0) return escapeHtml("—");
+    if (ports.length <= 2) return escapeHtml(ports.join(", "));
+    return escapeHtml(ports.slice(0, 2).join(", ") + ", ...");
+  }
+
+  function routeTopologyAriaLabel(r) {
+    const proto = routeProtoPlainText(r.proto);
+    const portsJoined = (r.ports || []).map((x) => String(x).trim()).filter(Boolean).join(", ");
+    const ports = portsJoined || "—";
+    let s = "Forwarding route, " + proto + ", ports " + ports;
+    if (r.disabled) s += " (disabled)";
+    return escapeHtml(s);
+  }
+
+  /** Ping display for topology peer cards (right column). */
+  function topologyPeerPingParts(peer, pingByTunnel) {
+    if (!showPeersMetricsColumn()) {
+      return { display: "—", title: "Enable peer ICMP metrics in Settings to show ping here." };
+    }
+    if (!peer) return { display: "—", title: "" };
+    if (peer.disabled) return { display: "—", title: "Peer disabled" };
+    if (!pingByTunnel) return { display: "…", title: "Loading metrics" };
+    const th = tunnelHostOnly(peer.tunnel_ip);
+    const row = th ? pingByTunnel.get(th) : null;
+    if (!row) return { display: "—", title: "No ping data" };
+    if (row.ok) return { display: String(row.latency_ms) + " ms", title: "Last ICMP ping (evuproxy metrics)" };
+    const err = row.error ? String(row.error) : "unreachable";
+    return { display: "—", title: err };
+  }
+
+  function topoBezierPath(x1, y1, x2, y2) {
+    const dx = Math.max(40, (x2 - x1) * 0.45);
+    return "M " + x1 + " " + y1 + " C " + (x1 + dx) + " " + y1 + ", " + (x2 - dx) + " " + y2 + ", " + x2 + " " + y2;
+  }
+
+  /** Fallback width when DOM measure is unavailable. */
+  function estimateTopologyRouteChipWidthPx(r, routeX, peerX) {
+    const proto = routeProtoPlainText(r.proto);
+    const portsPlain = (r.ports || []).map((x) => String(x).trim()).filter(Boolean);
+    const portsDisp =
+      portsPlain.length === 0
+        ? "—"
+        : portsPlain.length <= 2
+          ? portsPlain.join(", ")
+          : portsPlain.slice(0, 2).join(", ") + ", ...";
+    const protoU = proto === "—" ? "—" : proto.toUpperCase();
+    const padAndGutter = 26;
+    const border = 2;
+    const splitGapAndVbar = 16;
+    const w =
+      border +
+      padAndGutter +
+      protoU.length * 7 +
+      splitGapAndVbar +
+      Math.max(portsDisp.length, 1) * 6.6 +
+      padAndGutter;
+    const maxW = Math.max(88, peerX - routeX - 24);
+    return Math.max(68, Math.min(Math.ceil(w), maxW));
+  }
+
+  function buildTopologyRouteCardInnerHtml(r, protoEsc, portsEsc, aria, routeOutlineCls) {
+    return (
+      '<div class="topology-node topology-node--route' +
+      (r.disabled ? " topology-node--disabled" : "") +
+      routeOutlineCls +
+      '" role="group" aria-label="' +
+      aria +
+      '"><div class="topology-route-split"><span class="topology-route-proto">' +
+      protoEsc +
+      '</span><span class="topology-node-vbar" aria-hidden="true"></span><span class="topology-route-ports">' +
+      portsEsc +
+      "</span></div></div>"
+    );
+  }
+
+  function measureTopologyRouteChipWidthPx(cardInnerHtml, routeX, peerX, r) {
+    const wrap = $("topology-graph-wrap");
+    const maxW = Math.max(88, peerX - routeX - 24);
+    if (!wrap) {
+      return estimateTopologyRouteChipWidthPx(r, routeX, peerX);
+    }
+    let rail = $("topology-measure-rail");
+    if (!rail) {
+      rail = document.createElement("div");
+      rail.id = "topology-measure-rail";
+      rail.className = "topology-measure-rail";
+      rail.setAttribute("aria-hidden", "true");
+      wrap.appendChild(rail);
+    }
+    rail.innerHTML = cardInnerHtml;
+    const node = rail.querySelector(".topology-node--route");
+    if (!node) return estimateTopologyRouteChipWidthPx(r, routeX, peerX);
+    const w = node.getBoundingClientRect().width;
+    if (!(w > 1)) return estimateTopologyRouteChipWidthPx(r, routeX, peerX);
+    return Math.max(52, Math.min(Math.ceil(w), maxW));
+  }
+
+  function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
+    if (pingByTunnel === undefined) pingByTunnel = null;
+    const svg = $("topology-svg");
+    if (!svg) return;
+    const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
+    const slots = buildTopologyPeerSlots(cfg);
+    if (!routes.length) {
+      svg.setAttribute("viewBox", "0 0 780 120");
+      svg.innerHTML =
+        '<title id="topology-svg-title">No routes in config</title><text x="390" y="60" text-anchor="middle" class="topology-empty-text">No routes in config</text>';
+      return;
+    }
+
+    const rowGapSamePeer = 52;
+    const rowGapNewPeer = 92;
+    const peerNodeH = 58;
+    const routeNodeH = 34;
+    const rowH = Math.max(routeNodeH, peerNodeH);
+    const pad = 36;
+
+    const bandTop = [];
+    for (let bi = 0; bi < routes.length; bi++) {
+      if (bi === 0) bandTop[0] = pad;
+      else {
+        const pPrev = peerSlotIndexForRoute(routes, slots, routes[bi - 1].target_ip);
+        const pCur = peerSlotIndexForRoute(routes, slots, routes[bi].target_ip);
+        const step = pPrev === pCur ? rowGapSamePeer : rowGapNewPeer;
+        bandTop[bi] = bandTop[bi - 1] + step;
+      }
+    }
+    const lastBandTop = bandTop[routes.length - 1];
+    const totalH = lastBandTop + rowH + 24;
+
+    const srvW = 176;
+    const srvX = 36;
+    const srvCx = srvX + srvW;
+    const srvCy = totalH / 2;
+    const routeX = 268;
+    const peerX = 492;
+    const peerW = 200;
+
+    function routeMidY(i) {
+      return bandTop[i] + rowH / 2;
+    }
+
+    const wgIf = (cfg.wireguard && cfg.wireguard.interface) || (st && st.wireguard_interface) || "wg0";
+    const wgAddr = (cfg.wireguard && cfg.wireguard.address) || "";
+    const pubIf = (cfg.network && cfg.network.public_interface) || "";
+    const serverLineCount = 2 + (wgAddr ? 1 : 0) + (pubIf ? 1 : 0);
+    const serverNodeH = Math.max(peerNodeH, 22 + serverLineCount * 19);
+
+    const edges = [];
+    const nodes = [];
+    const routeCardInners = [];
+    const routeWidths = [];
+    const slotMaxRouteW = new Array(slots.length).fill(0);
+    const routePeerSlot = [];
+    for (let ri = 0; ri < routes.length; ri++) {
+      const r0 = routes[ri];
+      const protoEsc0 = routeTopologyProtoUpperEscaped(r0);
+      const portsEsc0 = routeTopologyPortsDisplayEscaped(r0);
+      const aria0 = routeTopologyAriaLabel(r0);
+      const routeOutlineCls0 = r0.disabled ? "" : " topology-node--outline-on";
+      const inner0 = buildTopologyRouteCardInnerHtml(r0, protoEsc0, portsEsc0, aria0, routeOutlineCls0);
+      routeCardInners.push(inner0);
+      const pj0 = peerSlotIndexForRoute(routes, slots, r0.target_ip);
+      routePeerSlot.push(pj0);
+      const w0 = measureTopologyRouteChipWidthPx(inner0, routeX, peerX, r0);
+      if (w0 > slotMaxRouteW[pj0]) slotMaxRouteW[pj0] = w0;
+    }
+    for (let ri = 0; ri < routes.length; ri++) {
+      routeWidths.push(slotMaxRouteW[routePeerSlot[ri]]);
+    }
+
+    for (let i = 0; i < routes.length; i++) {
+      const r = routes[i];
+      const routeWi = routeWidths[i];
+      const routeCx = routeX + routeWi;
+      const rcy = routeMidY(i);
+      const dis = !!r.disabled;
+      const pj = peerSlotIndexForRoute(routes, slots, r.target_ip);
+      const slot = slots[pj];
+      const peer = slot && slot.peer;
+      const pk = peer ? String(peer.public_key || "").trim() : "";
+      const stt = peer ? peerWgTopologyState(peer, st) : "unknown";
+
+      const p1 = topoBezierPath(srvCx, srvCy, routeX, rcy);
+      const pathActive = !dis && stt === "on" && !!pk && activePeerKeys.has(pk);
+      let e1c;
+      let e2c;
+      if (dis) {
+        e1c = "topo-edge topo-edge--muted";
+        e2c = "topo-edge topo-edge--muted";
+      } else if (pathActive) {
+        e1c = "topo-edge topo-edge--on topo-edge--pulse";
+        e2c = "topo-edge topo-edge--on topo-edge--pulse";
+      } else {
+        e1c = "topo-edge topo-edge--neutral";
+        e2c = "topo-edge topo-edge--neutral";
+      }
+      edges.push('<path class="' + e1c + '" d="' + p1 + '" fill="none" />');
+
+      const peerAttachY = routeMidY(slots[pj].anchorRouteIndex);
+      const p2 = topoBezierPath(routeCx, rcy, peerX, peerAttachY);
+      edges.push('<path class="' + e2c + '" d="' + p2 + '" fill="none" />');
+    }
+
+    const serverBody =
+      '<div class="topology-node topology-node--server"><p class="topology-node-title">EvuProxy</p>' +
+      '<p class="topology-node-meta mono">' +
+      escapeHtml(wgIf) +
+      "</p>" +
+      (wgAddr ? '<p class="topology-node-detail mono">' + escapeHtml(wgAddr) + "</p>" : "") +
+      (pubIf
+        ? '<p class="topology-node-detail meta">wan ' + escapeHtml(pubIf) + "</p>"
+        : "") +
+      "</div>";
+
+    nodes.push(
+      '<foreignObject x="' +
+        srvX +
+        '" y="' +
+        (srvCy - serverNodeH / 2) +
+        '" width="' +
+        srvW +
+        '" height="' +
+        serverNodeH +
+        '"><div xmlns="http://www.w3.org/1999/xhtml" class="topology-foreign-inner topology-foreign-inner--server">' +
+        serverBody +
+        "</div></foreignObject>"
+    );
+
+    for (let i = 0; i < routes.length; i++) {
+      const r = routes[i];
+      const ry = bandTop[i] + (rowH - routeNodeH) / 2;
+      nodes.push(
+        '<foreignObject x="' +
+          routeX +
+          '" y="' +
+          ry +
+          '" width="' +
+          routeWidths[i] +
+          '" height="' +
+          routeNodeH +
+          '"><div xmlns="http://www.w3.org/1999/xhtml" class="topology-foreign-inner topology-foreign-inner--route">' +
+          routeCardInners[i] +
+          "</div></foreignObject>"
+      );
+    }
+
+    for (let j = 0; j < slots.length; j++) {
+      const s = slots[j];
+      const anchor = s.anchorRouteIndex;
+      const py = bandTop[anchor] + (rowH - peerNodeH) / 2;
+      const peer = s.peer;
+      const stt = peer ? peerWgTopologyState(peer, st) : "unknown";
+      const peerOutlineCls = stt === "on" ? " topology-node--outline-on" : "";
+
+      const title = peer
+        ? escapeHtml(String(peer.name || "").trim() || "Peer")
+        : escapeHtml("Unknown target");
+      const sub = peer
+        ? escapeHtml(String(peer.tunnel_ip || "").trim())
+        : escapeHtml(String(s.orphanHost || "").trim());
+      const pingParts = topologyPeerPingParts(peer, pingByTunnel);
+      const pingEsc = escapeHtml(pingParts.display);
+      const pingTitleEsc = pingParts.title ? escapeHtml(pingParts.title) : "";
+      const namePlain = peer ? String(peer.name || "").trim() || "Peer" : "Unknown target";
+      const subPlain = peer ? String(peer.tunnel_ip || "").trim() : String(s.orphanHost || "").trim();
+      const peerAria = escapeHtml(namePlain + ", " + subPlain + ", ping " + pingParts.display);
+
+      nodes.push(
+        '<foreignObject x="' +
+          peerX +
+          '" y="' +
+          py +
+          '" width="' +
+          peerW +
+          '" height="' +
+          peerNodeH +
+          '"><div xmlns="http://www.w3.org/1999/xhtml" class="topology-foreign-inner topology-foreign-inner--peer"><div class="topology-node topology-node--peer' +
+          peerOutlineCls +
+          '" role="group" aria-label="' +
+          peerAria +
+          '"><div class="topology-peer-split"><div class="topology-peer-main"><p class="topology-node-title">' +
+          title +
+          '</p><p class="topology-node-meta mono">' +
+          sub +
+          '</p></div><span class="topology-node-vbar" aria-hidden="true"></span><span class="topology-peer-ping mono"' +
+          (pingTitleEsc ? ' title="' + pingTitleEsc + '"' : "") +
+          ">" +
+          pingEsc +
+          "</span></div></div></div></foreignObject>"
+      );
+    }
+
+    const online = slots.filter((s) => s.peer && peerWgTopologyState(s.peer, st) === "on").length;
+    const summary =
+      routes.length +
+      " route(s), " +
+      slots.length +
+      " peer target(s), " +
+      online +
+      " online peer link(s)";
+    svg.setAttribute("viewBox", "0 0 780 " + totalH);
+    svg.innerHTML =
+      '<title id="topology-svg-title">' +
+      escapeHtml(summary) +
+      "</title><rect class=\"topology-grid-bg\" x=\"0\" y=\"0\" width=\"780\" height=\"" +
+      totalH +
+      '" aria-hidden="true" /><g class="topology-edges" aria-hidden="true">' +
+      edges.join("") +
+      '</g><g class="topology-nodes">' +
+      nodes.join("") +
+      "</g>";
+  }
+
+  async function refreshTopologyPage() {
+    if (topologyRefreshInFlight) return;
+    topologyRefreshInFlight = true;
+    const msg = $("topology-msg");
+    if (msg) {
+      msg.textContent = "";
+      msg.classList.remove("err");
+    }
+    try {
+      const [cfg, st] = await Promise.all([api("/v1/config"), api("/v1/stats")]);
+      let pingByTunnel = null;
+      if (showPeersMetricsColumn()) {
+        try {
+          pingByTunnel = await fetchPeerMetricsMap();
+          lastPeerPingByTunnel = pingByTunnel;
+        } catch (_) {
+          pingByTunnel = lastPeerPingByTunnel;
+        }
+      }
+      const activeKeys = new Set();
+      if (st && !st.wireguard_dump_failed && Array.isArray(st.wireguard_peers)) {
+        for (const row of st.wireguard_peers) {
+          const pk = String(row.public_key || "").trim();
+          if (!pk) continue;
+          const cur = (Number(row.transfer_rx) || 0) + (Number(row.transfer_tx) || 0);
+          const prev = topologyPrevPeerBytes.get(pk);
+          if (prev !== undefined && cur - prev >= 128) {
+            activeKeys.add(pk);
+          }
+          topologyPrevPeerBytes.set(pk, cur);
+        }
+      }
+      renderTopologyGraph(cfg, st, activeKeys, pingByTunnel);
+      setApiStatus(true);
+    } catch (e) {
+      if (msg) {
+        msg.textContent = String(e.message || e);
+        msg.classList.add("err");
+      }
+      setApiStatus(false, String(e.message || e));
+    } finally {
+      topologyRefreshInFlight = false;
+    }
+  }
+
   function routeProtoFromCheckboxes() {
     const tcp = $("route-f-proto-tcp").checked;
     const udp = $("route-f-proto-udp").checked;
@@ -1375,7 +1883,7 @@
       .filter(Boolean);
   }
 
-  function formatRouteProtoCell(p) {
+  function routeProtoPlainText(p) {
     const raw = String(p || "").trim();
     if (!raw) return "—";
     const s = raw.toLowerCase();
@@ -1386,7 +1894,14 @@
     if (tcp && udp) return "tcp, udp";
     if (tcp) return "tcp";
     if (udp) return "udp";
-    return escapeHtml(raw);
+    return raw;
+  }
+
+  function formatRouteProtoCell(p) {
+    const plain = routeProtoPlainText(p);
+    if (plain === "—") return "—";
+    if (plain === "tcp" || plain === "udp" || plain === "tcp, udp") return plain;
+    return escapeHtml(plain);
   }
 
   function renderRoutesTable(cfg) {
@@ -1399,7 +1914,9 @@
     }
     const rows = routes
       .map((r, i) => {
-        const f = [formatRouteProtoCell(r.proto), (r.ports || []).join(", "), r.target_ip].join(" ").toLowerCase();
+        const targetHost = String(r.target_ip || "").trim();
+        const targetPeerName = peerNameForTargetHost(cfg, targetHost);
+        const f = [formatRouteProtoCell(r.proto), (r.ports || []).join(", "), targetHost, targetPeerName].join(" ").toLowerCase();
         const srcList = r.source_allow_cidrs || [];
         const srcCell =
           srcList.length > 0
@@ -1410,11 +1927,14 @@
               "</span> <span class=\"meta\">CIDR</span></td>"
             : '<td><span class="meta">any</span></td>';
         return (
-          `<tr data-filter="${escapeHtml(f)}"><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td><td class="mono">${escapeHtml(r.target_ip)}</td>${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-test="${i}" class="btn-quiet">Test</button> <button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+          `<tr data-filter="${escapeHtml(f)}"><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
+          monoIpCopyCellHtml(r.target_ip, targetPeerName) +
+          `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-test="${i}" class="btn-quiet">Test</button> <button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
         );
       })
       .join("");
     wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Source</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    bindTunnelIpCopyButtons(wrap, setRoutesMsg);
     wrap.querySelectorAll("[data-route-edit]").forEach((b) => {
       b.addEventListener("click", () => openRouteEditor(+b.getAttribute("data-route-edit")));
     });
@@ -2808,13 +3328,104 @@
     }
   }
 
+  const GITHUB_RELEASES_LATEST_API =
+    "https://api.github.com/repos/imevul/evuproxy/releases/latest";
+  const GITHUB_RELEASES_PAGE_BASE = "https://github.com/imevul/evuproxy";
+  const UPDATE_CHECK_STORAGE_KEY = "evuproxy_gh_release_check_v1";
+  const UPDATE_CHECK_TTL_MS = 6 * 60 * 60 * 1000;
+
+  function parseSemverPrefix(s) {
+    const t = String(s || "")
+      .trim()
+      .replace(/^v/i, "");
+    const m = t.match(/^(\d+)\.(\d+)\.(\d+)/);
+    if (!m) return null;
+    return { major: +m[1], minor: +m[2], patch: +m[3] };
+  }
+
+  function semverCompare(a, b) {
+    if (!a || !b) return 0;
+    if (a.major !== b.major) return a.major - b.major;
+    if (a.minor !== b.minor) return a.minor - b.minor;
+    return a.patch - b.patch;
+  }
+
+  async function fetchLatestGitHubReleaseTag() {
+    const r = await fetch(GITHUB_RELEASES_LATEST_API, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    if (!r.ok) throw new Error("release lookup failed");
+    const j = await r.json();
+    const tag = String(j.tag_name || "").trim();
+    if (!tag) throw new Error("no tag");
+    return tag;
+  }
+
+  async function applySidebarUpdateNotice(currentVersion) {
+    const note = $("sidebar-update-note");
+    const link = $("sidebar-update-link");
+    if (!note || !link) return;
+    const cur = parseSemverPrefix(currentVersion);
+    const vLow = String(currentVersion || "").trim().toLowerCase();
+    if (!cur || vLow === "dev") {
+      note.classList.add("is-hidden");
+      return;
+    }
+    let latestTag = null;
+    const now = Date.now();
+    try {
+      const raw = sessionStorage.getItem(UPDATE_CHECK_STORAGE_KEY);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (
+          cached &&
+          typeof cached.tag === "string" &&
+          typeof cached.t === "number" &&
+          now - cached.t < UPDATE_CHECK_TTL_MS
+        ) {
+          latestTag = cached.tag;
+        }
+      }
+    } catch (_) {}
+    if (!latestTag) {
+      try {
+        latestTag = await fetchLatestGitHubReleaseTag();
+        try {
+          sessionStorage.setItem(
+            UPDATE_CHECK_STORAGE_KEY,
+            JSON.stringify({ t: now, tag: latestTag })
+          );
+        } catch (_) {}
+      } catch {
+        note.classList.add("is-hidden");
+        return;
+      }
+    }
+    const remote = parseSemverPrefix(latestTag);
+    if (!remote || semverCompare(remote, cur) <= 0) {
+      note.classList.add("is-hidden");
+      return;
+    }
+    const tagEnc = encodeURIComponent(latestTag);
+    link.href = GITHUB_RELEASES_PAGE_BASE + "/releases/tag/" + tagEnc;
+    const label = latestTag.replace(/^v/i, "");
+    link.textContent = "New: v" + label;
+    note.classList.remove("is-hidden");
+  }
+
   async function refreshSidebarAbout() {
     const el = $("sidebar-version");
     if (!el || el.dataset.loaded === "1") return;
     try {
       const a = await api("/v1/about");
-      el.textContent = a.version || "—";
+      const ver =
+        a.version != null && String(a.version).trim() !== "" ? String(a.version).trim() : "—";
+      el.textContent = ver;
       el.dataset.loaded = "1";
+      void applySidebarUpdateNotice(ver);
     } catch {
       /* no token or API down */
     }
@@ -3218,6 +3829,8 @@
   $("peer-cancel").addEventListener("click", closePeerEditor);
 
   $("routes-refresh").addEventListener("click", refreshRoutesPage);
+  const topoRef = $("topology-refresh");
+  if (topoRef) topoRef.addEventListener("click", () => void refreshTopologyPage());
   $("routes-add").addEventListener("click", () => {
     if (!lastConfig) refreshRoutesPage().then(() => openRouteEditor(-1));
     else openRouteEditor(-1);

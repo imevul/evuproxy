@@ -12,7 +12,7 @@ Production nginx sends **`Cache-Control: no-cache, private, must-revalidate`** f
 
 See also [Security and privacy](security-and-privacy.md) and [Local HTTP API](http-api.md).
 
-The UI is **dark-themed** only. **Overview** shows recent **audit events** (from the API) and geo list freshness when available. **Settings** can download raw **`config.yaml`**. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API.
+The UI is **dark-themed** only. **Overview** shows recent **audit events** (from the API) and geo list freshness when available. **Settings** can download raw **`config.yaml`**. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API. **Topology** shows a read-only graph of `forwarding.routes` from the EvuProxy host (ingress) to each target peer, using `GET /v1/stats` for WireGuard handshake-style edge coloring.
 
 ## Local UI with mock API
 
@@ -22,6 +22,6 @@ To try the admin UI **without** `evuproxy serve` on the host (no WireGuard or nf
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-Open `http://127.0.0.1:9080` and enter API token **`dev`** (default), or set `MOCK_API_TOKEN` when starting compose and use that value in the UI. The mock implements the same HTTP paths and JSON shapes as the real API; config is kept **in memory** on `PUT`.
+Open `http://127.0.0.1:9080` and enter API token **`dev`** (default), or set `MOCK_API_TOKEN` when starting compose and use that value in the UI. The mock implements the same HTTP paths and JSON shapes as the real API. **Config persistence (dev):** the mock writes successful `PUT /api/v1/config` (and discard/restore paths that rewrite config) to **`docker/mock-api/state/mock-config.json`** inside a bind-mounted volume so edits survive container restart. Delete that file (or run **`make dev-fresh`** from the repo root) to reset to the Python baseline in **`mock_server.py`**. Synthetic **`GET /api/v1/stats`** `wireguard_peers` fields support the **Topology** page (Animated edges ≈ counter deltas in mock only).
 
 **Live UI edits:** [docker-compose.dev.yml](../docker-compose.dev.yml) bind-mounts [web/](../web/) into the nginx container and [docker/mock-api/mock_server.py](../docker/mock-api/mock_server.py) into the mock container. Edit static files or the mock script on the host, **reload the browser** for UI changes, or run `docker compose -f docker-compose.dev.yml restart mock-api` after Python edits. Rebuild images only when [docker/Dockerfile](../docker/Dockerfile), [docker/nginx.conf](../docker/nginx.conf), or [docker/entrypoint.sh](../docker/entrypoint.sh) change. Dev nginx uses [docker/nginx.dev.conf](../docker/nginx.dev.conf) (`Cache-Control: no-store`, fixed upstream to `mock-api`).

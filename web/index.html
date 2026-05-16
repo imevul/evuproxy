@@ -34,6 +34,7 @@
         <a href="#/token" class="nav-link" data-route="token">API token</a>
         <a href="#/peers" class="nav-link" data-route="peers">Peers</a>
         <a href="#/routes" class="nav-link" data-route="routes">Routes</a>
+        <a href="#/topology" class="nav-link" data-route="topology">Topology</a>
         <a href="#/inbound" class="nav-link" data-route="inbound">Inbound access</a>
         <a href="#/geoblocking" class="nav-link" data-route="geoblocking">Geoblocking</a>
         <a href="#/pending" class="nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span></a>
@@ -48,7 +49,16 @@
           rel="noopener noreferrer"
           >EvuProxy on GitHub</a
         >
-        <span class="sidebar-version" id="sidebar-version" title="API build version">—</span>
+        <span class="sidebar-version" id="sidebar-version" title="Running version (from API)">—</span>
+        <p class="sidebar-update-note is-hidden" id="sidebar-update-note" role="status" aria-live="polite">
+          <a
+            id="sidebar-update-link"
+            class="sidebar-update-link"
+            href="https://github.com/imevul/evuproxy/releases/latest"
+            target="_blank"
+            rel="noopener noreferrer"
+          ></a>
+        </p>
       </footer>
     </aside>
 
@@ -352,6 +362,34 @@
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section id="page-topology" class="page" hidden>
+        <h2 class="page-title">Topology</h2>
+        <div class="card topology-card">
+          <div class="toolbar">
+            <button type="button" class="btn-primary" id="topology-refresh">Refresh</button>
+          </div>
+          <div class="topology-legend" role="list">
+            <span class="topology-legend-item" role="listitem"><span class="topology-legend-card topology-legend-card--on" aria-hidden="true"></span> Enabled route / online peer</span>
+            <span class="topology-legend-item" role="listitem"><span class="topology-legend-card topology-legend-card--idle" aria-hidden="true"></span> Disabled route / peer not online</span>
+            <span class="topology-legend-item" role="listitem"><span class="topology-swatch topo-edge-sample topo-edge-sample--neutral"></span> Idle edge</span>
+            <span class="topology-legend-item" role="listitem"><span class="topology-swatch topo-edge-sample topo-edge-sample--traffic" aria-hidden="true"></span> Traffic edge (online + byte change)</span>
+          </div>
+          <div id="topology-graph-wrap" class="topology-graph-wrap">
+            <svg
+              id="topology-svg"
+              class="topology-svg"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 780 200"
+              role="img"
+              aria-labelledby="topology-svg-title"
+            >
+              <title id="topology-svg-title">Forwarding topology</title>
+            </svg>
+          </div>
+          <p id="topology-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>
 
