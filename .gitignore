@@ -2,6 +2,9 @@
 *.tgz
 .DS_Store
 
+# Local Docker Compose overrides (copy from .env.example)
+.env
+
 # Private / local-only docs (not published in this repo)
 .cursor/
 local_docs/

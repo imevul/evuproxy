@@ -20,6 +20,6 @@ services:
       retries: 3
       start_period: 10s
     environment:
-      EVUPROXY_API_UPSTREAM: 127.0.0.1:9847
-      # Override from shell: EVUPROXY_UI_LISTEN=0.0.0.0:9080 docker compose up -d
+      EVUPROXY_API_UPSTREAM: ${EVUPROXY_API_UPSTREAM:-127.0.0.1:9847}
+      # Optional: copy `.env.example` → `.env` (see EVUPROXY_UI_LISTEN there).
       EVUPROXY_UI_LISTEN: ${EVUPROXY_UI_LISTEN:-127.0.0.1:9080}
