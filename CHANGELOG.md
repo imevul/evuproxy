@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/imevul/evuproxy/compare/v0.9.0...v0.10.0) (2026-05-16)
+
+
+### Features
+
+* Topology page, mock config persistence, and sidebar version notice ([a7a05a1](https://github.com/imevul/evuproxy/commit/a7a05a157e59a230b684b972d42445dc8add5c39))
+* **web:** topology graph pan/zoom with Center control ([1a1ef86](https://github.com/imevul/evuproxy/commit/1a1ef862dde3067e1128cdfec906bb39f34e9911))
+
 ## [0.9.0](https://github.com/imevul/evuproxy/compare/v0.8.0...v0.9.0) (2026-05-09)
 
 
