@@ -14,7 +14,13 @@ services:
     network_mode: host
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9080/healthz | grep -q ok || exit 1"]
+      # Same listen target as nginx: EVUPROXY_UI_LISTEN is set in `environment` below.
+      # If the bind address is 0.0.0.0, curl uses 127.0.0.1 (0.0.0.0 is not a valid client target).
+      test:
+        [
+          "CMD-SHELL",
+          'ADDR=$${EVUPROXY_UI_LISTEN:-127.0.0.1:9080}; HOST=$${ADDR%:*}; PORT=$${ADDR##*:}; [ "$$HOST" = "0.0.0.0" ] && HOST=127.0.0.1; curl -fsS "http://$$HOST:$$PORT/healthz" | grep -q ok || exit 1',
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
