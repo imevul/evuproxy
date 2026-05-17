@@ -67,6 +67,8 @@
   /** Query string from hash for ?peer= / ?route= highlighting */
   let hashNavParams = new URLSearchParams();
   const GEO_STALE_MS = 30 * 24 * 60 * 60 * 1000;
+  /** Overview "Needs attention" when rolling 10m ICMP avg is at or above this (ms). */
+  const OVERVIEW_LATENCY_LAST10M_WARN_MS = 500;
   /** WireGuard transfer_rx+transfer_tx totals per public_key for topology edge animation */
   let topologyPrevPeerBytes = new Map();
   let topologyRefreshInFlight = false;
@@ -628,15 +630,6 @@
   }
 
   /* ——— Overview ——— */
-  function elStat(label, value) {
-    const d = document.createElement("div");
-    d.className = "stat-card";
-    d.innerHTML = "<p class=\"label\"></p><p class=\"value\"></p>";
-    d.querySelector(".label").textContent = label;
-    d.querySelector(".value").textContent = value;
-    return d;
-  }
-
   function overviewApiIssueCard(opts) {
     const wrap = document.createElement("div");
     wrap.className = "card overview-api-issue-card";
@@ -721,6 +714,548 @@
     return days + " days ago";
   }
 
+  function pingSeriesFromDashboard(met) {
+    const hist = met && met.dashboard && met.dashboard.ping_history;
+    if (!Array.isArray(hist)) return [];
+    const out = [];
+    for (const p of hist) {
+      const v = Number(p && p.avg_ms);
+      if (Number.isFinite(v)) out.push(v);
+    }
+    return out;
+  }
+
+  function axisTimeLabelFromIso(iso) {
+    if (!iso || typeof iso !== "string") return "";
+    const m = iso.match(/T(\d{2}):(\d{2})/);
+    if (m) return m[1] + ":" + m[2] + "Z";
+    return iso.length > 13 ? iso.slice(11, 16) + "Z" : iso;
+  }
+
+  function pingPointsFromPingHistory(met) {
+    const hist = met && met.dashboard && met.dashboard.ping_history;
+    if (!Array.isArray(hist) || hist.length < 2) return null;
+    const ys = [];
+    const ts = [];
+    for (const p of hist) {
+      const v = Number(p && p.avg_ms);
+      const t = p && p.ts_utc != null ? String(p.ts_utc).trim() : "";
+      if (!Number.isFinite(v) || !t) continue;
+      ys.push(v);
+      ts.push(t);
+    }
+    if (ys.length < 2) return null;
+    return {
+      ys: ys,
+      xLeft: axisTimeLabelFromIso(ts[0]),
+      xRight: axisTimeLabelFromIso(ts[ts.length - 1]),
+    };
+  }
+
+  /* Milliseconds — aligns with docker/mock-api `ping_history` so the Overview spark renders before SQLite buckets fill. */
+  const OVERVIEW_DEV_PING_SPARK_SERIES = [19, 22, 25, 31, 38, 35, 29, 24, 21, 23, 20, 18, 22, 26, 21];
+
+  function pingSeriesForSpark(met) {
+    const fromApi = pingSeriesFromDashboard(met);
+    if (fromApi.length >= 2) return fromApi;
+    try {
+      if (window.__EVUPROXY_DEV_UI__ === true && OVERVIEW_DEV_PING_SPARK_SERIES.length >= 2) {
+        return OVERVIEW_DEV_PING_SPARK_SERIES;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    return fromApi;
+  }
+
+  function pingSparkChartModel(met) {
+    const fromHist = pingPointsFromPingHistory(met);
+    if (fromHist) return fromHist;
+    const ys = pingSeriesForSpark(met);
+    if (ys.length < 2) return { ys: [], xLeft: "", xRight: "" };
+    return { ys: ys, xLeft: "Older", xRight: "Now" };
+  }
+
+  function svgPingSparkChart(model) {
+    const ns = "http://www.w3.org/2000/svg";
+    const series = model.ys;
+    const W = 640;
+    const H = 208;
+    const ml = 46;
+    const mr = 10;
+    const mt = 12;
+    const mb = 34;
+    const cw = W - ml - mr;
+    const ch = H - mt - mb;
+    const xl = ml;
+    const xr = W - mr;
+    const yt = mt;
+    const yb = H - mb;
+
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("class", "overview-ping-spark");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("focusable", "false");
+    const aria =
+      "Average peer latency spark: " +
+      series.length +
+      " buckets from " +
+      (model.xLeft || "?") +
+      " to " +
+      (model.xRight || "?");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", aria);
+
+    const title = document.createElementNS(ns, "title");
+    title.textContent = aria;
+    svg.appendChild(title);
+
+    let vmin = Infinity;
+    let vmax = -Infinity;
+    for (const v of series) {
+      vmin = Math.min(vmin, v);
+      vmax = Math.max(vmax, v);
+    }
+    if (!Number.isFinite(vmin) || !Number.isFinite(vmax)) {
+      svg.appendChild(document.createComment("empty-spark"));
+      return svg;
+    }
+    let span = vmax - vmin;
+    if (span <= 1e-9) {
+      vmin = Math.max(0, vmin - 2);
+      vmax = vmax + 2;
+      span = vmax - vmin;
+    } else {
+      const padV = span * 0.08;
+      vmin -= padV;
+      vmax += padV;
+      span = vmax - vmin;
+    }
+
+    const n = series.length;
+    function bx(i) {
+      return n <= 1 ? xl + cw / 2 : xl + (cw * i) / (n - 1);
+    }
+    function byVal(vv) {
+      return yt + (1 - (vv - vmin) / span) * ch;
+    }
+
+    /* Grid */
+    const gridGrp = document.createElementNS(ns, "g");
+    gridGrp.setAttribute("class", "overview-ping-spark-grid");
+    for (let g = 1; g <= 3; g++) {
+      const gy = yt + (ch * g) / 4;
+      const hl = document.createElementNS(ns, "line");
+      hl.setAttribute("x1", String(xl));
+      hl.setAttribute("x2", String(xr));
+      hl.setAttribute("y1", String(gy));
+      hl.setAttribute("y2", String(gy));
+      hl.setAttribute("stroke", "#21262d");
+      hl.setAttribute("stroke-width", "1");
+      gridGrp.appendChild(hl);
+    }
+    svg.appendChild(gridGrp);
+
+    /* Area + line (under axes so frame reads on top) */
+    let poly = bx(0) + "," + yb + " ";
+    for (let i = 0; i < n; i++) {
+      poly += bx(i) + "," + byVal(series[i]) + " ";
+    }
+    poly += bx(n - 1) + "," + yb;
+
+    const fill = document.createElementNS(ns, "polygon");
+    fill.setAttribute("points", poly.trim());
+    fill.setAttribute("fill", "rgba(56, 139, 253, 0.12)");
+    svg.appendChild(fill);
+
+    let linePts = "";
+    for (let i = 0; i < n; i++) {
+      linePts += bx(i) + "," + byVal(series[i]) + " ";
+    }
+    const pl = document.createElementNS(ns, "polyline");
+    pl.setAttribute("fill", "none");
+    pl.setAttribute("stroke", "#58a6ff");
+    pl.setAttribute("stroke-width", "2");
+    pl.setAttribute("stroke-linecap", "round");
+    pl.setAttribute("stroke-linejoin", "round");
+    pl.setAttribute("points", linePts.trim());
+    svg.appendChild(pl);
+
+    /* Axes */
+    const axY = document.createElementNS(ns, "path");
+    axY.setAttribute("d", "M " + xl + " " + yt + " V " + yb + "");
+    axY.setAttribute("fill", "none");
+    axY.setAttribute("stroke", "#30363d");
+    axY.setAttribute("stroke-width", "1");
+    svg.appendChild(axY);
+
+    const axX = document.createElementNS(ns, "path");
+    axX.setAttribute("d", "M " + xl + " " + yb + " H " + xr + "");
+    axX.setAttribute("fill", "none");
+    axX.setAttribute("stroke", "#30363d");
+    axX.setAttribute("stroke-width", "1");
+    svg.appendChild(axX);
+
+    /* Y ticks + labels */
+    const yFmtTop = Math.round(vmax);
+    const yFmtBot = Math.round(vmin);
+    const tickLen = 4;
+    const tyTop = document.createElementNS(ns, "path");
+    tyTop.setAttribute("d", "M " + (xl - tickLen) + " " + yt + " H " + xl + "");
+    tyTop.setAttribute("stroke", "#30363d");
+    tyTop.setAttribute("stroke-width", "1");
+    svg.appendChild(tyTop);
+
+    const tyBot = document.createElementNS(ns, "path");
+    tyBot.setAttribute("d", "M " + (xl - tickLen) + " " + yb + " H " + xl + "");
+    tyBot.setAttribute("stroke", "#30363d");
+    tyBot.setAttribute("stroke-width", "1");
+    svg.appendChild(tyBot);
+
+    if (yFmtTop === yFmtBot) {
+      const lblOne = document.createElementNS(ns, "text");
+      lblOne.setAttribute("x", String(xl - 6));
+      lblOne.setAttribute("y", String(yt + ch / 2));
+      lblOne.setAttribute("fill", "#8b949e");
+      lblOne.setAttribute("font-size", "11");
+      lblOne.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+      lblOne.setAttribute("text-anchor", "end");
+      lblOne.setAttribute("dominant-baseline", "middle");
+      lblOne.textContent = yFmtTop + " ms";
+      svg.appendChild(lblOne);
+    } else {
+      const lblTop = document.createElementNS(ns, "text");
+      lblTop.setAttribute("x", String(xl - 6));
+      lblTop.setAttribute("y", String(yt + 10));
+      lblTop.setAttribute("fill", "#8b949e");
+      lblTop.setAttribute("font-size", "11");
+      lblTop.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+      lblTop.setAttribute("text-anchor", "end");
+      lblTop.textContent = yFmtTop + " ms";
+      svg.appendChild(lblTop);
+
+      const lblBot = document.createElementNS(ns, "text");
+      lblBot.setAttribute("x", String(xl - 6));
+      lblBot.setAttribute("y", String(yb - 4));
+      lblBot.setAttribute("fill", "#8b949e");
+      lblBot.setAttribute("font-size", "11");
+      lblBot.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+      lblBot.setAttribute("text-anchor", "end");
+      lblBot.textContent = yFmtBot + " ms";
+      svg.appendChild(lblBot);
+    }
+
+    /* X labels */
+    if (model.xLeft) {
+      const txl = document.createElementNS(ns, "text");
+      txl.setAttribute("x", String(xl));
+      txl.setAttribute("y", String(H - 12));
+      txl.setAttribute("fill", "#8b949e");
+      txl.setAttribute("font-size", "10");
+      txl.setAttribute("font-family", "ui-monospace, monospace");
+      txl.textContent = model.xLeft;
+      svg.appendChild(txl);
+    }
+    if (model.xRight) {
+      const txr = document.createElementNS(ns, "text");
+      txr.setAttribute("x", String(xr));
+      txr.setAttribute("y", String(H - 12));
+      txr.setAttribute("fill", "#8b949e");
+      txr.setAttribute("font-size", "10");
+      txr.setAttribute("font-family", "ui-monospace, monospace");
+      txr.setAttribute("text-anchor", "end");
+      txr.textContent = model.xRight;
+      svg.appendChild(txr);
+    }
+
+    const xAxisHint = document.createElementNS(ns, "text");
+    xAxisHint.setAttribute("x", String((xl + xr) / 2));
+    xAxisHint.setAttribute("y", String(H - 2));
+    xAxisHint.setAttribute("fill", "#6e7681");
+    xAxisHint.setAttribute("font-size", "9");
+    xAxisHint.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
+    xAxisHint.setAttribute("text-anchor", "middle");
+    xAxisHint.textContent = "Time (UTC)";
+    svg.appendChild(xAxisHint);
+
+    return svg;
+  }
+
+  function appendPingSparkInto(containerEl, met) {
+    const model = pingSparkChartModel(met);
+    if (model.ys.length < 2) {
+      const p = document.createElement("p");
+      p.className = "meta overview-ping-spark-empty";
+      if (met && met.collection_disabled) {
+        p.textContent = "Turn on ICMP peer metrics collection to build a latency history.";
+      } else if (!model.ys.length) {
+        p.textContent = "Historical averages appear once the collector fills a short window (~15 min · 1 min buckets).";
+      } else {
+        p.textContent = "Sparkline appears after two or more buckets of samples.";
+      }
+      containerEl.appendChild(p);
+      return;
+    }
+    containerEl.appendChild(svgPingSparkChart(model));
+  }
+
+  function overviewLatencyOverviewCard(met) {
+    const wrap = document.createElement("div");
+    wrap.className = "card overview-dash-card overview-dash-latency";
+    wrap.setAttribute("role", "group");
+    wrap.setAttribute("aria-label", "Peer ICMP latency summary and rolling average chart");
+
+    const h = document.createElement("h3");
+    h.textContent = "Peer ICMP latency";
+    wrap.appendChild(h);
+
+    const disabled = !!(met && met.collection_disabled);
+    const dash = met && met.dashboard ? met.dashboard : null;
+    const lpTxt = formatDashboardMinAvgMax(dash && dash.last_ping, disabled);
+    const l10Txt = formatDashboardMinAvgMax(dash && dash.last_10m, disabled);
+
+    const line = document.createElement("div");
+    line.className = "meta overview-latency-line";
+
+    const segPing = document.createElement("span");
+    segPing.className = "overview-latency-seg";
+    const rk1 = document.createElement("span");
+    rk1.className = "overview-latency-key";
+    rk1.textContent = "Last ping";
+    const rv1 = document.createElement("span");
+    rv1.className = "overview-latency-val";
+    rv1.textContent = lpTxt;
+    segPing.appendChild(rk1);
+    segPing.appendChild(rv1);
+
+    const sep = document.createElement("span");
+    sep.className = "overview-latency-sep meta";
+    sep.textContent = "·";
+
+    const seg10 = document.createElement("span");
+    seg10.className = "overview-latency-seg";
+    const rk2 = document.createElement("span");
+    rk2.className = "overview-latency-key";
+    rk2.textContent = "Last 10 min";
+    const rv2 = document.createElement("span");
+    rv2.className = "overview-latency-val";
+    rv2.textContent = l10Txt;
+    seg10.appendChild(rk2);
+    seg10.appendChild(rv2);
+
+    line.appendChild(segPing);
+    line.appendChild(sep);
+    line.appendChild(seg10);
+    wrap.appendChild(line);
+
+    const cap = document.createElement("p");
+    cap.className = "meta overview-spark-caption";
+    cap.textContent = "Rolling avg across peers (≈last 15 min · 1 min buckets)";
+    wrap.appendChild(cap);
+
+    const cc = document.createElement("div");
+    cc.className = "overview-ping-spark-wrap";
+    appendPingSparkInto(cc, met);
+    wrap.appendChild(cc);
+    return wrap;
+  }
+
+  function overviewHostGeoCard(o) {
+    const wrap = document.createElement("div");
+    wrap.className = "card overview-dash-card overview-dash-host";
+
+    const h = document.createElement("h3");
+    h.textContent = "Tunnel, forwarding & geo";
+    wrap.appendChild(h);
+
+    const grid = document.createElement("div");
+    grid.className = "overview-kv-grid";
+
+    function addRow(label, valueText, valueTitleOpt) {
+      const lab = document.createElement("div");
+      lab.className = "overview-kv-label";
+      lab.textContent = label;
+      const val = document.createElement("div");
+      val.className = "overview-kv-val";
+      val.textContent = valueText;
+      if (valueTitleOpt) val.setAttribute("title", valueTitleOpt);
+      grid.appendChild(lab);
+      grid.appendChild(val);
+    }
+
+    function addStructuredValueRow(label, valueRoot) {
+      const lab = document.createElement("div");
+      lab.className = "overview-kv-label";
+      lab.textContent = label;
+      valueRoot.classList.add("overview-kv-val");
+      grid.appendChild(lab);
+      grid.appendChild(valueRoot);
+    }
+
+    function buildGeoFreshnessCell(geo) {
+      const iso = geo && geo.geo_last_success_utc ? String(geo.geo_last_success_utc) : "";
+      const root = document.createElement("div");
+      root.className = "overview-geo-fresh";
+
+      if (!iso) {
+        const tag = document.createElement("span");
+        tag.className = "overview-geo-fresh-tag overview-geo-fresh-tag--never";
+        tag.textContent = "Never loaded";
+        const hint = document.createElement("div");
+        hint.className = "overview-geo-fresh-meta";
+        hint.textContent = "Run Update geo lists from the Overview actions.";
+        root.appendChild(tag);
+        root.appendChild(hint);
+        return root;
+      }
+
+      const d = Date.parse(iso);
+      const stale = !isNaN(d) && Date.now() - d > GEO_STALE_MS;
+      const age = formatGeoAge(iso);
+      const src = String((geo && geo.geo_last_success_source) || "").trim();
+
+      const tag = document.createElement("span");
+      tag.className =
+        "overview-geo-fresh-tag " +
+        (stale ? "overview-geo-fresh-tag--stale" : "overview-geo-fresh-tag--ok");
+      tag.textContent = stale ? "Stale" : "Up to date";
+
+      const ageLine = document.createElement("div");
+      ageLine.className = "overview-geo-fresh-age";
+      ageLine.textContent = age ? "Zones last loaded " + age : "Zones last loaded";
+
+      const meta = document.createElement("div");
+      meta.className = "overview-geo-fresh-meta";
+
+      if (src) {
+        const srcSpan = document.createElement("span");
+        srcSpan.textContent = "Source: " + src;
+        meta.appendChild(srcSpan);
+      }
+
+      const tsSpan = document.createElement("span");
+      tsSpan.className = "overview-geo-fresh-ts";
+      tsSpan.textContent = iso;
+      meta.appendChild(tsSpan);
+
+      root.appendChild(tag);
+      root.appendChild(ageLine);
+      root.appendChild(meta);
+      return root;
+    }
+
+    const iface = String(o.wireguard_interface ?? "—");
+    const port = o.wireguard_listen_port ?? "—";
+
+    const wgStack = document.createElement("div");
+    wgStack.className = "overview-kv-wg-stack";
+    wgStack.setAttribute("title", iface + " · UDP " + String(port));
+    const wgIface = document.createElement("div");
+    wgIface.className = "overview-kv-wg-iface";
+    wgIface.textContent = iface;
+    const wgListen = document.createElement("div");
+    wgListen.className = "overview-kv-wg-listen";
+    wgListen.textContent = "UDP " + String(port);
+    wgStack.appendChild(wgIface);
+    wgStack.appendChild(wgListen);
+    addStructuredValueRow("WireGuard", wgStack);
+
+    addRow("Public NIC", String(o.public_interface ?? "—"));
+    addRow("Peers", String((o.peer_names || []).length));
+    const n = (o.forwarding_routes && o.forwarding_routes.length) || 0;
+    addRow("Forwarding", n + " route(s)");
+
+    let geoLine = "off";
+    let geoTitle = "";
+    if (o.geo_enabled) {
+      const prefix = o.geo_mode === "block" ? "block " : "allow ";
+      const cc = Array.isArray(o.geo_countries) ? o.geo_countries : [];
+      geoLine = prefix + cc.join(", ");
+      if (cc.length > 3) {
+        geoLine = prefix + cc.slice(0, 3).join(", ") + ", ...";
+        geoTitle = prefix + cc.join(", ");
+      }
+    }
+    addRow("Geo", geoLine, geoTitle || undefined);
+
+    if (o.geo_enabled) {
+      addStructuredValueRow("Geo zones freshness", buildGeoFreshnessCell(o));
+    }
+
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
+  function overviewApplySummaryLine(evs) {
+    let line = "No recent reload or geo events in the last fetch.";
+    const list = evs || [];
+    for (const e of list) {
+      const ev = (e && e.event) || "";
+      if (
+        ev === "reload_ok" ||
+        ev === "reload_failed" ||
+        ev === "update_geo_ok" ||
+        ev === "update_geo_failed" ||
+        ev === "backup_ok" ||
+        ev === "restore_ok"
+      ) {
+        line = (e.ts || "") + " — " + ev + (e.detail ? " — " + e.detail : "");
+        break;
+      }
+    }
+    return line;
+  }
+
+  function overviewActivityAttentionCard(evs, items) {
+    const wrap = document.createElement("div");
+    wrap.className = "card overview-dash-card overview-dash-activity";
+
+    const inner = document.createElement("div");
+    inner.className = "overview-activity-merge-inner";
+
+    const left = document.createElement("section");
+    left.className = "overview-activity-pane";
+    const t1 = document.createElement("div");
+    t1.className = "overview-pane-title";
+    t1.textContent = "Last apply activity";
+    const p1 = document.createElement("p");
+    p1.className = "meta";
+    p1.textContent = overviewApplySummaryLine(evs);
+    left.appendChild(t1);
+    left.appendChild(p1);
+
+    const right = document.createElement("section");
+    right.className = "overview-activity-pane";
+    const t2 = document.createElement("div");
+    t2.className = "overview-pane-title";
+
+    if (!items.length) {
+      t2.textContent = "Status";
+      const ok = document.createElement("p");
+      ok.className = "meta";
+      ok.textContent = "No warnings from this pass.";
+      right.appendChild(t2);
+      right.appendChild(ok);
+    } else {
+      t2.textContent = "Needs attention";
+      right.appendChild(t2);
+      const ul = document.createElement("ul");
+      ul.className = "attention-list";
+      for (const txt of items) {
+        const li = document.createElement("li");
+        li.textContent = txt;
+        ul.appendChild(li);
+      }
+      right.appendChild(ul);
+    }
+
+    inner.appendChild(left);
+    inner.appendChild(right);
+    wrap.appendChild(inner);
+    return wrap;
+  }
+
   function buildOverviewAttentionItems(cfg, o, st, met) {
     const items = [];
     const peers = (cfg && cfg.peers) || [];
@@ -754,47 +1289,24 @@
     if (met && !met.collection_disabled && (!met.peers || !met.peers.length)) {
       items.push("Peer metrics collection is enabled but no samples are stored yet.");
     }
+    if (
+      met &&
+      met.collection_disabled !== true &&
+      met.dashboard &&
+      met.dashboard.last_10m &&
+      typeof met.dashboard.last_10m.avg_ms === "number" &&
+      met.dashboard.last_10m.avg_ms >= OVERVIEW_LATENCY_LAST10M_WARN_MS
+    ) {
+      items.push(
+        "Average peer ICMP latency over the last 10 minutes is high (" +
+          String(met.dashboard.last_10m.avg_ms) +
+          " ms)."
+      );
+    }
     if (o && o.geo_enabled && !o.geo_last_success_utc) {
       items.push("Geoblocking is on but geo zone files have never loaded successfully on this host.");
     }
     return items;
-  }
-
-  function overviewAttentionCard(items) {
-    const wrap = document.createElement("div");
-    wrap.className = "card overview-attention-card";
-    if (!items.length) {
-      wrap.innerHTML = "<h3>Status</h3><p class=\"meta\">No warnings from this pass.</p>";
-      return wrap;
-    }
-    wrap.innerHTML =
-      "<h3>Needs attention</h3><ul class=\"attention-list\">" +
-      items.map((t) => "<li>" + escapeHtml(t) + "</li>").join("") +
-      "</ul>";
-    return wrap;
-  }
-
-  function overviewApplyStatusCard(evs) {
-    const wrap = document.createElement("div");
-    wrap.className = "card";
-    let line = "No recent reload or geo events in the last fetch.";
-    const list = evs || [];
-    for (const e of list) {
-      const ev = (e && e.event) || "";
-      if (
-        ev === "reload_ok" ||
-        ev === "reload_failed" ||
-        ev === "update_geo_ok" ||
-        ev === "update_geo_failed" ||
-        ev === "backup_ok" ||
-        ev === "restore_ok"
-      ) {
-        line = (e.ts || "") + " — " + ev + (e.detail ? " — " + e.detail : "");
-        break;
-      }
-    }
-    wrap.innerHTML = "<h3>Last apply activity</h3><p class=\"meta\">" + escapeHtml(line) + "</p>";
-    return wrap;
   }
 
   async function refreshOverviewPage() {
@@ -841,54 +1353,9 @@
       applyNavRestriction();
       setApiStatus(true);
       if (actionsCard) actionsCard.hidden = false;
-      grid.appendChild(overviewApplyStatusCard(evs));
-      grid.appendChild(overviewAttentionCard(buildOverviewAttentionItems(cfg, o, st, met)));
-      grid.appendChild(elStat("WireGuard", o.wireguard_interface + " · UDP " + o.wireguard_listen_port));
-      grid.appendChild(elStat("Public NIC", o.public_interface));
-      const n = (o.forwarding_routes && o.forwarding_routes.length) || 0;
-      const fwd = n + " route(s)";
-      grid.appendChild(elStat("Forwarding", fwd));
-      grid.appendChild(
-        elStat(
-          "Geo",
-          o.geo_enabled
-            ? (o.geo_mode === "block" ? "block " : "allow ") + (o.geo_countries || []).join(", ")
-            : "off"
-        )
-      );
-      grid.appendChild(elStat("Peers", String((o.peer_names || []).length)));
-      if (o.geo_enabled) {
-        if (o.geo_last_success_utc) {
-          const d = Date.parse(o.geo_last_success_utc);
-          const stale = !isNaN(d) && Date.now() - d > GEO_STALE_MS;
-          const age = formatGeoAge(o.geo_last_success_utc);
-          grid.appendChild(
-            elStat(
-              "Geo zones freshness",
-              (stale ? "Stale — " : "OK — ") +
-                age +
-                (o.geo_last_success_source ? " · " + o.geo_last_success_source : "") +
-                " · " +
-                o.geo_last_success_utc
-            )
-          );
-        } else {
-          grid.appendChild(elStat("Geo zones freshness", "Never loaded — use Update geo lists"));
-        }
-      }
-      const cardLp = elStat("Peer latency (last ping)", "…");
-      const card10 = elStat("Peer latency (last 10 min)", "…");
-      grid.appendChild(cardLp);
-      grid.appendChild(card10);
-      const vLp = cardLp.querySelector(".value");
-      const v10 = card10.querySelector(".value");
-      if (met) {
-        vLp.textContent = formatDashboardMinAvgMax(met.dashboard && met.dashboard.last_ping, met.collection_disabled);
-        v10.textContent = formatDashboardMinAvgMax(met.dashboard && met.dashboard.last_10m, met.collection_disabled);
-      } else {
-        vLp.textContent = "—";
-        v10.textContent = "—";
-      }
+      grid.appendChild(overviewActivityAttentionCard(evs, buildOverviewAttentionItems(cfg, o, st, met)));
+      grid.appendChild(overviewHostGeoCard(o));
+      grid.appendChild(overviewLatencyOverviewCard(met));
       void refreshOverviewEventsList();
     } catch (e) {
       if (seq !== overviewRefreshSeq) return;

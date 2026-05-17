@@ -34,10 +34,17 @@ type Last10mDashboard struct {
 	WindowEndUTC   string `json:"window_end_utc"`
 }
 
+// PingHistoryPoint is one time-bucket aggregate for Overview ping visualization (cross-peer average latency).
+type PingHistoryPoint struct {
+	TsUTC string `json:"ts_utc"` // Bucket start RFC3339 (UTC)
+	AvgMs int64  `json:"avg_ms"`
+}
+
 // Dashboard wraps optional overview aggregates.
 type Dashboard struct {
-	LastPing *MinAvgMax        `json:"last_ping,omitempty"`
-	Last10m  *Last10mDashboard `json:"last_10m,omitempty"`
+	LastPing    *MinAvgMax         `json:"last_ping,omitempty"`
+	Last10m     *Last10mDashboard  `json:"last_10m,omitempty"`
+	PingHistory []PingHistoryPoint `json:"ping_history,omitempty"`
 }
 
 // PeerMetric is one peer's latest stored metrics (API row).

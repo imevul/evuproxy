@@ -91,3 +91,56 @@ func TestLast10mPeerSmoothed(t *testing.T) {
 		t.Fatalf("last_10m %+v", resp.Dashboard.Last10m)
 	}
 }
+
+func TestPingHistoryBuckets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "m.db")
+	db, err := OpenWriter(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now().UTC().Truncate(time.Minute)
+	if err := WriteResults(context.Background(), db, []apply.PeerPingResult{
+		{Name: "a", TunnelIP: "10.0.0.2", OK: true, LatencyMS: 100},
+		{Name: "b", TunnelIP: "10.0.0.3", OK: true, LatencyMS: 200},
+	}, base.Add(-4*time.Minute)); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := WriteResults(context.Background(), db, []apply.PeerPingResult{
+		{Name: "a", TunnelIP: "10.0.0.2", OK: true, LatencyMS: 200},
+		{Name: "b", TunnelIP: "10.0.0.3", OK: true, LatencyMS: 400},
+	}, base.Add(-2*time.Minute)); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db2, err := OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db2.Close()
+
+	resp, err := BuildPeersResponse(context.Background(), db2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Dashboard == nil || len(resp.Dashboard.PingHistory) < 2 {
+		t.Fatalf("expected at least 2 ping_history buckets, got %+v", resp.Dashboard)
+	}
+	var got150, got300 bool
+	for _, p := range resp.Dashboard.PingHistory {
+		if p.AvgMs == 150 {
+			got150 = true
+		}
+		if p.AvgMs == 300 {
+			got300 = true
+		}
+	}
+	if !got150 || !got300 {
+		t.Fatalf("expected bucket avgs 150 and 300 in %+v", resp.Dashboard.PingHistory)
+	}
+}

@@ -399,6 +399,41 @@ body.app .toggle-switch .toggle-switch-input[type="checkbox"] {
   height: auto;
 }
 
+/* Consolidated Overview dash cards: avoid stretching last inner block into empty space */
+#overview-cards.card-grid > .card.overview-dash-card:not(.overview-api-issue-card)
+  > *:last-child:not(h3) {
+  margin-top: 0;
+}
+
+#overview-cards.overview-cards-compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 920px) {
+  #overview-cards.overview-cards-compact {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  }
+
+  #overview-cards.overview-cards-compact > .overview-dash-activity {
+    grid-column: 1 / -1;
+  }
+
+  #overview-cards.overview-cards-compact > .overview-dash-host {
+    grid-column: 1;
+  }
+
+  #overview-cards.overview-cards-compact > .overview-dash-latency {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 919.98px) {
+  #overview-cards.overview-cards-compact > .overview-dash-host,
+  #overview-cards.overview-cards-compact > .overview-dash-latency {
+    grid-column: 1 / -1;
+  }
+}
+
 #overview-cards.card-grid > .stat-card {
   display: flex;
   flex-direction: column;
@@ -2081,6 +2116,210 @@ button.geo-tags-edit {
 
 .overview-attention-card li {
   margin: 0.25rem 0;
+}
+
+/* Merged Overview activity / attention */
+.overview-activity-merge-inner {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.25rem;
+}
+
+@media (max-width: 720px) {
+  .overview-activity-merge-inner {
+    grid-template-columns: 1fr;
+  }
+}
+
+.overview-pane-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6e7681;
+  font-weight: 600;
+}
+
+.overview-dash-host .overview-kv-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.35rem 1rem;
+  font-size: 0.87rem;
+  align-items: start;
+}
+
+.overview-dash-host .overview-kv-label {
+  color: #8b949e;
+  white-space: nowrap;
+}
+
+.overview-dash-host .overview-kv-val {
+  color: #e6edf3;
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-dash-host .overview-kv-wg-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.overview-dash-host .overview-kv-wg-iface {
+  font-weight: 600;
+}
+
+.overview-dash-host .overview-kv-wg-listen {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: #e6edf3;
+}
+
+.overview-geo-fresh {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.38rem;
+  min-width: 0;
+}
+
+.overview-geo-fresh-tag {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid #30363d;
+  flex-shrink: 0;
+}
+
+.overview-geo-fresh-tag--ok {
+  color: #3fb950;
+  border-color: #238636;
+  background: rgba(46, 160, 67, 0.12);
+}
+
+.overview-geo-fresh-tag--stale {
+  color: #d29922;
+  border-color: #9e6a03;
+  background: rgba(187, 128, 9, 0.12);
+}
+
+.overview-geo-fresh-tag--never {
+  color: #8b949e;
+  border-color: #484f58;
+  background: rgba(110, 118, 129, 0.12);
+}
+
+.overview-geo-fresh-age {
+  font-size: 0.87rem;
+  font-weight: 500;
+  color: #e6edf3;
+  line-height: 1.35;
+}
+
+.overview-geo-fresh-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: #8b949e;
+}
+
+.overview-geo-fresh-ts {
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
+
+.overview-dash-latency .overview-latency-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.85rem;
+  margin: 0 0 0.35rem;
+}
+
+.overview-dash-latency .overview-latency-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.overview-dash-latency .overview-latency-key {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6e7681;
+  font-weight: 600;
+}
+
+.overview-dash-latency .overview-latency-val {
+  color: #e6edf3;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+}
+
+.overview-spark-caption {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+}
+
+/* Latency chart grows with the Overview card column (paired with Tunnel / geo). */
+#overview-cards.card-grid > .card.overview-dash-latency.overview-dash-card:not(.overview-api-issue-card) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.overview-dash-latency .overview-spark-caption {
+  flex-shrink: 0;
+}
+
+.overview-dash-latency > h3,
+.overview-dash-latency > .overview-latency-line {
+  flex-shrink: 0;
+}
+
+.overview-ping-spark-wrap {
+  margin-top: 0.5rem;
+  flex: 1 1 auto;
+  min-height: 10rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  background: #0d1117;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-ping-spark-empty {
+  margin: 0.85rem 0;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.overview-ping-spark {
+  display: block;
+  width: 100%;
+  flex: 1 1 0;
+  min-height: 8rem;
+  min-width: 0;
+  height: auto;
+  max-height: none;
+  vertical-align: middle;
+}
+
+.overview-dash-activity .attention-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.15rem;
 }
 
 .table-wrap tr.row-highlight {

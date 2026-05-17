@@ -70,7 +70,10 @@ func BuildPeersResponse(ctx context.Context, db *sql.DB, collectionDisabled bool
 	if l10 := last10mPeerSmoothed(ctx, db, startMs, endMs, winStart, winEnd); l10 != nil {
 		dash.Last10m = l10
 	}
-	if dash.LastPing != nil || dash.Last10m != nil {
+	if ph := pingHistorySeries(ctx, db, now.Add(-15*time.Minute).UnixMilli(), endMs); len(ph) > 0 {
+		dash.PingHistory = ph
+	}
+	if dash.LastPing != nil || dash.Last10m != nil || len(dash.PingHistory) > 0 {
 		out.Dashboard = dash
 	}
 	return out, nil
@@ -130,4 +133,40 @@ SELECT MIN(m), AVG(m), MAX(m) FROM means`
 		WindowStartUTC: winStartRFC,
 		WindowEndUTC:   winEndRFC,
 	}
+}
+
+func pingHistorySeries(ctx context.Context, db *sql.DB, startMs, endMs int64) []PingHistoryPoint {
+	if db == nil || endMs <= startMs {
+		return nil
+	}
+	const bucketMs = int64(60_000)
+	rows, err := db.QueryContext(ctx, `
+SELECT ((ts_ms / ?) * ?) AS b, AVG(latency_ms)
+FROM peer_sample
+WHERE ts_ms >= ? AND ts_ms <= ?
+GROUP BY b
+ORDER BY b ASC`, bucketMs, bucketMs, startMs, endMs)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []PingHistoryPoint
+	for rows.Next() {
+		var b int64
+		var avg sql.NullFloat64
+		if err := rows.Scan(&b, &avg); err != nil {
+			return nil
+		}
+		if !avg.Valid {
+			continue
+		}
+		out = append(out, PingHistoryPoint{
+			TsUTC: time.UnixMilli(b).UTC().Format(time.RFC3339),
+			AvgMs: int64(math.Round(avg.Float64)),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil
+	}
+	return out
 }

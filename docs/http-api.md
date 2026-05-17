@@ -100,6 +100,8 @@ Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**) 
 
 **`dashboard.last_10m`**, when present, aggregates **ok** samples from **`peer_sample`** over a **rolling ten minutes ending at request time** (`window_end_utc` / `window_start_utc`). Because the window is anchored to the API request, **`window_end_utc`** is often **newer** than **`collected_at_utc`** when the collector has been idle. If there are no samples in the window, **`last_10m`** may be omitted.
 
+**`dashboard.ping_history`** (optional) lists **approx. one‑minute buckets** of **average latency across peers** from **`peer_sample`** for about the **last fifteen minutes**, for simple Overview charts.
+
 ## File logging (`evuproxy serve`)
 
 When **`EVUPROXY_LOG_DIR`** is set (e.g. **`/var/log/evuproxy`**), **`evuproxy serve`** writes **JSON lines** to **`$EVUPROXY_LOG_DIR/evuproxy.jsonl`** in addition to **stderr** (journald). Unset in development to skip file logging. See [contrib/logrotate.d/evuproxy](../contrib/logrotate.d/evuproxy) for rotation notes.
