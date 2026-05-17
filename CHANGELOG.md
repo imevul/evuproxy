@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/imevul/evuproxy/compare/v0.10.0...v0.11.0) (2026-05-17)
+
+
+### Features
+
+* **peers:** EVUB onboarding via bash installers and tightened admin UI. ([532b886](https://github.com/imevul/evuproxy/commit/532b886016e0bc945c35c10675b8e526bacbcac0))
+
+
+### Bug Fixes
+
+* **docker:** derive UI healthcheck URL from EVUPROXY_UI_LISTEN ([958ba01](https://github.com/imevul/evuproxy/commit/958ba0184dd9270954daaad70af2d63c72d1826c))
+* **ui:** tabbed Settings and tidier Overview cards. ([07b8c5f](https://github.com/imevul/evuproxy/commit/07b8c5f2a098400e22eb2252faf0241dcc727323))
+
 ## [0.10.0](https://github.com/imevul/evuproxy/compare/v0.9.0...v0.10.0) (2026-05-16)
 
 
