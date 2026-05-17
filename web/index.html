@@ -90,121 +90,138 @@
         <p class="hint">
           Preferences below are stored on the EvuProxy host as <code class="inline">ui-preferences.json</code> next to the main config (not in WireGuard YAML). The API token is on the sidebar page “API token” and stays in the browser only.
         </p>
-        <div class="card">
-          <h3>Peer tunnel subnet</h3>
-          <p class="hint">
-            IPv4 CIDR used to pick the next free tunnel IP when you add a peer. Should match the WireGuard tunnel network. Server default is <code>10.100.0.0/24</code> when unset.
-          </p>
-          <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" />
-          <h3 class="settings-block-gap">WireGuard server endpoint</h3>
-          <p class="hint">
-            Public address peers use to reach this VPN (<code>host:port</code> or <code>hostname:port</code>). Pre-filled in the peer form; port can be omitted if it matches the server listen port after you refresh server details.
-          </p>
-          <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
-          <div class="field settings-block-gap">
+        <div class="geo-segmented settings-page-tabs" role="tablist" aria-label="Settings sections">
+          <button type="button" class="geo-seg-btn is-active" id="settings-tab-prefs-btn" role="tab" aria-selected="true" aria-controls="settings-tab-prefs-panel">
+            Preferences
+          </button>
+          <button type="button" class="geo-seg-btn" id="settings-tab-maint-btn" role="tab" aria-selected="false" aria-controls="settings-tab-maint-panel">
+            Notes &amp; backups
+          </button>
+          <button type="button" class="geo-seg-btn" id="settings-tab-adv-btn" role="tab" aria-selected="false" aria-controls="settings-tab-adv-panel">
+            Advanced
+          </button>
+        </div>
+        <div id="settings-tab-prefs-panel" role="tabpanel" aria-labelledby="settings-tab-prefs-btn">
+          <div class="card">
+            <h3>Peer tunnel subnet</h3>
+            <p class="hint">
+              IPv4 CIDR used to pick the next free tunnel IP when you add a peer. Should match the WireGuard tunnel network. Server default is <code>10.100.0.0/24</code> when unset.
+            </p>
+            <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" />
+            <h3 class="settings-block-gap">WireGuard server endpoint</h3>
+            <p class="hint">
+              Public address peers use to reach this VPN (<code>host:port</code> or <code>hostname:port</code>). Pre-filled in the peer form; port can be omitted if it matches the server listen port after you refresh server details.
+            </p>
+            <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+            <div class="field settings-block-gap">
+              <div class="toggle-switch-row">
+                <span class="toggle-switch-text" id="settings-metrics-collection-desc"
+                  >Collect peer ICMP metrics on the host (<code class="inline">evuproxy metrics</code> systemd service). Enables the Ping column on Peers; overview latency cards always load from stored metrics. Requires <code class="inline">ping</code> on the server.</span
+                >
+                <label class="toggle-switch">
+                  <input
+                    type="checkbox"
+                    id="settings-metrics-collection"
+                    class="toggle-switch-input"
+                    autocomplete="off"
+                    aria-labelledby="settings-metrics-collection-desc"
+                  />
+                  <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                </label>
+              </div>
+            </div>
+            <div class="btn-row settings-block-gap">
+              <button type="button" class="btn-primary" id="settings-save-prefs">Save preferences</button>
+              <button type="button" class="btn-quiet" id="settings-download-yaml">Download config.yaml</button>
+            </div>
+            <p id="settings-prefs-msg" class="msg" aria-live="polite"></p>
+          </div>
+        </div>
+        <div id="settings-tab-maint-panel" role="tabpanel" aria-labelledby="settings-tab-maint-btn" hidden>
+          <div class="card">
+            <h3>Operator notes</h3>
+            <p class="hint meta">Plain text on the host as <code class="inline">config-notes.txt</code> next to <code class="inline">config.yaml</code>. Not part of WireGuard YAML.</p>
+            <div class="field">
+              <label for="config-notes-body">Notes</label>
+              <textarea id="config-notes-body" rows="6" spellcheck="false" autocomplete="off" placeholder="Why this host is configured this way…"></textarea>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn-primary" id="config-notes-save">Save notes</button>
+            </div>
+            <p id="config-notes-msg" class="msg" aria-live="polite"></p>
+          </div>
+          <div class="card">
+            <h3>Backup &amp; restore</h3>
+            <p class="hint meta">
+              Archives live under the backup allow directory (default <code class="inline">/var/backups</code>); paths are validated by the API (
+              <code>EVUPROXY_BACKUP_DIR</code>).
+            </p>
+            <div class="field">
+              <label for="backup-path-input">Backup archive path</label>
+              <input type="text" id="backup-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn-primary" id="btn-backup-run">Create backup</button>
+            </div>
+            <div class="field settings-block-gap">
+              <label for="restore-path-input">Restore from archive</label>
+              <input type="text" id="restore-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn-primary" id="btn-restore-run">Restore</button>
+            </div>
+            <p id="backup-restore-msg" class="msg" aria-live="polite"></p>
+          </div>
+        </div>
+        <div id="settings-tab-adv-panel" role="tabpanel" aria-labelledby="settings-tab-adv-btn" hidden>
+          <div class="card">
+            <h3>Replace config (upload)</h3>
+            <p class="hint meta">Preview JSON before saving to the server. The saved config replaces what is on disk; YAML comments from the uploaded file are not preserved.</p>
+            <div class="btn-row">
+              <button type="button" class="btn-primary" id="config-upload-open">Upload JSON…</button>
+              <input type="file" id="config-upload-file" accept="application/json,.json" class="is-hidden" />
+            </div>
+            <p id="config-upload-msg" class="msg" aria-live="polite"></p>
+          </div>
+          <div class="card">
+            <h3>Advanced settings</h3>
+            <p class="hint">
+              Enables advanced options across this admin UI. Stored only in this browser (<code class="inline">localStorage</code>).
+            </p>
             <div class="toggle-switch-row">
-              <span class="toggle-switch-text" id="settings-metrics-collection-desc"
-                >Collect peer ICMP metrics on the host (<code class="inline">evuproxy metrics</code> systemd service). Enables the Ping column on Peers; overview latency cards always load from stored metrics. Requires <code class="inline">ping</code> on the server.</span
-              >
+              <span class="toggle-switch-text" id="settings-advanced-toggle-desc">Advanced mode</span>
               <label class="toggle-switch">
                 <input
                   type="checkbox"
-                  id="settings-metrics-collection"
+                  id="settings-advanced-toggle"
                   class="toggle-switch-input"
                   autocomplete="off"
-                  aria-labelledby="settings-metrics-collection-desc"
+                  aria-labelledby="settings-advanced-toggle-desc"
                 />
                 <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
               </label>
             </div>
+            <div class="field settings-content-width-field">
+              <label for="settings-content-width">Main content width</label>
+              <p class="hint meta settings-content-width-hint">
+                Max width of the main panel. Stored only in this browser (<code class="inline">localStorage</code>).
+              </p>
+              <select id="settings-content-width" autocomplete="off">
+                <option value="small">Small (900px)</option>
+                <option value="medium">Medium (1200px)</option>
+                <option value="large">Large (1400px)</option>
+                <option value="full">Full width (100%)</option>
+              </select>
+            </div>
           </div>
-          <div class="btn-row settings-block-gap">
-            <button type="button" class="btn-primary" id="settings-save-prefs">Save preferences</button>
-            <button type="button" class="btn-quiet" id="settings-download-yaml">Download config.yaml</button>
+          <div class="card">
+            <h3>Diagnostics</h3>
+            <p class="hint">Raw status from the host (WireGuard + nftables table).</p>
+            <div class="btn-row">
+              <button type="button" class="btn-quiet" id="btn-status">Fetch status</button>
+            </div>
+            <pre id="settings-status-out" class="code-block is-collapsed"></pre>
           </div>
-          <p id="settings-prefs-msg" class="msg" aria-live="polite"></p>
-        </div>
-        <div class="card">
-          <h3>Operator notes</h3>
-          <p class="hint meta">Plain text on the host as <code class="inline">config-notes.txt</code> next to <code class="inline">config.yaml</code>. Not part of WireGuard YAML.</p>
-          <div class="field">
-            <label for="config-notes-body">Notes</label>
-            <textarea id="config-notes-body" rows="6" spellcheck="false" autocomplete="off" placeholder="Why this host is configured this way…"></textarea>
-          </div>
-          <div class="btn-row">
-            <button type="button" class="btn-primary" id="config-notes-save">Save notes</button>
-          </div>
-          <p id="config-notes-msg" class="msg" aria-live="polite"></p>
-        </div>
-        <div class="card">
-          <h3>Backup &amp; restore</h3>
-          <p class="hint meta">
-            Archives live under the backup allow directory (default <code class="inline">/var/backups</code>); paths are validated by the API (
-            <code>EVUPROXY_BACKUP_DIR</code>).
-          </p>
-          <div class="field">
-            <label for="backup-path-input">Backup archive path</label>
-            <input type="text" id="backup-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
-          </div>
-          <div class="btn-row">
-            <button type="button" class="btn-primary" id="btn-backup-run">Create backup</button>
-          </div>
-          <div class="field">
-            <label for="restore-path-input">Restore from archive</label>
-            <input type="text" id="restore-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
-          </div>
-          <div class="btn-row">
-            <button type="button" class="btn-primary" id="btn-restore-run">Restore</button>
-          </div>
-          <p id="backup-restore-msg" class="msg" aria-live="polite"></p>
-        </div>
-        <div class="card">
-          <h3>Replace config (upload)</h3>
-          <p class="hint meta">Preview JSON then save. <code>PUT /config</code> replaces the server file and strips YAML comments.</p>
-          <div class="btn-row">
-            <button type="button" class="btn-primary" id="config-upload-open">Upload JSON…</button>
-            <input type="file" id="config-upload-file" accept="application/json,.json" class="is-hidden" />
-          </div>
-          <p id="config-upload-msg" class="msg" aria-live="polite"></p>
-        </div>
-        <div class="card">
-          <h3>Advanced settings</h3>
-          <p class="hint">
-            Enables advanced options across this admin UI. Stored only in this browser (<code class="inline">localStorage</code>).
-          </p>
-          <div class="toggle-switch-row">
-            <span class="toggle-switch-text" id="settings-advanced-toggle-desc">Advanced mode</span>
-            <label class="toggle-switch">
-              <input
-                type="checkbox"
-                id="settings-advanced-toggle"
-                class="toggle-switch-input"
-                autocomplete="off"
-                aria-labelledby="settings-advanced-toggle-desc"
-              />
-              <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
-            </label>
-          </div>
-          <div class="field settings-content-width-field">
-            <label for="settings-content-width">Main content width</label>
-            <p class="hint meta settings-content-width-hint">
-              Max width of the main panel. Stored only in this browser (<code class="inline">localStorage</code>).
-            </p>
-            <select id="settings-content-width" autocomplete="off">
-              <option value="small">Small (900px)</option>
-              <option value="medium">Medium (1200px)</option>
-              <option value="large">Large (1400px)</option>
-              <option value="full">Full width (100%)</option>
-            </select>
-          </div>
-        </div>
-        <div class="card">
-          <h3>Diagnostics</h3>
-          <p class="hint">Raw status from the host (WireGuard + nftables table).</p>
-          <div class="btn-row">
-            <button type="button" class="btn-quiet" id="btn-status">Fetch status</button>
-          </div>
-          <pre id="settings-status-out" class="code-block is-collapsed"></pre>
         </div>
       </section>
 

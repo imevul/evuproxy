@@ -12,7 +12,7 @@ Production nginx sends **`Cache-Control: no-cache, private, must-revalidate`** f
 
 See also [Security and privacy](security-and-privacy.md) and [Local HTTP API](http-api.md).
 
-The UI is **dark-themed** only. **Overview** shows recent **audit events** (from the API) and geo list freshness when available. **Settings** can download raw **`config.yaml`**. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API. **Topology** shows a read-only graph of `forwarding.routes` from the EvuProxy host (ingress) to each target peer, using `GET /v1/stats` for WireGuard handshake-style edge coloring.
+The UI is **dark-themed** only. **Overview** shows recent **audit events** (from the API) and geo list freshness when available. **Settings** uses tabs (**Preferences**, **Notes & backups**, **Advanced**) and can download raw **`config.yaml`** from Preferences. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API. **Topology** shows a read-only graph of `forwarding.routes` from the EvuProxy host (ingress) to each target peer, using `GET /v1/stats` for WireGuard handshake-style edge coloring.
 
 ## Local UI with mock API
 

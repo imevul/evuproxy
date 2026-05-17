@@ -556,7 +556,10 @@
     } else {
       stopOverviewEventsPolling();
     }
-    if (name === "settings") await refreshSettingsPage();
+    if (name === "settings") {
+      await refreshSettingsPage();
+      setSettingsEditorTab("prefs");
+    }
     if (name === "token") {
       refreshTokenPage();
       await ensureApiGate();
@@ -1092,6 +1095,28 @@
     const rp = $("restore-path-input");
     if (bp && !bp.value.trim()) bp.value = "/var/backups/evuproxy-config.tgz";
     if (rp && !rp.value.trim()) rp.value = "/var/backups/evuproxy-config.tgz";
+  }
+
+  function setSettingsEditorTab(which) {
+    const prefs = which === "prefs";
+    const maint = which === "maint";
+    const adv = which === "adv";
+    const prefsBtn = $("settings-tab-prefs-btn");
+    const maintBtn = $("settings-tab-maint-btn");
+    const advBtn = $("settings-tab-adv-btn");
+    const prefsPanel = $("settings-tab-prefs-panel");
+    const maintPanel = $("settings-tab-maint-panel");
+    const advPanel = $("settings-tab-adv-panel");
+    if (!prefsBtn || !maintBtn || !advBtn || !prefsPanel || !maintPanel || !advPanel) return;
+    prefsBtn.classList.toggle("is-active", prefs);
+    maintBtn.classList.toggle("is-active", maint);
+    advBtn.classList.toggle("is-active", adv);
+    prefsBtn.setAttribute("aria-selected", prefs ? "true" : "false");
+    maintBtn.setAttribute("aria-selected", maint ? "true" : "false");
+    advBtn.setAttribute("aria-selected", adv ? "true" : "false");
+    prefsPanel.hidden = !prefs;
+    maintPanel.hidden = !maint;
+    advPanel.hidden = !adv;
   }
 
   function refreshTokenPage() {
@@ -4179,6 +4204,13 @@
   if ($("api-base") && savedApiBase != null && String(savedApiBase).trim() !== "") {
     $("api-base").value = String(savedApiBase).trim();
   }
+
+  const settingsTabPrefs = $("settings-tab-prefs-btn");
+  const settingsTabMaint = $("settings-tab-maint-btn");
+  const settingsTabAdv = $("settings-tab-adv-btn");
+  if (settingsTabPrefs) settingsTabPrefs.addEventListener("click", () => setSettingsEditorTab("prefs"));
+  if (settingsTabMaint) settingsTabMaint.addEventListener("click", () => setSettingsEditorTab("maint"));
+  if (settingsTabAdv) settingsTabAdv.addEventListener("click", () => setSettingsEditorTab("adv"));
 
   const advToggle = $("settings-advanced-toggle");
   if (advToggle) {
