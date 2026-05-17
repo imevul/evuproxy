@@ -25,9 +25,6 @@
     return getDefaultApiBase();
   }
 
-  const peerInstallScriptUrl =
-    window.EVUPROXY_PEER_INSTALL_SCRIPT_URL ||
-    "https://raw.githubusercontent.com/imevul/evuproxy/v0.5.0/scripts/peer-install.sh";
   const tokenKey = "evuproxy_api_token";
   const endpointKey = "evuproxy_onboard_endpoint";
   const peerSubnetKey = "evuproxy_peer_subnet_cidr";
@@ -1514,6 +1511,32 @@
     }
   }
 
+  let onboardingUnlockPassStored = "";
+  let onboardingBundleRebuildSeq = 0;
+  let onboardingBundleDebounceTimer = null;
+  const onboardingBundleDebounceMs = 380;
+  const onboardingBundlePlaceholder =
+    "Fill peer fields & private key and load Overview (API). Scripts appear below when onboarding data is ready — Regenerate rotates the encrypted bundle.";
+  function clearOnboardingBundleScriptPanels() {
+    const sn = $("onboard-bundle-snippet-cmd");
+    if (sn) sn.textContent = onboardingBundlePlaceholder;
+  }
+
+  function setPeerEditorTab(which) {
+    const onboarding = which === "onboard";
+    const fieldsBtn = $("peer-tab-fields-btn");
+    const onboardBtn = $("peer-tab-onboard-btn");
+    const fieldsPanel = $("peer-tab-fields-panel");
+    const onboardPanel = $("peer-tab-onboard-panel");
+    if (!fieldsBtn || !onboardBtn || !fieldsPanel || !onboardPanel) return;
+    fieldsBtn.classList.toggle("is-active", !onboarding);
+    onboardBtn.classList.toggle("is-active", onboarding);
+    fieldsBtn.setAttribute("aria-selected", onboarding ? "false" : "true");
+    onboardBtn.setAttribute("aria-selected", onboarding ? "true" : "false");
+    fieldsPanel.hidden = onboarding;
+    onboardPanel.hidden = !onboarding;
+  }
+
   function openPeerEditor(index) {
     const cfg = lastConfig;
     if (!cfg || !cfg.peers[index]) return;
@@ -1530,10 +1553,11 @@
     const modal = $("peer-modal");
     if (modal) {
       modal.classList.remove("is-hidden");
+      setPeerEditorTab("fields");
       const first = $("peer-f-name");
       if (first) requestAnimationFrame(() => first.focus());
     }
-    refreshOnboardInstallCmd();
+    void rebuildOnboardingEncryptedBundle(false);
     void fetchPeerOverviewForModal();
   }
 
@@ -1543,6 +1567,11 @@
       clearTimeout(peerOverviewDebounceTimer);
       peerOverviewDebounceTimer = null;
     }
+    if (onboardingBundleDebounceTimer) {
+      clearTimeout(onboardingBundleDebounceTimer);
+      onboardingBundleDebounceTimer = null;
+    }
+    onboardingBundleRebuildSeq++;
     const modal = $("peer-modal");
     if (modal) modal.classList.add("is-hidden");
     $("peer-edit-index").value = "";
@@ -1560,6 +1589,7 @@
   }
 
   function resetPeerOnboardExtras() {
+    onboardingUnlockPassStored = "";
     $("onboard-client-priv").value = "";
     resetPeerPrivRevealState();
     const out = $("onboard-out");
@@ -1569,8 +1599,7 @@
     }
     const msg = $("onboard-msg");
     if (msg) msg.textContent = "";
-    const ic = $("onboard-install-cmd");
-    if (ic) ic.textContent = onboardInstallCmdPlaceholder;
+    clearOnboardingBundleScriptPanels();
   }
 
   async function savePeerEditor() {
@@ -3878,9 +3907,6 @@
     return s;
   }
 
-  const onboardInstallCmdPlaceholder =
-    "Fill all peer fields and private key. Server details load from the API when you edit this form; the install command appears when everything is valid.";
-
   function shellSingleQuote(s) {
     return "'" + String(s).replace(/'/g, "'\\''") + "'";
   }
@@ -3914,47 +3940,171 @@
     };
   }
 
-  function buildPeerInstallOneliner(p) {
-    const q = shellSingleQuote;
-    const url = peerInstallScriptUrl;
-    return [
-      "set -euo pipefail",
-      "export EVUPROXY_WG_PRIVATE_KEY=" + q(p.priv),
-      "export EVUPROXY_WG_ADDRESS=" + q(p.tip),
-      "export EVUPROXY_WG_SERVER_PUBLIC_KEY=" + q(p.serverPublicKey),
-      "export EVUPROXY_WG_ENDPOINT=" + q(p.ep),
-      "export EVUPROXY_WG_ALLOWED_IPS=" + q(p.subnet),
-      '_evu_script="$(mktemp)"',
-      "trap 'rm -f \"$_evu_script\"' EXIT INT TERM",
-      "curl -fsSL " + q(url) + ' -o "$_evu_script"',
-      'sha256sum "$_evu_script"',
-      "# Compare the hash to scripts/peer-install.sh in SHA256SUMS on the matching GitHub Release, then run:",
-      'sudo -E bash "$_evu_script"',
- ].join("\n");
+  /** WireGuard onboarding bundle (matches scripts/evuproxy-peer-bundle-apply.sh). */
+  const PEER_BUNDLE_VERSION = 1;
+  const PEER_BUNDLE_PBDF2_ITER = 310000;
+  const PEER_BUNDLE_MAGIC = new Uint8Array([69, 86, 85, 66]); // EVUB
+  // Default raw URL uses GitHub `main`: semver-pinned defaults would drift stale unless bumped every release. `main` is a moving branch.
+  // For reproducibility set window.EVUPROXY_PEER_TOOL_INSTALL_SCRIPT_URL to a tagged raw URL (checksum discipline).
+  const PEER_TOOL_INSTALL_SCRIPT_DEFAULT =
+    "https://raw.githubusercontent.com/imevul/evuproxy/main/scripts/install-peer-tool.sh";
+
+  function concatUint8Arrays(...parts) {
+    let len = 0;
+    for (let i = 0; i < parts.length; i++) len += parts[i].length;
+    const out = new Uint8Array(len);
+    let o = 0;
+    for (let i = 0; i < parts.length; i++) {
+      out.set(parts[i], o);
+      o += parts[i].length;
+    }
+    return out;
   }
 
-  function refreshOnboardInstallCmd() {
-    const pre = $("onboard-install-cmd");
-    if (!pre) return;
+  function randomUnlockPassphraseHex() {
+    const u = new Uint8Array(24);
+    globalThis.crypto.getRandomValues(u);
+    let hex = "";
+    for (let i = 0; i < u.length; i++) hex += u[i].toString(16).padStart(2, "0");
+    return hex;
+  }
+
+  async function peerBundleEncryptedBytes(passphraseStr, wgParams) {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) throw new Error("Web Crypto not available (use HTTPS).");
+    const enc = new TextEncoder();
+    const passBytes = enc.encode(passphraseStr);
+    const plainObj = {
+      v: PEER_BUNDLE_VERSION,
+      peerPrivateKey: wgParams.priv,
+      peerTunnelAddress: wgParams.tip,
+      serverPublicKey: wgParams.serverPublicKey,
+      endpoint: wgParams.ep,
+      allowedIPs: wgParams.subnet,
+      interfaceName: "evuproxy",
+    };
+    const plainBytes = enc.encode(JSON.stringify(plainObj));
+    const salt = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(salt);
+    const passphraseKeyMat = await subtle.importKey("raw", passBytes, "PBKDF2", false, ["deriveBits"]);
+    const dk = new Uint8Array(
+      await subtle.deriveBits(
+        {
+          name: "PBKDF2",
+          salt,
+          iterations: PEER_BUNDLE_PBDF2_ITER,
+          hash: "SHA-256",
+        },
+        passphraseKeyMat,
+        512,
+      ),
+    );
+    const aesKeyBytes = dk.subarray(0, 32);
+    const macKeyBytes = dk.subarray(32, 64);
+    const iv = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(iv);
+    const aesImported = await subtle.importKey("raw", aesKeyBytes, "AES-CBC", false, ["encrypt"]);
+    const plainSlice = plainBytes.buffer.slice(
+      plainBytes.byteOffset,
+      plainBytes.byteOffset + plainBytes.byteLength,
+    );
+    const ciphertextBuf = await subtle.encrypt({ name: "AES-CBC", iv }, aesImported, plainSlice);
+    const ciphertext = new Uint8Array(ciphertextBuf);
+    const macPayload = concatUint8Arrays(iv, ciphertext);
+    const macKeyImp = await subtle.importKey("raw", macKeyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const macSig = await subtle.sign("HMAC", macKeyImp, macPayload);
+    const mac = new Uint8Array(macSig);
+
+    const headerLen = 4 + 1 + 4 + 1 + 16 + 16 + 4;
+    const total = headerLen + ciphertext.length + mac.length;
+    const out = new Uint8Array(total);
+    let o = 0;
+    out.set(PEER_BUNDLE_MAGIC, o);
+    o += 4;
+    out[o++] = PEER_BUNDLE_VERSION;
+    const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
+    dv.setUint32(o, PEER_BUNDLE_PBDF2_ITER, false);
+    o += 4;
+    out[o++] = 16;
+    out.set(salt, o);
+    o += 16;
+    out.set(iv, o);
+    o += 16;
+    dv.setUint32(o, ciphertext.length, false);
+    o += 4;
+    out.set(ciphertext, o);
+    o += ciphertext.length;
+    out.set(mac, o);
+    return out;
+  }
+
+  function peerToolInstallUrlResolved() {
+    return typeof window.EVUPROXY_PEER_TOOL_INSTALL_SCRIPT_URL === "string" &&
+      window.EVUPROXY_PEER_TOOL_INSTALL_SCRIPT_URL.trim() !== ""
+      ? window.EVUPROXY_PEER_TOOL_INSTALL_SCRIPT_URL.trim()
+      : PEER_TOOL_INSTALL_SCRIPT_DEFAULT;
+  }
+
+  function buildPeerTwoLineSnippet(passHex, blobB64) {
+    const q = shellSingleQuote;
+    const installUrl = q(peerToolInstallUrlResolved());
+    return [
+      "export EVU_SECRET_FROM_ADMIN=" + q(passHex),
+      "export EVU_BLOB_FROM_ADMIN=" + q(blobB64),
+      "curl --proto '=https' --proto-redir '=https' -fsSL " + installUrl + " | sudo bash",
+      "sudo evuproxy-peer-apply \\",
+      '  --secret "$(printf \'%s\' "$EVU_SECRET_FROM_ADMIN")" \\',
+      '  --blob "$(printf \'%s\' "$EVU_BLOB_FROM_ADMIN")"',
+    ].join("\n");
+  }
+
+  function scheduleDebouncedOnboardingEncryptedBundle(forceNewUnlock) {
+    if (onboardingBundleDebounceTimer) clearTimeout(onboardingBundleDebounceTimer);
+    onboardingBundleDebounceTimer = setTimeout(() => {
+      onboardingBundleDebounceTimer = null;
+      void rebuildOnboardingEncryptedBundle(forceNewUnlock);
+    }, onboardingBundleDebounceMs);
+  }
+
+  async function rebuildOnboardingEncryptedBundle(forceNewUnlock) {
+    const seq = ++onboardingBundleRebuildSeq;
+    const sn = $("onboard-bundle-snippet-cmd");
+    if (!sn) return;
     const r = peerOnboardWireGuardParams();
     if (!r.ok) {
-      pre.textContent = onboardInstallCmdPlaceholder;
+      if (seq !== onboardingBundleRebuildSeq) return;
+      if (forceNewUnlock) onboardingUnlockPassStored = "";
+      clearOnboardingBundleScriptPanels();
       return;
     }
-    pre.textContent = buildPeerInstallOneliner(r);
+    try {
+      if (forceNewUnlock || !onboardingUnlockPassStored) {
+        onboardingUnlockPassStored = randomUnlockPassphraseHex();
+      }
+      const bytes = await peerBundleEncryptedBytes(onboardingUnlockPassStored, r);
+      if (seq !== onboardingBundleRebuildSeq) return;
+      const blobB64 = u8ToB64(bytes);
+      sn.textContent = buildPeerTwoLineSnippet(onboardingUnlockPassStored, blobB64);
+    } catch (e) {
+      if (seq !== onboardingBundleRebuildSeq) return;
+      setOnboardMsg(String(e.message || e), true);
+      clearOnboardingBundleScriptPanels();
+    }
   }
 
-  async function copyOnboardInstallCmd() {
-    const pre = $("onboard-install-cmd");
-    if (!pre) return;
-    const text = pre.textContent.trim();
-    if (!text || text === onboardInstallCmdPlaceholder) {
-      setOnboardMsg("Install command is not ready yet.", true);
+  async function copyOnboardingFieldOrCmd(getter, missingMsg, okMsg) {
+    const raw = getter();
+    let text = "";
+    if (raw != null && typeof raw.value === "string") text = raw.value.trim();
+    else if (raw != null) text = String(raw.textContent || "").trim();
+
+    if (!text || text === onboardingBundlePlaceholder) {
+      setOnboardMsg(missingMsg, true);
       return;
     }
     try {
       await navigator.clipboard.writeText(text);
-      setOnboardMsg("Copied install command.");
+      setOnboardMsg(okMsg);
     } catch (e) {
       setOnboardMsg(String(e.message || e), true);
     }
@@ -4001,7 +4151,9 @@
       if (seq !== peerOverviewFetchSeq) return;
       lastOverview = j;
       updateServerHint(j);
-      refreshOnboardInstallCmd();
+      if (onboardingBundleDebounceTimer) clearTimeout(onboardingBundleDebounceTimer);
+      onboardingBundleDebounceTimer = null;
+      void rebuildOnboardingEncryptedBundle(false);
     } catch (e) {
       if (seq !== peerOverviewFetchSeq) return;
       setOnboardMsg(String(e.message || e), true);
@@ -4040,6 +4192,35 @@
     contentWidthSel.addEventListener("change", () => setContentWidthPreset(contentWidthSel.value));
   }
   syncContentWidthSelect();
+
+  function closeContextHelpModal() {
+    const m = $("context-help-modal");
+    if (m) m.classList.add("is-hidden");
+    const bd = $("context-help-body");
+    if (bd) bd.innerHTML = "";
+  }
+
+  document.body.addEventListener("click", (ev) => {
+    const trig = ev.target.closest("button[data-help-template]");
+    if (!trig || trig.closest("#context-help-modal")) return;
+    const tid = trig.getAttribute("data-help-template");
+    if (!tid) return;
+    const tmpl = document.getElementById(tid);
+    const modal = $("context-help-modal");
+    const bd = $("context-help-body");
+    const titleEl = $("context-help-modal-title");
+    if (!tmpl || !tmpl.content || !modal || !bd || !titleEl) return;
+    ev.preventDefault();
+    bd.innerHTML = "";
+    bd.appendChild(tmpl.content.cloneNode(true));
+    const ht = trig.getAttribute("data-help-title");
+    titleEl.textContent = ht && String(ht).trim() ? String(ht).trim() : "Help";
+    modal.classList.remove("is-hidden");
+  });
+  const ctxHelpClose = $("context-help-close");
+  if (ctxHelpClose) ctxHelpClose.addEventListener("click", closeContextHelpModal);
+  const ctxHelpBd = $("context-help-backdrop");
+  if (ctxHelpBd) ctxHelpBd.addEventListener("click", closeContextHelpModal);
 
   const gSearch = $("global-table-search");
   if (gSearch) {
@@ -4437,6 +4618,12 @@
   }
 
   $("peers-refresh").addEventListener("click", refreshPeersPage);
+  const peerTabFieldsBtn = $("peer-tab-fields-btn");
+  const peerTabOnboardBtn = $("peer-tab-onboard-btn");
+  if (peerTabFieldsBtn)
+    peerTabFieldsBtn.addEventListener("click", () => setPeerEditorTab("fields"));
+  if (peerTabOnboardBtn)
+    peerTabOnboardBtn.addEventListener("click", () => setPeerEditorTab("onboard"));
   $("peers-add-start").addEventListener("click", async () => {
     if (!lastConfig) return;
     $("peer-edit-index").value = "";
@@ -4449,7 +4636,10 @@
     const oe = $("onboard-endpoint");
     if (oe) oe.value = serverEndpointDisplay();
     const modal = $("peer-modal");
-    if (modal) modal.classList.remove("is-hidden");
+    if (modal) {
+      modal.classList.remove("is-hidden");
+      setPeerEditorTab("fields");
+    }
     try {
       const kp = await generatePeerKeypairBrowser();
       $("peer-f-pub").value = kp.publicKey;
@@ -4457,7 +4647,7 @@
     } catch (e) {
       setPeersMsg(String(e.message || e), true);
     }
-    refreshOnboardInstallCmd();
+    void rebuildOnboardingEncryptedBundle(false);
     void fetchPeerOverviewForModal();
     const first = $("peer-f-name");
     if (first) requestAnimationFrame(() => first.focus());
@@ -4568,6 +4758,12 @@
   });
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape") return;
+    const chHelp = $("context-help-modal");
+    if (chHelp && !chHelp.classList.contains("is-hidden")) {
+      closeContextHelpModal();
+      ev.preventDefault();
+      return;
+    }
     const gm = $("geo-country-modal");
     if (gm && !gm.classList.contains("is-hidden")) {
       closeGeoCountryModal();
@@ -4649,7 +4845,7 @@
     $("onboard-client-priv").value = "";
     if (!adding) {
       setOnboardMsg("Keys cleared.");
-      refreshOnboardInstallCmd();
+      void rebuildOnboardingEncryptedBundle(false);
       return;
     }
     setOnboardMsg("…");
@@ -4658,7 +4854,7 @@
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
       setOnboardMsg("New keypair generated.");
-      refreshOnboardInstallCmd();
+      void rebuildOnboardingEncryptedBundle(false);
     } catch (e) {
       setOnboardMsg(String(e.message || e), true);
     }
@@ -4734,27 +4930,37 @@
   const obDlSh = $("onboard-download-sh");
   if (obDlSh) {
     obDlSh.addEventListener("click", () => {
-      const pre = $("onboard-install-cmd");
-      const txt = pre && pre.textContent ? pre.textContent.trim() : "";
-      if (!txt || txt === onboardInstallCmdPlaceholder) {
-        setOnboardMsg("Install command not ready — fill peer fields first.", true);
+      const sn = $("onboard-bundle-snippet-cmd");
+      const txt = sn && sn.textContent ? sn.textContent.trim() : "";
+      if (!txt || txt === onboardingBundlePlaceholder) {
+        setOnboardMsg("Onboarding bundle not ready — fill peer fields and wait for Overview.", true);
         return;
       }
       const name = ($("peer-f-name") && $("peer-f-name").value.trim()) || "peer";
       const safe = name.replace(/[^a-zA-Z0-9._-]+/g, "-");
-      downloadTextFile("evuproxy-peer-" + safe + "-install.sh", txt + "\n", "text/x-shellscript;charset=utf-8");
-      setOnboardMsg("Downloaded install script text.");
+      downloadTextFile("evuproxy-peer-" + safe + "-onboard.sh", txt + "\n", "text/x-shellscript;charset=utf-8");
+      setOnboardMsg("Downloaded command snippet.");
     });
   }
 
-  $("onboard-install-copy").addEventListener("click", () => {
-    void copyOnboardInstallCmd();
-  });
+  const obCopySnip = $("onboard-bundle-copy-snippet");
+  if (obCopySnip) {
+    obCopySnip.addEventListener("click", async () =>
+      copyOnboardingFieldOrCmd(() => $("onboard-bundle-snippet-cmd"), "Commands not ready yet.", "Copied commands."),
+    );
+  }
+  const obRegen = $("onboard-bundle-regenerate-unlock");
+  if (obRegen) {
+    obRegen.addEventListener("click", () => {
+      onboardingUnlockPassStored = "";
+      void rebuildOnboardingEncryptedBundle(true);
+    });
+  }
 
   function onPeerModalFieldActivity() {
     const pm = $("peer-modal");
     if (!pm || pm.classList.contains("is-hidden")) return;
-    refreshOnboardInstallCmd();
+    scheduleDebouncedOnboardingEncryptedBundle(false);
     schedulePeerOverviewFromModal();
   }
 

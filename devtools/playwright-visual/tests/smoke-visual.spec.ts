@@ -7,6 +7,13 @@ import * as path from "path";
 
 import { test } from "@playwright/test";
 
+/** Single path segment under test-results/ — stray env cannot escape tree. */
+function visualSubdirName(): string {
+  const raw = process.env.PW_VISUAL_SUBDIR?.trim();
+  const d = raw && raw.length > 0 ? raw : "visual";
+  return /^[\w.-]+$/.test(d) && d !== "." && d !== ".." ? d : "visual";
+}
+
 const ROUTES = [
   "overview",
   "settings",
@@ -46,7 +53,8 @@ test.describe("visual inspection (full-page screenshots)", () => {
 
       await page.locator(`#page-${route}`).waitFor({ state: "visible", timeout: 25_000 });
 
-      const visualDir = path.join(process.cwd(), "test-results", "visual");
+      const sub = visualSubdirName();
+      const visualDir = path.join(process.cwd(), "test-results", sub);
       fs.mkdirSync(visualDir, { recursive: true });
       await page.screenshot({
         path: path.join(visualDir, `${route}.png`),

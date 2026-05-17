@@ -259,6 +259,14 @@ tr.is-filter-hidden {
   font-weight: 500;
 }
 
+.toggle-switch-label-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .toggle-switch {
   position: relative;
   display: inline-flex;
@@ -649,6 +657,23 @@ code.inline {
   font-size: 0.8rem;
 }
 
+.onboard-install-hint-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0.35rem 0 0;
+}
+
+.onboard-install-hint-row > .btn-help-trigger {
+  margin-top: 0.05rem;
+}
+
+.onboard-install-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
 .is-hidden {
   display: none !important;
 }
@@ -742,9 +767,16 @@ button:hover {
   display: none;
 }
 
-.onboard-install-cmd {
-  max-height: 10rem;
+.onboard-bundle-panel {
+  margin-bottom: 0.15rem;
+}
+
+
+.onboard-bundle-cmd {
+  max-height: 14rem;
   word-break: break-word;
+  white-space: pre-wrap;
+  margin-top: 0.45rem;
 }
 
 .table-wrap {
@@ -1587,7 +1619,7 @@ button.geo-tags-edit {
 }
 
 .geo-modal-actions {
-  margin-top: 0.25rem;
+  margin-top: 0.75rem;
 }
 
 /* ——— Topology (peers + routes graph) ——— */
@@ -1971,7 +2003,7 @@ button.geo-tags-edit {
 }
 
 .shortcuts-list {
-  margin: 0.5rem 0 1rem;
+  margin: 0.5rem 0 1.25rem;
   padding-left: 1.25rem;
 }
 
@@ -2031,4 +2063,100 @@ button.geo-tags-edit {
 
 .empty-state-msg {
   color: #8b949e;
+}
+
+/* Optional vertical spacing preset (reuse on token/settings-style blocks). */
+#page-token .hint-tight-under-label {
+  margin: 0.25rem 0 0.35rem;
+}
+
+/* Page title row + contextual help ("?") triggers */
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.page-title-row .page-title {
+  margin-bottom: 0;
+}
+
+.btn-help-trigger {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.85rem;
+  min-height: 1.85rem;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #8b949e;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.btn-help-trigger:hover {
+  color: #c9d1d9;
+  border-color: #484f58;
+}
+
+.btn-help-trigger:focus-visible {
+  outline: 2px solid #388bfd;
+  outline-offset: 2px;
+}
+
+.btn-help-trigger--compact {
+  min-width: 1.45rem;
+  min-height: 1.45rem;
+  font-size: 0.85rem;
+}
+
+.help-modal-rich {
+  color: #c9d1d9;
+}
+
+.help-modal-rich .hint,
+.help-modal-body .hint {
+  color: #8b949e;
+}
+
+.help-modal-rich p:last-child {
+  margin-bottom: 0;
+}
+
+/* Prose clones sit flush otherwise (last paragraph margin stripped). Match modal rhythm ~1rem. */
+.help-modal-rich + .btn-row {
+  margin-top: 1rem;
+}
+
+/* Peer modal: segmented tabs spanning panel width */
+.peer-editor .geo-segmented.peer-editor-tabs {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.peer-editor .geo-segmented.peer-editor-tabs .geo-seg-btn {
+  flex: 1 1 auto;
+}
+
+.peer-editor [role='tabpanel'] > .peer-onboard-section {
+  padding-top: 0.35rem;
+}
+
+.peer-section-title-spaced {
+  margin-top: 1rem;
+}
+
+.geo-field-subhint.geo-inbound-rule-hint {
+  margin: 0.35rem 0 0;
 }

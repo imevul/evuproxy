@@ -32,7 +32,19 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
   ```
 4. On boot, `evuproxy.service` reapplies the same. Geo zones refresh via `evuproxy-geo.timer`. With **geo enabled**, the first `reload` attempts to download country zones if files are missing; ensure outbound HTTPS is allowed.
 5. **WireGuard on the backend peer**: use a narrow **`AllowedIPs`** (tunnel subnet only, not `0.0.0.0/0`) so local LAN routing stays direct.
-6. **Peer (client) install (Linux):** [scripts/peer-install.sh](scripts/peer-install.sh) installs `wireguard-tools`, writes `/etc/wireguard/<iface>.conf`, and enables `wg-quick`. The admin UI **Add peer** modal generates a short shell script: download the install script to a temp file, print `sha256sum`, then run with `sudo` after you compare the hash to **`scripts/peer-install.sh`** in **SHA256SUMS** on the matching [GitHub Release](https://github.com/imevul/evuproxy/releases) (same tag or commit as the raw URL). For production peers, set `window.EVUPROXY_PEER_INSTALL_SCRIPT_URL` to a **tag-pinned** raw URL (not floating `main`) so the checksum in a fixed release applies.
+6. **Peer (client) install (Linux):** [scripts/peer-install.sh](scripts/peer-install.sh) installs `wireguard-tools`, writes `/etc/wireguard/<iface>.conf`, and enables `wg-quick`. The admin UI **Onboarding** tab usually delivers an **encrypted bundle** snippet: **`curl … \| sudo bash`** runs [**`install-peer-tool.sh`**](scripts/install-peer-tool.sh), which installs **`evuproxy-peer-apply`**; that tool decrypts the bundle and fetches **`peer-install.sh`** (see **[Peer onboarding script URLs (optional)](#peer-onboarding-script-urls-optional)** for pinning or replacing URLs). When you download **`scripts/peer-install.sh`** manually instead, save it under a temp name, **`sha256sum`** it, and compare against **SHA256SUMS** on the matching [GitHub Release](https://github.com/imevul/evuproxy/releases) (same tag or commit as the raw URL) before **`sudo`**.
+
+### Peer onboarding script URLs (optional)
+
+By default [**`install-peer-tool.sh`**](scripts/install-peer-tool.sh), the admin UI snippet, and **evuproxy-peer-apply** use **`main`** under `raw.githubusercontent.com/…/main/scripts/` (current scripts, **no semver string to bump in source**). The trade-off: **`main` can change underneath you.** Hard-coded **`vX.Y.Z`** URLs in defaults would lag unless automation updates them every release. Prefer tagged raw URLs plus **SHA256SUMS** discipline for audited production peers (overrides below).
+
+Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-peer-apply`** reject **`file:`** / **`ftp:`** scheme overrides.
+
+| Where | Setting | Purpose |
+| ----- | ------- | ------- |
+| **Admin UI (browser)** | `window.EVUPROXY_PEER_TOOL_INSTALL_SCRIPT_URL` | Set **before** the page loads (`<script>` in the hosting page or similar). Overrides the **`install-peer-tool.sh`** URL inside the snippet’s `curl -fsSL … \| sudo bash` line. |
+| **Peer (shell)** | `EVUPROXY_PEER_APPLY_DOWNLOAD_URL` | When running **`install-peer-tool.sh`**, overrides where **`evuproxy-peer-bundle-apply.sh`** is downloaded ([scripts/install-peer-tool.sh](scripts/install-peer-tool.sh)). |
+| **Peer (shell)** | `EVUPROXY_PEER_INSTALL_SCRIPT_URL` | When running **`evuproxy-peer-apply`**, overrides where **`peer-install.sh`** is fetched ([scripts/evuproxy-peer-bundle-apply.sh](scripts/evuproxy-peer-bundle-apply.sh)). |
 
 ## Command-line interface
 

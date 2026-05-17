@@ -212,15 +212,18 @@
         <h2 class="page-title">API token</h2>
         <div class="card">
           <p class="hint">Matches <code>/etc/evuproxy/api.token</code> on the host (mock dev: <code>dev</code>). Stored only in this browser.</p>
-          <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
-          <div class="field" style="margin-top: 1rem">
+          <div class="field">
+            <label for="token">API token</label>
+            <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
+          </div>
+          <div class="field settings-block-gap">
             <label for="api-base">API base URL <span class="meta">(optional)</span></label>
-            <p class="hint meta" style="margin: 0.25rem 0 0.35rem">
+            <p class="hint meta hint-tight-under-label">
               Defaults to this host’s <code class="inline">/api</code> (same origin). Set a full URL only if the UI is served from a different host than the EvuProxy API (no trailing slash).
             </p>
             <input type="text" id="api-base" placeholder="/api" autocomplete="off" spellcheck="false" />
           </div>
-          <div class="btn-row" style="margin-top: 0.5rem">
+          <div class="btn-row settings-block-gap">
             <button type="button" id="save-token" class="btn-primary">Save in browser</button>
           </div>
           <p id="auth-msg" class="msg" aria-live="polite"></p>
@@ -228,11 +231,24 @@
       </section>
 
       <section id="page-peers" class="page" hidden>
-        <h2 class="page-title">Peers</h2>
-        <p class="hint">WireGuard peers (tunnel IPs and keys for each side). Changes are saved to config on the server; apply from Pending changes when ready. The Status column uses WireGuard handshakes from the host: Online when the last handshake was within about three minutes; Unknown if stats are unavailable. Enable <strong>Collect peer ICMP metrics</strong> in Settings to show a Ping column (data from the metrics service / SQLite). Overview always shows latency summaries when the API returns metrics.</p>
+        <div class="page-title-row">
+          <h2 class="page-title">Peers</h2>
+          <button
+            type="button"
+            class="btn-help-trigger"
+            aria-label="More about peers (dialog)"
+            data-help-title="Peers"
+            data-help-template="help-peers-intro"
+          >
+            ?
+          </button>
+        </div>
+        <p class="hint">
+          Tunnel endpoints and WireGuard keys for each client. Saves write server YAML; use <strong>Pending changes</strong> to reload the tunnel and firewall rules.
+        </p>
         <div class="card">
           <div class="toolbar">
-            <button type="button" class="btn-primary" id="peers-refresh">Refresh list</button>
+            <button type="button" class="btn-primary" id="peers-refresh">Refresh</button>
             <button type="button" class="btn-quiet" id="peers-add-start">Add peer</button>
           </div>
           <div id="peers-table-wrap" class="table-wrap"></div>
@@ -251,89 +267,127 @@
             <div id="peer-editor" class="peer-editor">
               <h3 id="peer-editor-title">Edit peer</h3>
               <input type="hidden" id="peer-edit-index" value="" />
-              <div class="field">
-                <label for="peer-f-name">Name</label>
-                <input type="text" id="peer-f-name" placeholder="e.g. laptop" autocomplete="off" />
+              <div class="geo-segmented peer-editor-tabs" role="tablist" aria-label="Peer editor sections">
+                <button type="button" class="geo-seg-btn is-active" id="peer-tab-fields-btn" role="tab" aria-selected="true" aria-controls="peer-tab-fields-panel">
+                  Peer fields
+                </button>
+                <button type="button" class="geo-seg-btn" id="peer-tab-onboard-btn" role="tab" aria-selected="false" aria-controls="peer-tab-onboard-panel">
+                  Setup &amp; onboarding
+                </button>
               </div>
-              <div class="field">
-                <label for="peer-f-tunnel">Tunnel IP <span class="meta">(e.g. 10.100.0.5/32)</span></label>
-                <input type="text" id="peer-f-tunnel" autocomplete="off" />
-              </div>
-              <div class="field">
-                <label for="peer-f-pub">Public key</label>
-                <input type="text" id="peer-f-pub" class="mono" spellcheck="false" autocomplete="off" />
-              </div>
-              <div class="field">
-                <div class="toggle-switch-row">
-                  <span class="toggle-switch-text" id="peer-f-disabled-desc"
-                    >Enabled (off = keep in config, omit from WireGuard until turned on again)</span
-                  >
-                  <label class="toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="peer-f-disabled"
-                      class="toggle-switch-input"
-                      autocomplete="off"
-                      aria-labelledby="peer-f-disabled-desc"
-                    />
-                    <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
-                  </label>
-                </div>
-              </div>
-              <div class="btn-row">
-                <button type="button" class="btn-primary" id="peer-save">Save</button>
-                <button type="button" class="btn-quiet" id="peer-cancel">Cancel</button>
-              </div>
-
-              <div id="onboard-panel" class="peer-onboard-section">
-                <h4 class="peer-section-title">WireGuard profile</h4>
-                <p class="hint">
-                  Server endpoint and keys below are used to build the YAML snippet and WireGuard config for this peer. Use narrow <code>AllowedIPs</code> (tunnel subnet only). Many setups save the <code>[Interface]</code> / <code>[Peer]</code> block as <code>client.conf</code>. New peers get a keypair automatically; you can clear and regenerate while adding.
-                </p>
+              <div id="peer-tab-fields-panel" role="tabpanel" aria-labelledby="peer-tab-fields-btn">
                 <div class="field">
-                  <label for="onboard-endpoint">Server endpoint</label>
-                  <input type="text" id="onboard-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+                  <label for="peer-f-name">Name</label>
+                  <input type="text" id="peer-f-name" placeholder="e.g. laptop" autocomplete="off" />
                 </div>
-                <div class="onboard-toolbar">
-                  <button type="button" id="onboard-clear-keys" class="btn-quiet">Clear / regenerate keys</button>
-                </div>
-                <p id="onboard-server-hint" class="hint onboard-hint is-hidden" aria-live="polite"></p>
                 <div class="field">
-                  <label for="onboard-client-priv">Peer private key <span class="warn-label">— browser only</span></label>
-                  <div class="input-reveal-wrap">
-                    <input
-                      type="password"
-                      id="onboard-client-priv"
-                      class="mono input-reveal-field"
-                      spellcheck="false"
-                      autocomplete="off"
-                    />
-                    <button
-                      type="button"
-                      class="input-reveal-toggle"
-                      id="onboard-client-priv-toggle"
-                      aria-label="Show private key"
-                      aria-pressed="false"
-                    >
-                      Show
-                    </button>
+                  <label for="peer-f-tunnel">Tunnel IP <span class="meta">(e.g. 10.100.0.5/32)</span></label>
+                  <input type="text" id="peer-f-tunnel" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label for="peer-f-pub">Public key</label>
+                  <input type="text" id="peer-f-pub" class="mono" spellcheck="false" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <div class="toggle-switch-row">
+                    <span class="toggle-switch-label-group">
+                      <span class="toggle-switch-text" id="peer-f-disabled-desc">Enabled</span>
+                      <button
+                        type="button"
+                        class="btn-help-trigger btn-help-trigger--compact"
+                        aria-label="Details: Enabled off omits peer from WireGuard"
+                        title="Explain “Enabled” / off behaviour"
+                        data-help-title="Peer: Enabled"
+                        data-help-template="help-enabled-omit-wireguard"
+                      >
+                        ?
+                      </button>
+                    </span>
+                    <label class="toggle-switch">
+                      <input
+                        type="checkbox"
+                        id="peer-f-disabled"
+                        class="toggle-switch-input"
+                        autocomplete="off"
+                        aria-labelledby="peer-f-disabled-desc"
+                      />
+                      <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                    </label>
                   </div>
                 </div>
-                <h4 class="peer-section-title" style="margin-top: 1rem">Install on Linux (systemd)</h4>
-                <p class="hint">
-                  Installs <code>wireguard-tools</code>, writes <code>/etc/wireguard/</code>, and enables <code>wg-quick@…</code>. Server public key and listen port load from the API when you change any field in this dialog. The command contains your <strong>private key</strong> — avoid shared terminals and shell history on untrusted hosts. The script is downloaded to a temp file, <code>sha256sum</code> is printed so you can verify it against <strong>SHA256SUMS</strong> on the GitHub Release (same tag or commit as the script URL) before <code>sudo bash</code>. Set <code>window.EVUPROXY_PEER_INSTALL_SCRIPT_URL</code> to a release-pinned raw URL for a stable trust anchor.
-                </p>
-                <div class="onboard-toolbar">
-                  <button type="button" id="onboard-install-copy" class="btn-quiet">Copy install command</button>
+                <div class="btn-row">
+                  <button type="button" class="btn-primary" id="peer-save">Save</button>
+                  <button type="button" class="btn-quiet" id="peer-cancel">Cancel</button>
                 </div>
-                <pre id="onboard-install-cmd" class="code-block onboard-install-cmd" aria-live="polite"></pre>
-                <div class="onboard-toolbar">
-                  <button type="button" id="onboard-build" class="btn-primary">Build YAML + WireGuard config</button>
-                  <button type="button" id="onboard-download-conf" class="btn-quiet">Download .conf</button>
-                  <button type="button" id="onboard-download-sh" class="btn-quiet">Download install.sh snippet</button>
+              </div>
+
+              <div id="peer-tab-onboard-panel" role="tabpanel" aria-labelledby="peer-tab-onboard-btn" hidden>
+                <div id="onboard-panel" class="peer-onboard-section">
+                  <h4 class="peer-section-title">WireGuard profile</h4>
+                  <p class="hint">
+                    Server endpoint and keys below are used to build the YAML snippet and WireGuard config for this peer. Use narrow <code>AllowedIPs</code> (tunnel subnet only). Many setups save the <code>[Interface]</code> / <code>[Peer]</code> block as <code>client.conf</code>. New peers get a keypair automatically; you can clear and regenerate while adding.
+                  </p>
+                  <div class="field">
+                    <label for="onboard-endpoint">Server endpoint</label>
+                    <input type="text" id="onboard-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+                  </div>
+                  <div class="onboard-toolbar">
+                    <button type="button" id="onboard-clear-keys" class="btn-quiet">Clear / regenerate keys</button>
+                  </div>
+                  <p id="onboard-server-hint" class="hint onboard-hint is-hidden" aria-live="polite"></p>
+                  <div class="field">
+                    <label for="onboard-client-priv">Peer private key <span class="warn-label">— browser only</span></label>
+                    <div class="input-reveal-wrap">
+                      <input
+                        type="password"
+                        id="onboard-client-priv"
+                        class="mono input-reveal-field"
+                        spellcheck="false"
+                        autocomplete="off"
+                      />
+                      <button
+                        type="button"
+                        class="input-reveal-toggle"
+                        id="onboard-client-priv-toggle"
+                        aria-label="Show private key"
+                        aria-pressed="false"
+                      >
+                        Show
+                      </button>
+                    </div>
+                  </div>
+                  <h4 class="peer-section-title peer-section-title-spaced">Install on Linux (systemd)</h4>
+                  <div class="onboard-install-hint-row">
+                    <p class="hint onboard-install-hint">
+                      <code class="inline">curl … | sudo bash</code> installs <code class="inline">evuproxy-peer-apply</code>;
+                      <code class="inline">sudo evuproxy-peer-apply</code> decrypts the EVUB bundle. Requires OpenSSL&nbsp;3 with
+                      <code class="inline">openssl kdf</code>, plus <code class="inline">curl</code> and <code class="inline">xxd</code>.
+                    </p>
+                    <button
+                      type="button"
+                      class="btn-help-trigger btn-help-trigger--compact"
+                      aria-label="More about Linux peer onboarding (dialog)"
+                      data-help-title="Linux peer onboarding"
+                      data-help-template="help-linux-peer-onboarding"
+                    >
+                      ?
+                    </button>
+                  </div>
+                  <div class="onboard-bundle-panel onboard-bundle-quick">
+                    <div class="onboard-toolbar">
+                      <button type="button" class="btn-quiet" id="onboard-bundle-copy-snippet">Copy commands</button>
+                      <button type="button" class="btn-quiet" id="onboard-bundle-regenerate-unlock">Regenerate bundle</button>
+                    </div>
+                    <pre id="onboard-bundle-snippet-cmd" class="code-block onboard-bundle-cmd" aria-live="polite"></pre>
+                  </div>
+                  <div class="onboard-toolbar">
+                    <button type="button" id="onboard-build" class="btn-primary">Build YAML + WireGuard config</button>
+                    <button type="button" id="onboard-download-conf" class="btn-quiet">Download .conf</button>
+                    <button type="button" id="onboard-download-sh" class="btn-quiet">Download command snippet</button>
+                  </div>
+                  <p id="onboard-msg" class="msg" aria-live="polite"></p>
+                  <pre id="onboard-out" class="code-block is-collapsed"></pre>
                 </div>
-                <p id="onboard-msg" class="msg" aria-live="polite"></p>
-                <pre id="onboard-out" class="code-block is-collapsed"></pre>
               </div>
             </div>
           </div>
@@ -341,8 +395,21 @@
       </section>
 
       <section id="page-routes" class="page" hidden>
-        <h2 class="page-title">Routes</h2>
-        <p class="hint">Map TCP/UDP ports to a peer tunnel IP (<code class="inline">forwarding.routes</code>). Turn off <strong>Enabled</strong> to keep a route in config but leave it out of generated nftables until you turn it on again. Optional <strong>Source allowlist</strong> restricts which WAN IPv4 sources may use the port forward (nftables reload required). When geoblocking is on in <strong>block</strong> mode, country block rules run before the allowlist: a source in a blocked country is still dropped even if it is listed here.</p>
+        <div class="page-title-row">
+          <h2 class="page-title">Routes</h2>
+          <button
+            type="button"
+            class="btn-help-trigger"
+            aria-label="More about routes (dialog)"
+            data-help-title="Forwarding routes"
+            data-help-template="help-routes-intro"
+          >
+            ?
+          </button>
+        </div>
+        <p class="hint">
+          WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily; edits apply after <strong>Pending changes</strong> → Apply/reload.
+        </p>
         <div class="card">
           <div class="toolbar">
             <button type="button" class="btn-primary" id="routes-refresh">Refresh</button>
@@ -387,9 +454,19 @@
               </div>
               <div class="field">
                 <div class="toggle-switch-row">
-                  <span class="toggle-switch-text" id="route-f-disabled-desc"
-                    >Enabled (off = keep in config, omit from nftables until turned on again)</span
-                  >
+                  <span class="toggle-switch-label-group">
+                    <span class="toggle-switch-text" id="route-f-disabled-desc">Enabled</span>
+                    <button
+                      type="button"
+                      class="btn-help-trigger btn-help-trigger--compact"
+                      aria-label="Details: Enabled off omits route from nftables"
+                      title="Explain “Enabled” / off behaviour"
+                      data-help-title="Route: Enabled"
+                      data-help-template="help-enabled-omit-nftables"
+                    >
+                      ?
+                    </button>
+                  </span>
                   <label class="toggle-switch">
                     <input
                       type="checkbox"
@@ -451,7 +528,7 @@
       <section id="page-inbound" class="page" hidden>
         <h2 class="page-title">Inbound access</h2>
         <p class="hint">
-          Extra nftables <strong>INPUT</strong> accept rules on the host (SSH, HTTP, etc.). Stored as <code class="inline">input_allows</code> in config.           Use the
+          Extra nftables <strong>INPUT</strong> accept rules on the host (SSH, HTTP, etc.). Stored as <code class="inline">input_allows</code> in config. Use the
           <strong>Enabled</strong> toggle (off = keep in config, omit from generated nftables until you turn it on again).
         </p>
         <div class="card">
@@ -492,9 +569,19 @@
               </div>
               <div class="field">
                 <div class="toggle-switch-row">
-                  <span class="toggle-switch-text" id="inbound-f-disabled-desc"
-                    >Enabled (off = keep in config, omit from nftables until turned on again)</span
-                  >
+                  <span class="toggle-switch-label-group">
+                    <span class="toggle-switch-text" id="inbound-f-disabled-desc">Enabled</span>
+                    <button
+                      type="button"
+                      class="btn-help-trigger btn-help-trigger--compact"
+                      aria-label="Details: Enabled off omits rule from nftables"
+                      title="Explain “Enabled” / off behaviour"
+                      data-help-title="Inbound rule: Enabled"
+                      data-help-template="help-enabled-omit-nftables"
+                    >
+                      ?
+                    </button>
+                  </span>
                   <label class="toggle-switch">
                     <input
                       type="checkbox"
@@ -517,15 +604,20 @@
       </section>
 
       <section id="page-geoblocking" class="page" hidden>
-        <h2 class="page-title">Geoblocking</h2>
-        <p class="hint" id="geo-page-hint">
-          When enabled, nftables restrict public forwarding using downloaded country zones. Inbound
-          <code class="inline">input_allows</code> (SSH, HTTP, etc.) follow the same rules only if you turn on
-          <strong>Apply geoblocking to inbound allow rules</strong> under the advanced fields below (default is off;
-          enable <a href="#/settings">Settings</a> → Advanced mode to show those fields). Choose whether the country
-          list is an <strong>allow</strong> or <strong>block</strong> list. Stored in <code class="inline">geo</code> in
-          the main config. After saving, run <strong>Update geo lists</strong> on this page or from Overview, then Apply
-          on Pending changes.
+        <div class="page-title-row">
+          <h2 class="page-title">Geoblocking</h2>
+          <button
+            type="button"
+            class="btn-help-trigger"
+            aria-label="More about geoblocking (dialog)"
+            data-help-title="Geoblocking"
+            data-help-template="help-geoblocking-intro"
+          >
+            ?
+          </button>
+        </div>
+        <p class="hint">
+          Country-zone rules for forwarded ports (<code class="inline">geo</code> in config). Toggle list mode below, refresh zone files, then <strong>Pending changes</strong> → Apply.
         </p>
         <div class="card">
           <div class="field">
@@ -593,7 +685,7 @@
                   <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
                 </label>
               </div>
-              <p class="hint meta" style="margin: 0.35rem 0 0">
+              <p class="hint meta geo-field-subhint geo-inbound-rule-hint">
                 When off (default), SSH, HTTP, and other <code class="inline">input_allows</code> stay reachable from any
                 source IPv4 even if geoblocking is on. When on, those ports use the same allow-list or block-list rules
                 as forwarded services. Click <strong>Save</strong> to store changes, then <strong>Apply</strong> on the host.
@@ -714,14 +806,21 @@
       </section>
 
       <section id="page-logs" class="page" hidden>
-        <h2 class="page-title">Logs</h2>
+        <div class="page-title-row">
+          <h2 class="page-title">Logs</h2>
+          <button
+            type="button"
+            class="btn-help-trigger"
+            aria-label="More about Logs (sources, prefixes, GeoIP columns)"
+            data-help-title="Logs"
+            data-help-template="help-logs-intro"
+          >
+            ?
+          </button>
+        </div>
         <p class="hint">
-          Lines from nftables <code class="inline">log</code> rules with prefixes
-          <code class="inline">evuproxy-geo-block</code> (geoblocking drops) and
-          <code class="inline">evuproxy-forward-drop</code> (forward-chain drops). The API reads
+          Kernel <code class="inline">log</code> lines from EvuProxy drop rules (<strong>geoblock</strong> and <strong>forward</strong> prefixes). Use <strong>Refresh</strong>; the API prefers
           <code class="inline">journalctl</code> (newest first) or falls back to <code class="inline">dmesg</code>.
-          Optional: set <code class="inline">EVUPROXY_GEOLITE_MMDB</code> to a MaxMind GeoLite2 Country
-          <code class="inline">.mmdb</code> file on the host so SRC/DST columns show country flags.
         </p>
         <div class="card">
           <div class="logs-toolbar-wrap">
@@ -848,7 +947,7 @@
           <ul class="shortcuts-list meta">
             <li><kbd class="kbd">/</kbd> — Focus peer/route filter</li>
             <li><kbd class="kbd">?</kbd> — This help</li>
-            <li><kbd class="kbd">Esc</kbd> — Close dialog</li>
+            <li><kbd class="kbd">Esc</kbd> — Close open dialog (keyboard help or page “?” help)</li>
           </ul>
           <div class="btn-row">
             <button type="button" class="btn-primary" id="shortcuts-modal-close">Close</button>
@@ -884,8 +983,115 @@
           <p id="config-upload-apply-msg" class="msg" aria-live="polite"></p>
         </div>
       </div>
+
+      <div
+        id="context-help-modal"
+        class="modal is-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="context-help-modal-title"
+      >
+        <button type="button" class="modal-backdrop" id="context-help-backdrop" aria-label="Close"></button>
+        <div class="modal-panel modal-panel-wide">
+          <h3 id="context-help-modal-title">Help</h3>
+          <div id="context-help-body" class="help-modal-rich"></div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="context-help-close">Close</button>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
+
+    <template id="help-peers-intro">
+      <div class="help-modal-body">
+        <p>Saves write YAML on the server only; reload WireGuard and nftables from <strong>Pending changes</strong> when ready.</p>
+        <p>
+          <strong>Status:</strong> from host handshake time — roughly <strong>Online</strong> if the latest handshake was within about three minutes, otherwise stale/offline;
+          <strong>Unknown</strong> if statistics are unavailable.
+        </p>
+        <p>
+          The <strong>Ping</strong> column appears when <strong>Collect peer ICMP metrics</strong> is enabled in Settings (collector + SQLite). Overview summarizes the same metrics when the API returns them.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-routes-intro">
+      <div class="help-modal-body">
+        <p>Routes are <code class="inline">forwarding.routes</code>: WAN TCP/UDP ports mapped to a peer <strong>tunnel IPv4 host</strong>.</p>
+        <p>
+          Turning <strong>Enabled</strong> off keeps the route in config but omits it from generated nftables until you enable it again, then Apply/reload.
+        </p>
+        <p><strong>Source allowlist</strong> limits which WAN IPv4 sources may reach the forwarded port (<strong>Apply to host</strong> required).</p>
+        <p>
+          Geoblocking in <strong>block</strong> mode evaluates country-drop rules before these forwards — a blocked-country source can still be dropped even if allowlisted here.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-geoblocking-intro">
+      <div class="help-modal-body">
+        <p>
+          Restricts public <strong>forwarded</strong> ports using GeoIP zones; configured under <code class="inline">geo</code> in the YAML.
+        </p>
+        <p>Choose allow vs block via <strong>List mode</strong>, then run <strong>Update geo lists</strong> here or Overview, and <strong>Apply</strong> from Pending.</p>
+        <p>
+          Inbound SSH/HTTP (<code class="inline">input_allows</code>) obey geo only if <strong>Apply geoblocking to inbound allow rules</strong> is on (shown when
+          <a href="#/settings">Settings</a> → Advanced is enabled).
+        </p>
+      </div>
+    </template>
+
+    <template id="help-enabled-omit-nftables">
+      <div class="help-modal-body">
+        <p>
+          Turning <strong>Enabled</strong> off keeps this entry in the server YAML but omits it from generated nftables until you turn it on again and reload firewall
+          rules from <strong>Pending changes</strong> (Apply/reload).
+        </p>
+      </div>
+    </template>
+
+    <template id="help-enabled-omit-wireguard">
+      <div class="help-modal-body">
+        <p>
+          Turning <strong>Enabled</strong> off keeps this peer in the server YAML but omits them from WireGuard until you turn it on again and reload the tunnel from
+          <strong>Pending changes</strong>.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-linux-peer-onboarding">
+      <div class="help-modal-body help-modal-rich">
+        <p>
+          The admin UI builds an <strong>EVUB</strong> blob (WireGuard/tunnel material encrypted in the browser). After operators paste the snippet on the peer,
+          unpacking, MAC check, decryption, and fetching <code class="inline">peer-install.sh</code> stay inside the shipped scripts.
+        </p>
+        <p>
+          The snippet exports <code class="inline">EVU_SECRET_FROM_ADMIN</code> / <code class="inline">EVU_BLOB_FROM_ADMIN</code> (unlock hex and base64 bundle), runs the
+          installer to put <code class="inline">evuproxy-peer-apply</code> on the PATH (typically <code class="inline">/usr/local/bin</code>), then runs
+          <code class="inline">sudo evuproxy-peer-apply</code> with <code class="inline">--secret</code>/<code class="inline">--blob</code> reading those vars.
+        </p>
+        <p>
+          <strong>Trust:</strong> treat <code class="inline">curl … | sudo bash</code> like any remote bootstrap — pin a tagged release or verify checksums on the artifacts
+          you pull.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-logs-intro">
+      <div class="help-modal-body">
+        <p>
+          Rows come from nftables <code class="inline">log</code> targets with prefixes
+          <code class="inline">evuproxy-geo-block</code> (IPv4 packets dropped by geoblocking rules) and
+          <code class="inline">evuproxy-forward-drop</code> (forward-chain drops, e.g. disallowed WAN traffic hitting forwarded ports).
+        </p>
+        <p>The API prefers <code class="inline">journalctl</code> (newest first) and falls back to <code class="inline">dmesg</code> when journal data is unavailable.</p>
+        <p>
+          Optional: set env <code class="inline">EVUPROXY_GEOLITE_MMDB</code> on the host to the path of a MaxMind GeoLite2 Country <code class="inline">.mmdb</code> file so SRC/DST
+          columns resolve to country codes/flags where possible.
+        </p>
+      </div>
+    </template>
 
   <script src="/static/app.js"></script>
 </body>
