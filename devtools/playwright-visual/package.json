@@ -1,0 +1,11 @@
+{
+  "name": "evuproxy-playwright-visual",
+  "private": true,
+  "description": "Headless/full-page screenshots of the EvuProxy admin UI against the dev mock stack",
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  },
+  "scripts": {
+    "test": "playwright test"
+  }
+}

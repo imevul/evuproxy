@@ -75,7 +75,10 @@
           <p id="overview-action-msg" class="msg" aria-live="polite"></p>
         </div>
         <div id="overview-events-card" class="card overview-events-card">
-          <h3>Recent activity</h3>
+          <div class="toolbar overview-events-toolbar">
+            <h3>Recent activity</h3>
+            <button type="button" class="btn-quiet" id="overview-events-export-csv">Export CSV</button>
+          </div>
           <p class="hint meta">From the host <code class="inline">state/events.jsonl</code> (append-only, size-capped). Polls while you stay on Overview.</p>
           <ul id="overview-events-list" class="overview-events-list"></ul>
           <p id="overview-events-empty" class="hint meta is-hidden">No events recorded yet.</p>
@@ -120,6 +123,49 @@
             <button type="button" class="btn-quiet" id="settings-download-yaml">Download config.yaml</button>
           </div>
           <p id="settings-prefs-msg" class="msg" aria-live="polite"></p>
+        </div>
+        <div class="card">
+          <h3>Operator notes</h3>
+          <p class="hint meta">Plain text on the host as <code class="inline">config-notes.txt</code> next to <code class="inline">config.yaml</code>. Not part of WireGuard YAML.</p>
+          <div class="field">
+            <label for="config-notes-body">Notes</label>
+            <textarea id="config-notes-body" rows="6" spellcheck="false" autocomplete="off" placeholder="Why this host is configured this way…"></textarea>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="config-notes-save">Save notes</button>
+          </div>
+          <p id="config-notes-msg" class="msg" aria-live="polite"></p>
+        </div>
+        <div class="card">
+          <h3>Backup &amp; restore</h3>
+          <p class="hint meta">
+            Archives live under the backup allow directory (default <code class="inline">/var/backups</code>); paths are validated by the API (
+            <code>EVUPROXY_BACKUP_DIR</code>).
+          </p>
+          <div class="field">
+            <label for="backup-path-input">Backup archive path</label>
+            <input type="text" id="backup-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="btn-backup-run">Create backup</button>
+          </div>
+          <div class="field">
+            <label for="restore-path-input">Restore from archive</label>
+            <input type="text" id="restore-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="btn-restore-run">Restore</button>
+          </div>
+          <p id="backup-restore-msg" class="msg" aria-live="polite"></p>
+        </div>
+        <div class="card">
+          <h3>Replace config (upload)</h3>
+          <p class="hint meta">Preview JSON then save. <code>PUT /config</code> replaces the server file and strips YAML comments.</p>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="config-upload-open">Upload JSON…</button>
+            <input type="file" id="config-upload-file" accept="application/json,.json" class="is-hidden" />
+          </div>
+          <p id="config-upload-msg" class="msg" aria-live="polite"></p>
         </div>
         <div class="card">
           <h3>Advanced settings</h3>
@@ -657,10 +703,11 @@
         <div class="card">
           <div class="toolbar">
             <button type="button" class="btn-primary" id="stats-refresh">Refresh</button>
+            <button type="button" class="btn-quiet" id="stats-export-metrics-csv">Export peer metrics CSV</button>
           </div>
           <h3>WireGuard peers</h3>
           <div id="stats-wg-wrap" class="table-wrap"></div>
-          <h3>nftables counters</h3>
+          <h3 class="settings-block-gap">nftables counters</h3>
           <div id="stats-nft-wrap" class="table-wrap"></div>
           <p id="stats-msg" class="msg" aria-live="polite"></p>
         </div>
@@ -785,6 +832,56 @@
             <button type="button" class="btn-primary" id="confirm-modal-ok">OK</button>
             <button type="button" class="btn-quiet" id="confirm-modal-cancel">Cancel</button>
           </div>
+        </div>
+      </div>
+
+      <div
+        id="shortcuts-modal"
+        class="modal is-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcuts-modal-title"
+      >
+        <button type="button" class="modal-backdrop" aria-label="Close"></button>
+        <div class="modal-panel">
+          <h3 id="shortcuts-modal-title">Keyboard shortcuts</h3>
+          <ul class="shortcuts-list meta">
+            <li><kbd class="kbd">/</kbd> — Focus peer/route filter</li>
+            <li><kbd class="kbd">?</kbd> — This help</li>
+            <li><kbd class="kbd">Esc</kbd> — Close dialog</li>
+          </ul>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="shortcuts-modal-close">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="config-upload-modal"
+        class="modal is-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="config-upload-modal-title"
+      >
+        <button type="button" class="modal-backdrop" aria-label="Close"></button>
+        <div class="modal-panel modal-panel-wide">
+          <h3 id="config-upload-modal-title">Replace config</h3>
+          <p id="config-upload-modal-hint" class="hint meta"></p>
+          <div class="config-upload-diff-grid">
+            <div class="field">
+              <label>Current (server)</label>
+              <pre id="config-upload-pre-current" class="code-block code-block-tall"></pre>
+            </div>
+            <div class="field">
+              <label>Uploaded</label>
+              <pre id="config-upload-pre-new" class="code-block code-block-tall"></pre>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" id="config-upload-apply">Save to server</button>
+            <button type="button" class="btn-quiet" id="config-upload-cancel">Cancel</button>
+          </div>
+          <p id="config-upload-apply-msg" class="msg" aria-live="polite"></p>
         </div>
       </div>
     </main>

@@ -65,6 +65,11 @@
 
   let overviewEventsTimer = null;
   let topologyPollTimer = null;
+  /** Last events list from GET /v1/events (for CSV export). */
+  let lastEventsForExport = [];
+  /** Query string from hash for ?peer= / ?route= highlighting */
+  let hashNavParams = new URLSearchParams();
+  const GEO_STALE_MS = 30 * 24 * 60 * 60 * 1000;
   /** WireGuard transfer_rx+transfer_tx totals per public_key for topology edge animation */
   let topologyPrevPeerBytes = new Map();
   let topologyRefreshInFlight = false;
@@ -193,9 +198,11 @@
       if (!evs.length) {
         ul.innerHTML = "";
         empty.classList.remove("is-hidden");
+        lastEventsForExport = [];
         return;
       }
       empty.classList.add("is-hidden");
+      lastEventsForExport = evs;
       ul.innerHTML = evs
         .map(
           (e) =>
@@ -330,6 +337,10 @@
   }
 
   let routeProbePending = null;
+  /** Pending parsed config from file upload (replace flow). */
+  let configUploadDraft = null;
+  /** Last /v1/metrics/peers response for CSV export on Stats page. */
+  let lastMetricsPeersExport = null;
 
   function closeRouteProbeModal() {
     routeProbePending = null;
@@ -508,6 +519,7 @@
 
   async function navigate(name) {
     if (!pages.includes(name)) name = "overview";
+    hashNavParams = parseHashNavParams();
     closeConfirmModal();
     if (name !== "routes") {
       closeRouteProbeModal();
@@ -535,7 +547,10 @@
     document.querySelectorAll(".nav-link").forEach((a) => {
       a.classList.toggle("is-active", a.getAttribute("data-route") === name);
     });
-    if (location.hash.replace(/^#\/?/, "") !== name) {
+    const hraw = (location.hash || "").replace(/^#/, "");
+    const hqi = hraw.indexOf("?");
+    const curPath = (hqi >= 0 ? hraw.slice(0, hqi) : hraw).replace(/^\//, "").split("/")[0] || "overview";
+    if (curPath !== name) {
       location.hash = "#/" + name;
     }
     if (name === "overview") {
@@ -549,8 +564,14 @@
       refreshTokenPage();
       await ensureApiGate();
     }
-    if (name === "peers") refreshPeersPage();
-    if (name === "routes") refreshRoutesPage();
+    if (name === "peers") {
+      await refreshPeersPage();
+      applyHashPeerRouteHighlight();
+    }
+    if (name === "routes") {
+      await refreshRoutesPage();
+      applyHashPeerRouteHighlight();
+    }
     if (name === "topology") {
       topologyPrevPeerBytes = new Map();
       void refreshTopologyPage();
@@ -567,9 +588,43 @@
     void refreshSidebarAbout();
   }
 
+  function applyHashPeerRouteHighlight() {
+    document.querySelectorAll("#peers-table-wrap tr.row-highlight, #routes-table-wrap tr.row-highlight").forEach((tr) => {
+      tr.classList.remove("row-highlight");
+    });
+    const pi = hashNavParams.get("peer");
+    if (pi !== null && $("page-peers") && !$("page-peers").hidden) {
+      const idx = parseInt(pi, 10);
+      if (!isNaN(idx)) {
+        const btn = document.querySelector("#peers-table-wrap [data-peer-edit=\"" + idx + "\"]");
+        const tr = btn && btn.closest("tr");
+        if (tr) {
+          tr.classList.add("row-highlight");
+          tr.scrollIntoView({ block: "nearest" });
+        }
+      }
+    }
+    const ri = hashNavParams.get("route");
+    if (ri !== null && $("page-routes") && !$("page-routes").hidden) {
+      const idx = parseInt(ri, 10);
+      if (!isNaN(idx)) {
+        const btn = document.querySelector("#routes-table-wrap [data-route-edit=\"" + idx + "\"]");
+        const tr = btn && btn.closest("tr");
+        if (tr) {
+          tr.classList.add("row-highlight");
+          tr.scrollIntoView({ block: "nearest" });
+        }
+      }
+    }
+  }
+
   async function onHash() {
-    const h = (location.hash || "#/overview").replace(/^#\/?/, "").split("/")[0];
-    await navigate(h || "overview");
+    const raw = (location.hash || "#/overview").replace(/^#/, "");
+    const qi = raw.indexOf("?");
+    const pathPart = qi >= 0 ? raw.slice(0, qi) : raw;
+    hashNavParams = qi >= 0 ? new URLSearchParams(raw.slice(qi + 1)) : new URLSearchParams();
+    const name = pathPart.replace(/^\//, "").split("/")[0] || "overview";
+    await navigate(name || "overview");
   }
 
   /* ——— Overview ——— */
@@ -607,6 +662,141 @@
     return wrap;
   }
 
+  function parseHashNavParams() {
+    const raw = (location.hash || "").replace(/^#/, "");
+    const qi = raw.indexOf("?");
+    if (qi < 0) return new URLSearchParams();
+    return new URLSearchParams(raw.slice(qi + 1));
+  }
+
+  function stableSortKeys(x) {
+    if (x === null || typeof x !== "object") return x;
+    if (Array.isArray(x)) return x.map(stableSortKeys);
+    const o = {};
+    for (const k of Object.keys(x).sort()) {
+      o[k] = stableSortKeys(x[k]);
+    }
+    return o;
+  }
+
+  function stableConfigJson(cfg) {
+    return JSON.stringify(cfg == null ? null : stableSortKeys(cfg));
+  }
+
+  function csvEscapeCell(s) {
+    const t = String(s ?? "");
+    if (/[",\n\r]/.test(t)) return '"' + t.replace(/"/g, '""') + '"';
+    return t;
+  }
+
+  function eventsToCsv(events) {
+    const rows = [["ts", "event", "detail", "error_code"]];
+    for (const e of events || []) {
+      rows.push([e.ts || "", e.event || "", e.detail || "", e.error_code || ""]);
+    }
+    return rows.map((r) => r.map(csvEscapeCell).join(",")).join("\n") + "\n";
+  }
+
+  function metricsPeersToCsv(data) {
+    const peers = (data && data.peers) || [];
+    const rows = [["name", "tunnel_ip", "ok", "latency_ms", "ts_utc"]];
+    for (const p of peers) {
+      rows.push([
+        p.name || "",
+        p.tunnel_ip || "",
+        p.ok === true ? "true" : p.ok === false ? "false" : "",
+        p.latency_ms ?? "",
+        p.ts_utc || "",
+      ]);
+    }
+    return rows.map((r) => r.map(csvEscapeCell).join(",")).join("\n") + "\n";
+  }
+
+  function formatGeoAge(isoUtc) {
+    const d = Date.parse(isoUtc);
+    if (isNaN(d)) return "";
+    const days = Math.floor((Date.now() - d) / (24 * 60 * 60 * 1000));
+    if (days <= 0) return "today";
+    if (days === 1) return "1 day ago";
+    return days + " days ago";
+  }
+
+  function buildOverviewAttentionItems(cfg, o, st, met) {
+    const items = [];
+    const peers = (cfg && cfg.peers) || [];
+    const pubMap = wgPeerPubKeyMap(st);
+    for (const p of peers) {
+      if (p.disabled) continue;
+      const row = pubMap.get((p.public_key || "").trim());
+      const h = row && row.latest_handshake_unix;
+      if (!h || h <= 0) {
+        items.push('Peer "' + (p.name || "unnamed") + '" has no WireGuard handshake yet.');
+      } else if (Math.floor(Date.now() / 1000) - h > PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC) {
+        items.push('Peer "' + (p.name || "unnamed") + '" looks offline (stale handshake).');
+      }
+    }
+    const disabledByTunnel = new Set();
+    for (const p of peers) {
+      if (p.disabled) {
+        const th = tunnelToHost(p.tunnel_ip);
+        if (th) disabledByTunnel.add(th);
+      }
+    }
+    const routes = (cfg && cfg.forwarding && cfg.forwarding.routes) || [];
+    for (let i = 0; i < routes.length; i++) {
+      const r = routes[i];
+      if (r.disabled) continue;
+      const tip = String(r.target_ip || "").trim();
+      if (tip && disabledByTunnel.has(tip)) {
+        items.push("Route #" + (i + 1) + " targets a disabled peer tunnel (" + tip + ").");
+      }
+    }
+    if (met && !met.collection_disabled && (!met.peers || !met.peers.length)) {
+      items.push("Peer metrics collection is enabled but no samples are stored yet.");
+    }
+    if (o && o.geo_enabled && !o.geo_last_success_utc) {
+      items.push("Geoblocking is on but geo zone files have never loaded successfully on this host.");
+    }
+    return items;
+  }
+
+  function overviewAttentionCard(items) {
+    const wrap = document.createElement("div");
+    wrap.className = "card overview-attention-card";
+    if (!items.length) {
+      wrap.innerHTML = "<h3>Status</h3><p class=\"meta\">No warnings from this pass.</p>";
+      return wrap;
+    }
+    wrap.innerHTML =
+      "<h3>Needs attention</h3><ul class=\"attention-list\">" +
+      items.map((t) => "<li>" + escapeHtml(t) + "</li>").join("") +
+      "</ul>";
+    return wrap;
+  }
+
+  function overviewApplyStatusCard(evs) {
+    const wrap = document.createElement("div");
+    wrap.className = "card";
+    let line = "No recent reload or geo events in the last fetch.";
+    const list = evs || [];
+    for (const e of list) {
+      const ev = (e && e.event) || "";
+      if (
+        ev === "reload_ok" ||
+        ev === "reload_failed" ||
+        ev === "update_geo_ok" ||
+        ev === "update_geo_failed" ||
+        ev === "backup_ok" ||
+        ev === "restore_ok"
+      ) {
+        line = (e.ts || "") + " — " + ev + (e.detail ? " — " + e.detail : "");
+        break;
+      }
+    }
+    wrap.innerHTML = "<h3>Last apply activity</h3><p class=\"meta\">" + escapeHtml(line) + "</p>";
+    return wrap;
+  }
+
   async function refreshOverviewPage() {
     const seq = ++overviewRefreshSeq;
     const grid = $("overview-cards");
@@ -636,16 +826,23 @@
       } catch (e) {
         /* keep lastUIPrefs; overview still useful */
       }
-      const [o, met] = await Promise.all([
+      const [o, met, cfg, st, evPack] = await Promise.all([
         api("/v1/overview"),
         api("/v1/metrics/peers").catch(() => null),
+        api("/v1/config").catch(() => null),
+        api("/v1/stats").catch(() => null),
+        api("/v1/events?limit=40").catch(() => ({ events: [] })),
       ]);
+      const evs = (evPack && evPack.events) || [];
       if (seq !== overviewRefreshSeq) return;
       lastOverview = o;
+      lastConfig = cfg || lastConfig;
       apiConnectionOk = true;
       applyNavRestriction();
       setApiStatus(true);
       if (actionsCard) actionsCard.hidden = false;
+      grid.appendChild(overviewApplyStatusCard(evs));
+      grid.appendChild(overviewAttentionCard(buildOverviewAttentionItems(cfg, o, st, met)));
       grid.appendChild(elStat("WireGuard", o.wireguard_interface + " · UDP " + o.wireguard_listen_port));
       grid.appendChild(elStat("Public NIC", o.public_interface));
       const n = (o.forwarding_routes && o.forwarding_routes.length) || 0;
@@ -660,13 +857,24 @@
         )
       );
       grid.appendChild(elStat("Peers", String((o.peer_names || []).length)));
-      if (o.geo_last_success_utc) {
-        grid.appendChild(
-          elStat(
-            "Geo lists last loaded",
-            o.geo_last_success_utc + (o.geo_last_success_source ? " · " + o.geo_last_success_source : "")
-          )
-        );
+      if (o.geo_enabled) {
+        if (o.geo_last_success_utc) {
+          const d = Date.parse(o.geo_last_success_utc);
+          const stale = !isNaN(d) && Date.now() - d > GEO_STALE_MS;
+          const age = formatGeoAge(o.geo_last_success_utc);
+          grid.appendChild(
+            elStat(
+              "Geo zones freshness",
+              (stale ? "Stale — " : "OK — ") +
+                age +
+                (o.geo_last_success_source ? " · " + o.geo_last_success_source : "") +
+                " · " +
+                o.geo_last_success_utc
+            )
+          );
+        } else {
+          grid.appendChild(elStat("Geo zones freshness", "Never loaded — use Update geo lists"));
+        }
       }
       const cardLp = elStat("Peer latency (last ping)", "…");
       const card10 = elStat("Peer latency (last 10 min)", "…");
@@ -865,6 +1073,28 @@
     syncAdvancedSettingsToggle();
     syncGeoAdvancedFieldsVisibility();
     syncContentWidthSelect();
+    const notesEl = $("config-notes-body");
+    const notesMsg = $("config-notes-msg");
+    if (notesEl) {
+      if (notesMsg) {
+        notesMsg.textContent = "";
+        notesMsg.classList.remove("err");
+      }
+      try {
+        const n = await api("/v1/config/notes");
+        notesEl.value = (n.text != null && n.text !== undefined) ? String(n.text) : "";
+      } catch (e) {
+        if (notesMsg) {
+          notesMsg.textContent = String(e.message || e);
+          notesMsg.classList.add("err");
+        }
+        notesEl.value = "";
+      }
+    }
+    const bp = $("backup-path-input");
+    const rp = $("restore-path-input");
+    if (bp && !bp.value.trim()) bp.value = "/var/backups/evuproxy-config.tgz";
+    if (rp && !rp.value.trim()) rp.value = "/var/backups/evuproxy-config.tgz";
   }
 
   function refreshTokenPage() {
@@ -1118,8 +1348,16 @@
     if (wgStats === undefined) wgStats = lastPeerWgStats;
     if (pingByTunnel === undefined) pingByTunnel = lastPeerPingByTunnel;
     const wrap = $("peers-table-wrap");
-    if (!cfg || !cfg.peers) {
-      wrap.innerHTML = "<p class=\"hint\">No peers.</p>";
+    if (!cfg.peers || !cfg.peers.length) {
+      wrap.innerHTML =
+        "<div class=\"empty-state\"><span class=\"empty-state-msg\">No peers configured.</span> <button type=\"button\" class=\"btn-primary\" id=\"peers-empty-add\">Add peer</button></div>";
+      const addBtn = $("peers-empty-add");
+      if (addBtn) {
+        addBtn.addEventListener("click", () => {
+          const st = $("peers-add-start");
+          if (st) st.click();
+        });
+      }
       return;
     }
     const wgWarn =
@@ -2049,7 +2287,15 @@
     const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
 
     if (!routes.length) {
-      wrap.innerHTML = "<p class=\"hint\">No routes yet. Add one or edit <code class=\"inline\">forwarding.routes</code> in config.</p>";
+      wrap.innerHTML =
+        "<div class=\"empty-state\"><span class=\"empty-state-msg\">No forwarding routes yet.</span> <button type=\"button\" class=\"btn-primary\" id=\"routes-empty-add\">Add route</button></div>";
+      const addBtn = $("routes-empty-add");
+      if (addBtn) {
+        addBtn.addEventListener("click", () => {
+          const st = $("routes-add");
+          if (st) st.click();
+        });
+      }
       return;
     }
     const rows = routes
@@ -3091,8 +3337,10 @@
     const wgW = $("stats-wg-wrap");
     const nftW = $("stats-nft-wrap");
     setStatsMsg("");
+    lastMetricsPeersExport = null;
     try {
-      const st = await api("/v1/stats");
+      const [st, mp] = await Promise.all([api("/v1/stats"), api("/v1/metrics/peers").catch(() => null)]);
+      lastMetricsPeersExport = mp;
       setApiStatus(true);
       if (st.wireguard_dump_failed) {
         wgW.innerHTML =
@@ -3798,11 +4046,25 @@
     gSearch.addEventListener("input", () => applyPeersRoutesTableFilter());
   }
   document.addEventListener("keydown", (ev) => {
-    if (ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
-    const tag = (ev.target && ev.target.tagName) || "";
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ev.target?.isContentEditable) return;
-    ev.preventDefault();
-    if (gSearch) gSearch.focus();
+    if (ev.key === "Escape") {
+      closeShortcutsModal();
+      return;
+    }
+    if (ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      const tag = (ev.target && ev.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ev.target?.isContentEditable) return;
+      ev.preventDefault();
+      if (gSearch) gSearch.focus();
+      return;
+    }
+    const helpKey = ev.key === "?" || (ev.shiftKey && ev.key === "/");
+    if (helpKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      const tag = (ev.target && ev.target.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ev.target?.isContentEditable) return;
+      ev.preventDefault();
+      const sm = $("shortcuts-modal");
+      if (sm) sm.classList.remove("is-hidden");
+    }
   });
 
   const dlYaml = $("settings-download-yaml");
@@ -3938,6 +4200,241 @@
       setApiStatus(false, String(e.message || e));
     }
   });
+
+  const notesSaveBtn = $("config-notes-save");
+  if (notesSaveBtn) {
+    notesSaveBtn.addEventListener("click", async () => {
+      const msg = $("config-notes-msg");
+      const body = ($("config-notes-body") && $("config-notes-body").value) || "";
+      if (msg) {
+        msg.textContent = "";
+        msg.classList.remove("err");
+      }
+      try {
+        await api("/v1/config/notes", { method: "PUT", body: JSON.stringify({ text: body }) });
+        if (msg) msg.textContent = "Notes saved.";
+        setApiStatus(true);
+      } catch (e) {
+        if (msg) {
+          msg.textContent = String(e.message || e);
+          msg.classList.add("err");
+        }
+      }
+    });
+  }
+
+  const backupBtn = $("btn-backup-run");
+  if (backupBtn) {
+    backupBtn.addEventListener("click", async () => {
+      const msg = $("backup-restore-msg");
+      if (msg) {
+        msg.textContent = "";
+        msg.classList.remove("err");
+      }
+      let path = (($("backup-path-input") && $("backup-path-input").value) || "").trim();
+      if (!path) path = "/var/backups/evuproxy-config.tgz";
+      try {
+        const q = "?path=" + encodeURIComponent(path);
+        await api("/v1/backup" + q, { method: "POST" });
+        if (msg) msg.textContent = "Backup created: " + path;
+        setApiStatus(true);
+        void refreshOverviewEventsList();
+      } catch (e) {
+        if (msg) {
+          msg.textContent = String(e.message || e);
+          msg.classList.add("err");
+        }
+      }
+    });
+  }
+
+  const restoreBtn = $("btn-restore-run");
+  if (restoreBtn) {
+    restoreBtn.addEventListener("click", () => {
+      const path = (($("restore-path-input") && $("restore-path-input").value) || "").trim();
+      const msg = $("backup-restore-msg");
+      if (!path) {
+        if (msg) {
+          msg.textContent = "Set restore path (absolute, under the backup allow directory).";
+          msg.classList.add("err");
+        }
+        return;
+      }
+      openConfirmModal({
+        title: "Restore from backup?",
+        message:
+          "This replaces files under /etc/evuproxy from the archive. Reload the host if needed. Path: " + path,
+        confirmLabel: "Restore",
+        onConfirm: async () => {
+          closeConfirmModal();
+          if (msg) {
+            msg.textContent = "";
+            msg.classList.remove("err");
+          }
+          try {
+            const q = "?path=" + encodeURIComponent(path);
+            await api("/v1/restore" + q, { method: "POST" });
+            if (msg) msg.textContent = "Restore finished. Review config and use Reload if needed.";
+            setApiStatus(true);
+            invalidateUIPrefsCache();
+            lastConfig = await api("/v1/config");
+            void refreshOverviewPage();
+            void refreshOverviewEventsList();
+            refreshPendingBadge();
+          } catch (e) {
+            if (msg) {
+              msg.textContent = String(e.message || e);
+              msg.classList.add("err");
+            }
+          }
+        },
+      });
+    });
+  }
+
+  function closeShortcutsModal() {
+    const m = $("shortcuts-modal");
+    if (m) m.classList.add("is-hidden");
+  }
+
+  const shortcutsClose = $("shortcuts-modal-close");
+  if (shortcutsClose) shortcutsClose.addEventListener("click", closeShortcutsModal);
+  const shortcutsBackdrop = document.querySelector("#shortcuts-modal .modal-backdrop");
+  if (shortcutsBackdrop) shortcutsBackdrop.addEventListener("click", closeShortcutsModal);
+
+  function openConfigUploadModal() {
+    const m = $("config-upload-modal");
+    if (m) m.classList.remove("is-hidden");
+  }
+
+  function closeConfigUploadModal() {
+    configUploadDraft = null;
+    const m = $("config-upload-modal");
+    if (m) m.classList.add("is-hidden");
+    const am = $("config-upload-apply-msg");
+    if (am) {
+      am.textContent = "";
+      am.classList.remove("err");
+    }
+  }
+
+  const configUploadOpen = $("config-upload-open");
+  const configUploadFile = $("config-upload-file");
+  if (configUploadOpen && configUploadFile) {
+    configUploadOpen.addEventListener("click", () => configUploadFile.click());
+    configUploadFile.addEventListener("change", () => {
+      const f = configUploadFile.files && configUploadFile.files[0];
+      configUploadFile.value = "";
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = async () => {
+        const txt = String(r.result || "");
+        let parsed;
+        try {
+          parsed = JSON.parse(txt);
+        } catch (e) {
+          const mu = $("config-upload-msg");
+          if (mu) {
+            mu.textContent = "Invalid JSON: " + String(e.message || e);
+            mu.classList.add("err");
+          }
+          return;
+        }
+        if (!parsed || typeof parsed !== "object") {
+          const mu = $("config-upload-msg");
+          if (mu) {
+            mu.textContent = "JSON must be an object.";
+            mu.classList.add("err");
+          }
+          return;
+        }
+        let cur;
+        try {
+          cur = await api("/v1/config");
+        } catch (e) {
+          const mu = $("config-upload-msg");
+          if (mu) {
+            mu.textContent = String(e.message || e);
+            mu.classList.add("err");
+          }
+          return;
+        }
+        configUploadDraft = parsed;
+        const hint = $("config-upload-modal-hint");
+        const same = stableConfigJson(cur) === stableConfigJson(parsed);
+        if (hint) {
+          hint.textContent = same
+            ? "Uploaded JSON matches server config."
+            : "Preview below — Save replaces the server file (YAML comments are not preserved).";
+        }
+        const preC = $("config-upload-pre-current");
+        const preN = $("config-upload-pre-new");
+        if (preC) preC.textContent = JSON.stringify(cur, null, 2);
+        if (preN) preN.textContent = JSON.stringify(parsed, null, 2);
+        const um = $("config-upload-msg");
+        if (um) {
+          um.textContent = "";
+          um.classList.remove("err");
+        }
+        openConfigUploadModal();
+      };
+      r.readAsText(f);
+    });
+  }
+
+  const configUploadApply = $("config-upload-apply");
+  if (configUploadApply) {
+    configUploadApply.addEventListener("click", async () => {
+      const am = $("config-upload-apply-msg");
+      if (!configUploadDraft) {
+        if (am) {
+          am.textContent = "No file loaded.";
+          am.classList.add("err");
+        }
+        return;
+      }
+      if (am) {
+        am.textContent = "";
+        am.classList.remove("err");
+      }
+      try {
+        await api("/v1/config", { method: "PUT", body: JSON.stringify(configUploadDraft) });
+        lastConfig = configUploadDraft;
+        if (am) am.textContent = "Saved. Check Pending changes / Reload.";
+        closeConfigUploadModal();
+        const um = $("config-upload-msg");
+        if (um) um.textContent = "Config updated on server.";
+        refreshPendingBadge();
+      } catch (e) {
+        if (am) {
+          am.textContent = String(e.message || e);
+          am.classList.add("err");
+        }
+      }
+    });
+  }
+  const configUploadCancel = $("config-upload-cancel");
+  if (configUploadCancel) configUploadCancel.addEventListener("click", closeConfigUploadModal);
+  const configUploadBd = document.querySelector("#config-upload-modal .modal-backdrop");
+  if (configUploadBd) configUploadBd.addEventListener("click", closeConfigUploadModal);
+
+  const evCsv = $("overview-events-export-csv");
+  if (evCsv) {
+    evCsv.addEventListener("click", () => {
+      downloadTextFile("evuproxy-events.csv", eventsToCsv(lastEventsForExport), "text/csv;charset=utf-8");
+    });
+  }
+
+  const statsExport = $("stats-export-metrics-csv");
+  if (statsExport) {
+    statsExport.addEventListener("click", () => {
+      if (!lastMetricsPeersExport) {
+        setStatsMsg("Refresh Stats first (no metrics data).", true);
+        return;
+      }
+      downloadTextFile("evuproxy-metrics-peers.csv", metricsPeersToCsv(lastMetricsPeersExport), "text/csv;charset=utf-8");
+    });
+  }
 
   $("peers-refresh").addEventListener("click", refreshPeersPage);
   $("peers-add-start").addEventListener("click", async () => {

@@ -1956,3 +1956,79 @@ button.geo-tags-edit {
   text-align: right;
   min-width: 3rem;
 }
+
+/* Overview attention, shortcuts, config upload diff */
+.overview-events-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.overview-events-toolbar h3 {
+  margin: 0;
+}
+
+.shortcuts-list {
+  margin: 0.5rem 0 1rem;
+  padding-left: 1.25rem;
+}
+
+.shortcuts-list li {
+  margin: 0.35rem 0;
+}
+
+.kbd {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  background: #0d1117;
+}
+
+.config-upload-diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .config-upload-diff-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.code-block-tall {
+  max-height: 14rem;
+  overflow: auto;
+  margin: 0;
+}
+
+.overview-attention-card ul.attention-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.overview-attention-card li {
+  margin: 0.25rem 0;
+}
+
+.table-wrap tr.row-highlight {
+  outline: 1px solid #388bfd;
+  background: rgba(56, 139, 253, 0.08);
+}
+
+.empty-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0 0;
+}
+
+.empty-state-msg {
+  color: #8b949e;
+}

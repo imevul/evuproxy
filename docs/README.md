@@ -9,4 +9,4 @@ Operator-focused reference (the main [README](../README.md) is the quick entry p
 | [Security and privacy](security-and-privacy.md) | Telemetry, sensitive data, token storage, firewall / geo / reload notes |
 | [Third-party data](third-party-data.md) | IPDeny attribution, usage, Copyrights.txt |
 
-Project working notes (roadmap, spec) live under [`local_docs/`](../local_docs/).
+Project working notes (roadmap, spec) live under [`local_docs/`](../local_docs/). **Feature sprint task lists** (dated chunks aligned with the backlog plan) are in [`local_docs/features/`](../local_docs/features/).

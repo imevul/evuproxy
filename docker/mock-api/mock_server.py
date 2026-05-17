@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Set from MOCK_API_TOKEN in __main__ before serve_forever (required non-empty).
@@ -119,6 +120,9 @@ MOCK_PREFS: dict = {
     "wireguard_server_endpoint": "",
     "metrics_collection_enabled": True,
 }
+
+# Operator notes (mock — real API uses config-notes.txt).
+MOCK_CONFIG_NOTES = ""
 
 # Cumulative fake WG bytes per public key (GET /stats bumps; resets on process restart).
 _mock_wg_byte_totals: dict[str, int] = {}
@@ -486,7 +490,22 @@ def _mock_stats_response() -> dict:
         ),
         "wireguard_dump_failed": False,
         "wireguard_peers": _mock_wireguard_peers_payload(),
-        "nftables_counters": [],
+        "nftables_counters": [
+            {
+                "family": "inet",
+                "table": "evuproxy",
+                "line": "tcp dport 22 accept counter packets 12 bytes 900",
+                "packets": 12,
+                "bytes": 900,
+            },
+            {
+                "family": "ip",
+                "table": "evuproxy",
+                "line": "iifname eth0 tcp dport 443 counter packets 3 bytes 180",
+                "packets": 3,
+                "bytes": 180,
+            },
+        ],
     }
 
 
@@ -514,6 +533,18 @@ MOCK_EVENTS = [
         "detail": "config saved",
     },
 ]
+
+
+def _push_mock_event(event: str, detail: str) -> None:
+    global MOCK_EVENTS
+    MOCK_EVENTS.insert(
+        0,
+        {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "event": event,
+            "detail": detail,
+        },
+    )
 
 
 def _overview_from_config(cfg: dict) -> dict:
@@ -705,6 +736,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(200, {"events": list(MOCK_EVENTS)})
         if path == "/api/v1/geo/summary":
             return self._send_json(200, _geo_summary_mock(MOCK_CONFIG))
+        if path == "/api/v1/config/notes":
+            return self._send_json(200, {"text": MOCK_CONFIG_NOTES})
         if path == "/api/v1/config.yaml":
             data = (
                 "# mock config.yaml - use real API for on-disk bytes\n"
@@ -755,6 +788,16 @@ class Handler(BaseHTTPRequestHandler):
                     )
             MOCK_PREFS = cur
             return self._send_json(200, _normalize_prefs(MOCK_PREFS))
+        if path == "/api/v1/config/notes":
+            if _content_len(self) > MAX_JSON_SMALL:
+                return self._send_json(413, {"error": "request body too large"})
+            body = self._read_json_body(MAX_JSON_SMALL)
+            if not isinstance(body, dict):
+                return self._send_json(400, {"error": "invalid json body"})
+            global MOCK_CONFIG_NOTES
+            MOCK_CONFIG_NOTES = str(body.get("text") or "")
+            _push_mock_event("config_notes_saved", "notes updated")
+            return self._send_json(200, {"result": "saved"})
         if path != "/api/v1/config":
             return self._send_json(404, {"error": "not found"})
         if _content_len(self) > MAX_JSON_PUT:
@@ -774,7 +817,7 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self) -> None:
-        global MOCK_CONFIG, MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE
+        global MOCK_CONFIG, MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE, MOCK_EVENTS
         path = self.path.split("?", 1)[0]
         if not _auth_ok(self):
             return self._send_json(401, {"error": "unauthorized"})
@@ -882,15 +925,26 @@ class Handler(BaseHTTPRequestHandler):
             MOCK_APPLIED_SHA = _disk_config_sha()
             MOCK_CONFIG_BASELINE = copy.deepcopy(MOCK_CONFIG)
             _mock_record_applied_snapshot()
+            _push_mock_event("reload_ok", "reload")
             return self._send_json(200, {"result": "reloaded"})
         if path == "/api/v1/update-geo":
+            _push_mock_event("update_geo_ok", "update-geo")
             return self._send_json(200, {"result": "geo_updated"})
         if path == "/api/v1/backup":
-            return self._send_json(200, {"archive": "/var/backups/evuproxy-config.tgz"})
-        return self._send_json(
-            200,
-            {"result": "restored", "hint": "run evuproxy reload"},
-        )
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            apath = (qs.get("path") or [""])[0].strip()
+            if not apath:
+                apath = "/var/backups/evuproxy-config.tgz"
+            _push_mock_event("backup_ok", apath)
+            return self._send_json(200, {"archive": apath})
+        if path == "/api/v1/restore":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            rp = (qs.get("path") or [""])[0].strip()
+            if not rp:
+                return self._send_json(400, {"error": "path query required"})
+            _push_mock_event("restore_ok", rp)
+            return self._send_json(200, {"result": "restored", "hint": "run evuproxy reload"})
+        return self._send_json(500, {"error": "unreachable mock post"})
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
-.PHONY: all up down dev dev-fresh
+.PHONY: all up down dev dev-fresh playwright-deps playwright-visual
 
 # Run from the repository root. Requires Go 1.22+, Docker, and `docker compose` (v2).
+
+PLAYWRIGHT_DIR := devtools/playwright-visual
 
 all:
 	./scripts/rebuild.sh
@@ -21,3 +23,17 @@ dev-fresh:
 
 down:
 	docker compose -f docker-compose.dev.yml down
+
+# Playwright: npm deps + Chromium for admin UI screenshots (devtools/playwright-visual).
+playwright-deps:
+	cd $(PLAYWRIGHT_DIR) && npm ci && npx playwright install chromium
+
+playwright-visual:
+	@if [ -z "$$SKIP_PLAYWRIGHT_PING" ]; then \
+	  u="$${BASE_URL:-http://127.0.0.1:9080}"; \
+	  curl -sf --max-time 3 "$${u%/}/" >/dev/null || { \
+	    printf '%s\n' >&2 'playwright-visual: UI not reachable at '"$$u"' (hint: run `make up` from repo root first)'; \
+	    exit 1; \
+	  }; \
+	fi
+	cd $(PLAYWRIGHT_DIR) && npm run test

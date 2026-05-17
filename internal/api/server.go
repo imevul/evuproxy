@@ -27,6 +27,9 @@ import (
 	"github.com/imevul/evuproxy/internal/metrics"
 )
 
+// Limits JSON body for PUT /config/notes (text is capped separately in apply.SaveConfigNotes).
+const configNotesMaxBody = 264 << 10
+
 // metricsOpenQuietReason maps open failures to a coarse log label (no raw driver strings).
 // path is the metrics DB path used for this attempt; SQLite often returns SQLITE_CANTOPEN
 // instead of os.ErrNotExist when the file or parent directory is missing, so we also os.Stat(path).
@@ -142,6 +145,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/pending", s.auth(s.handlePending))
 	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
 	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
+	mux.HandleFunc("GET /api/v1/config/notes", s.auth(s.handleConfigNotesGet))
+	mux.HandleFunc("PUT /api/v1/config/notes", s.auth(s.handleConfigNotesPut))
 	mux.HandleFunc("GET /api/v1/metrics/peers", s.auth(s.handleMetricsPeers))
 	mux.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
 	mux.HandleFunc("GET /api/v1/about", s.auth(s.handleAbout))
@@ -335,6 +340,45 @@ func (s *Server) handlePreferencesPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jsonOK(w, reloaded)
+}
+
+func (s *Server) handleConfigNotesGet(w http.ResponseWriter, r *http.Request) {
+	text, err := apply.LoadConfigNotes(s.Config)
+	if err != nil {
+		s.logErr("config notes get", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not read notes")
+		return
+	}
+	s.jsonOK(w, map[string]string{"text": text})
+}
+
+func (s *Server) handleConfigNotesPut(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, configNotesMaxBody)
+	defer r.Body.Close()
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			s.jsonErr(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		s.logErr("config notes decode", err)
+		s.jsonErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if err := apply.SaveConfigNotes(s.Config, body.Text); err != nil {
+		s.logErr("config notes save", err)
+		if strings.Contains(err.Error(), "exceed max size") {
+			s.jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.jsonErr(w, http.StatusInternalServerError, "could not save notes")
+		return
+	}
+	s.emit(eventlog.Record{Event: "config_notes_saved", Detail: "notes updated"})
+	s.jsonOK(w, map[string]string{"result": "saved"})
 }
 
 func (s *Server) metricsDBPath() string {
