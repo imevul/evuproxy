@@ -2232,10 +2232,19 @@ button.geo-tags-edit {
 }
 
 .overview-geo-fresh-ts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.08rem;
   font-family: ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
-  word-break: break-all;
+}
+
+.overview-geo-fresh-ts-date,
+.overview-geo-fresh-ts-clock {
+  white-space: nowrap;
+  line-height: 1.25;
 }
 
 .overview-dash-latency .overview-latency-line {
@@ -2290,31 +2299,121 @@ button.geo-tags-edit {
 
 .overview-ping-spark-wrap {
   margin-top: 0.5rem;
-  flex: 1 1 auto;
-  min-height: 10rem;
+  flex: 0 1 auto;
+  min-height: 7rem;
   padding: 0.55rem 0.65rem;
   border: 1px solid #21262d;
   border-radius: 8px;
   background: #0d1117;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-width: 0;
 }
 
 .overview-ping-spark-empty {
   margin: 0.85rem 0;
   font-size: 0.82rem;
   text-align: center;
+  align-self: stretch;
+  width: 100%;
 }
 
-.overview-ping-spark {
+/* Grid: unstretched typography + SVG plot that expands to wrap width / row height */
+.overview-ping-spark-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: min-content auto auto;
+  gap: 0.35rem 0.55rem;
+  width: 100%;
+  flex: 0 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.overview-ping-spark-y-axis {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 4px 0 6px;
+  min-width: 2.75rem;
+  color: #8b949e;
+}
+
+.overview-ping-spark-y-axis-single {
+  justify-content: center;
+}
+
+.overview-ping-spark-y-tick {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.overview-ping-spark-plot-wrap {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  height: clamp(5.25rem, 12vmin + 3.5rem, 11rem);
+  max-height: 11rem;
+  position: relative;
+}
+
+.overview-ping-spark-plot {
   display: block;
   width: 100%;
-  flex: 1 1 0;
-  min-height: 8rem;
-  min-width: 0;
-  height: auto;
-  max-height: none;
-  vertical-align: middle;
+  height: 100%;
+  min-height: 0;
+}
+
+.overview-ping-spark-x-axis {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 0;
+}
+
+.overview-ping-spark-x-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: baseline;
+  column-gap: 0.65rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.62rem;
+  color: #8b949e;
+  line-height: 1.25;
+}
+
+.overview-ping-spark-x-start {
+  justify-self: start;
+}
+
+.overview-ping-spark-x-mid:empty {
+  display: none;
+}
+
+.overview-ping-spark-x-mid:not(:empty) {
+  justify-self: center;
+  grid-column: 2;
+}
+
+.overview-ping-spark-x-end {
+  justify-self: end;
+  grid-column: 3;
+}
+
+.overview-ping-spark-x-caption {
+  grid-column: 2;
+  grid-row: 3;
+  margin: 0;
+  padding: 0;
+  font-size: 0.56rem !important;
+  text-align: center;
+  color: #6e7681 !important;
 }
 
 .overview-dash-activity .attention-list {

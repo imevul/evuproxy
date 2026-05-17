@@ -61,6 +61,11 @@
   let logsRefreshSeq = 0;
 
   let overviewEventsTimer = null;
+  /** Refreshes the Peer ICMP latency card (chart + aggregates) while Overview is visible. */
+  let overviewLatencyPollTimer = null;
+  let overviewLatencyPollSeq = 0;
+  /** 1 min aligns with collector buckets; avoids doubling load with full overview refetch. */
+  const OVERVIEW_LATENCY_POLL_MS = 60 * 1000;
   let topologyPollTimer = null;
   /** Last events list from GET /v1/events (for CSV export). */
   let lastEventsForExport = [];
@@ -69,6 +74,9 @@
   const GEO_STALE_MS = 30 * 24 * 60 * 60 * 1000;
   /** Overview "Needs attention" when rolling 10m ICMP avg is at or above this (ms). */
   const OVERVIEW_LATENCY_LAST10M_WARN_MS = 500;
+  /** ICMP spark SVG geometry viewBox width/height (px). */
+  const PING_SPARK_VB_WIDTH = 640;
+  const PING_SPARK_VB_HEIGHT = 208;
   /** WireGuard transfer_rx+transfer_tx totals per public_key for topology edge animation */
   let topologyPrevPeerBytes = new Map();
   let topologyRefreshInFlight = false;
@@ -164,6 +172,40 @@
     a.download = filename;
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  function stopOverviewLatencyPolling() {
+    if (overviewLatencyPollTimer) {
+      clearInterval(overviewLatencyPollTimer);
+      overviewLatencyPollTimer = null;
+    }
+  }
+
+  function restartOverviewLatencyPolling() {
+    stopOverviewLatencyPolling();
+    overviewLatencyPollTimer = setInterval(() => {
+      void refreshOverviewLatencyCardOnly();
+    }, OVERVIEW_LATENCY_POLL_MS);
+  }
+
+  /** Replaces `#overview-latency-card` with fresh `/v1/metrics/peers` data (no full overview reload). */
+  async function refreshOverviewLatencyCardOnly() {
+    const seq = ++overviewLatencyPollSeq;
+    if (!token().trim()) return;
+    const ov = $("page-overview");
+    if (!ov || ov.hidden) return;
+    const card = $("overview-latency-card");
+    if (!card) return;
+    try {
+      const met = await api("/v1/metrics/peers");
+      if (seq !== overviewLatencyPollSeq) return;
+      const cur = $("overview-latency-card");
+      const parent = cur && cur.parentNode;
+      if (!parent || seq !== overviewLatencyPollSeq || cur !== card) return;
+      parent.replaceChild(overviewLatencyOverviewCard(met), cur);
+    } catch (_) {
+      /* retain last rendered chart while API is flaky */
+    }
   }
 
   function stopOverviewEventsPolling() {
@@ -555,8 +597,10 @@
     if (name === "overview") {
       await refreshOverviewPage();
       restartOverviewEventsPolling();
+      restartOverviewLatencyPolling();
     } else {
       stopOverviewEventsPolling();
+      stopOverviewLatencyPolling();
     }
     if (name === "settings") {
       await refreshSettingsPage();
@@ -714,6 +758,20 @@
     return days + " days ago";
   }
 
+  /** Split RFC3339 / ISO UTC instant for stacked overview labels (avoids wrapping mid-clock). */
+  function geoSuccessUtcParts(iso) {
+    const d = Date.parse(iso);
+    if (isNaN(d)) return null;
+    const t = new Date(d);
+    function pad(x) {
+      return String(x).padStart(2, "0");
+    }
+    return {
+      date: t.getUTCFullYear() + "-" + pad(t.getUTCMonth() + 1) + "-" + pad(t.getUTCDate()),
+      clock: pad(t.getUTCHours()) + ":" + pad(t.getUTCMinutes()) + ":" + pad(t.getUTCSeconds()) + " UTC",
+    };
+  }
+
   function pingSeriesFromDashboard(met) {
     const hist = met && met.dashboard && met.dashboard.ping_history;
     if (!Array.isArray(hist)) return [];
@@ -732,6 +790,14 @@
     return iso.length > 13 ? iso.slice(11, 16) + "Z" : iso;
   }
 
+  /** Average of first/last UTC instants formatted like `axisTimeLabelFromIso`. */
+  function axisMidLabelFromUtcIsoPair(fromIso, toIso) {
+    const a = Date.parse(fromIso);
+    const b = Date.parse(toIso);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return "";
+    return axisTimeLabelFromIso(new Date(Math.round((a + b) / 2)).toISOString());
+  }
+
   function pingPointsFromPingHistory(met) {
     const hist = met && met.dashboard && met.dashboard.ping_history;
     if (!Array.isArray(hist) || hist.length < 2) return null;
@@ -745,10 +811,12 @@
       ts.push(t);
     }
     if (ys.length < 2) return null;
+    const xMid = axisMidLabelFromUtcIsoPair(ts[0], ts[ts.length - 1]);
     return {
       ys: ys,
       xLeft: axisTimeLabelFromIso(ts[0]),
       xRight: axisTimeLabelFromIso(ts[ts.length - 1]),
+      xMid: xMid,
     };
   }
 
@@ -772,55 +840,18 @@
     const fromHist = pingPointsFromPingHistory(met);
     if (fromHist) return fromHist;
     const ys = pingSeriesForSpark(met);
-    if (ys.length < 2) return { ys: [], xLeft: "", xRight: "" };
-    return { ys: ys, xLeft: "Older", xRight: "Now" };
+    if (ys.length < 2) return { ys: [], xLeft: "", xRight: "", xMid: "" };
+    return { ys: ys, xLeft: "Older", xRight: "Now", xMid: "" };
   }
 
-  function svgPingSparkChart(model) {
-    const ns = "http://www.w3.org/2000/svg";
-    const series = model.ys;
-    const W = 640;
-    const H = 208;
-    const ml = 46;
-    const mr = 10;
-    const mt = 12;
-    const mb = 34;
-    const cw = W - ml - mr;
-    const ch = H - mt - mb;
-    const xl = ml;
-    const xr = W - mr;
-    const yt = mt;
-    const yb = H - mb;
-
-    const svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
-    svg.setAttribute("class", "overview-ping-spark");
-    svg.setAttribute("preserveAspectRatio", "none");
-    svg.setAttribute("focusable", "false");
-    const aria =
-      "Average peer latency spark: " +
-      series.length +
-      " buckets from " +
-      (model.xLeft || "?") +
-      " to " +
-      (model.xRight || "?");
-    svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", aria);
-
-    const title = document.createElementNS(ns, "title");
-    title.textContent = aria;
-    svg.appendChild(title);
-
+  function pingSparkScaledRange(series) {
     let vmin = Infinity;
     let vmax = -Infinity;
     for (const v of series) {
       vmin = Math.min(vmin, v);
       vmax = Math.max(vmax, v);
     }
-    if (!Number.isFinite(vmin) || !Number.isFinite(vmax)) {
-      svg.appendChild(document.createComment("empty-spark"));
-      return svg;
-    }
+    if (!Number.isFinite(vmin) || !Number.isFinite(vmax)) return null;
     let span = vmax - vmin;
     if (span <= 1e-9) {
       vmin = Math.max(0, vmin - 2);
@@ -832,6 +863,39 @@
       vmax += padV;
       span = vmax - vmin;
     }
+    return { vmin: vmin, vmax: vmax, span: span };
+  }
+
+  /** Plot SVG only (axes labels live in HTML so width/height can stretch independently). */
+  function buildPingSparkPlotSvg(model, rng, opts) {
+    opts = opts || {};
+    const showYMidTick = opts.showYMidTick === true;
+    const ns = "http://www.w3.org/2000/svg";
+    const series = model.ys;
+    const vmin = rng.vmin;
+    const vmax = rng.vmax;
+    const span = rng.span;
+
+    const W = PING_SPARK_VB_WIDTH;
+    const H = PING_SPARK_VB_HEIGHT;
+    const ml = 14;
+    const mr = 10;
+    const mt = 12;
+    const mb = 10;
+    const cw = W - ml - mr;
+    const ch = H - mt - mb;
+    const xl = ml;
+    const xr = W - mr;
+    const yt = mt;
+    const yb = H - mb;
+
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    svg.setAttribute("class", "overview-ping-spark-plot");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
 
     const n = series.length;
     function bx(i) {
@@ -841,7 +905,6 @@
       return yt + (1 - (vv - vmin) / span) * ch;
     }
 
-    /* Grid */
     const gridGrp = document.createElementNS(ns, "g");
     gridGrp.setAttribute("class", "overview-ping-spark-grid");
     for (let g = 1; g <= 3; g++) {
@@ -853,11 +916,11 @@
       hl.setAttribute("y2", String(gy));
       hl.setAttribute("stroke", "#21262d");
       hl.setAttribute("stroke-width", "1");
+      hl.setAttribute("vector-effect", "non-scaling-stroke");
       gridGrp.appendChild(hl);
     }
     svg.appendChild(gridGrp);
 
-    /* Area + line (under axes so frame reads on top) */
     let poly = bx(0) + "," + yb + " ";
     for (let i = 0; i < n; i++) {
       poly += bx(i) + "," + byVal(series[i]) + " ";
@@ -879,15 +942,16 @@
     pl.setAttribute("stroke-width", "2");
     pl.setAttribute("stroke-linecap", "round");
     pl.setAttribute("stroke-linejoin", "round");
+    pl.setAttribute("vector-effect", "non-scaling-stroke");
     pl.setAttribute("points", linePts.trim());
     svg.appendChild(pl);
 
-    /* Axes */
     const axY = document.createElementNS(ns, "path");
     axY.setAttribute("d", "M " + xl + " " + yt + " V " + yb + "");
     axY.setAttribute("fill", "none");
     axY.setAttribute("stroke", "#30363d");
     axY.setAttribute("stroke-width", "1");
+    axY.setAttribute("vector-effect", "non-scaling-stroke");
     svg.appendChild(axY);
 
     const axX = document.createElementNS(ns, "path");
@@ -895,91 +959,128 @@
     axX.setAttribute("fill", "none");
     axX.setAttribute("stroke", "#30363d");
     axX.setAttribute("stroke-width", "1");
+    axX.setAttribute("vector-effect", "non-scaling-stroke");
     svg.appendChild(axX);
 
-    /* Y ticks + labels */
-    const yFmtTop = Math.round(vmax);
-    const yFmtBot = Math.round(vmin);
     const tickLen = 4;
     const tyTop = document.createElementNS(ns, "path");
     tyTop.setAttribute("d", "M " + (xl - tickLen) + " " + yt + " H " + xl + "");
     tyTop.setAttribute("stroke", "#30363d");
     tyTop.setAttribute("stroke-width", "1");
+    tyTop.setAttribute("vector-effect", "non-scaling-stroke");
     svg.appendChild(tyTop);
 
     const tyBot = document.createElementNS(ns, "path");
     tyBot.setAttribute("d", "M " + (xl - tickLen) + " " + yb + " H " + xl + "");
     tyBot.setAttribute("stroke", "#30363d");
     tyBot.setAttribute("stroke-width", "1");
+    tyBot.setAttribute("vector-effect", "non-scaling-stroke");
     svg.appendChild(tyBot);
 
-    if (yFmtTop === yFmtBot) {
-      const lblOne = document.createElementNS(ns, "text");
-      lblOne.setAttribute("x", String(xl - 6));
-      lblOne.setAttribute("y", String(yt + ch / 2));
-      lblOne.setAttribute("fill", "#8b949e");
-      lblOne.setAttribute("font-size", "11");
-      lblOne.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
-      lblOne.setAttribute("text-anchor", "end");
-      lblOne.setAttribute("dominant-baseline", "middle");
-      lblOne.textContent = yFmtTop + " ms";
-      svg.appendChild(lblOne);
-    } else {
-      const lblTop = document.createElementNS(ns, "text");
-      lblTop.setAttribute("x", String(xl - 6));
-      lblTop.setAttribute("y", String(yt + 10));
-      lblTop.setAttribute("fill", "#8b949e");
-      lblTop.setAttribute("font-size", "11");
-      lblTop.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
-      lblTop.setAttribute("text-anchor", "end");
-      lblTop.textContent = yFmtTop + " ms";
-      svg.appendChild(lblTop);
-
-      const lblBot = document.createElementNS(ns, "text");
-      lblBot.setAttribute("x", String(xl - 6));
-      lblBot.setAttribute("y", String(yb - 4));
-      lblBot.setAttribute("fill", "#8b949e");
-      lblBot.setAttribute("font-size", "11");
-      lblBot.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
-      lblBot.setAttribute("text-anchor", "end");
-      lblBot.textContent = yFmtBot + " ms";
-      svg.appendChild(lblBot);
+    if (showYMidTick) {
+      const yMidPx = yt + ch / 2;
+      const tyMid = document.createElementNS(ns, "path");
+      tyMid.setAttribute("d", "M " + (xl - tickLen) + " " + yMidPx + " H " + xl + "");
+      tyMid.setAttribute("stroke", "#30363d");
+      tyMid.setAttribute("stroke-width", "1");
+      tyMid.setAttribute("vector-effect", "non-scaling-stroke");
+      svg.appendChild(tyMid);
     }
-
-    /* X labels */
-    if (model.xLeft) {
-      const txl = document.createElementNS(ns, "text");
-      txl.setAttribute("x", String(xl));
-      txl.setAttribute("y", String(H - 12));
-      txl.setAttribute("fill", "#8b949e");
-      txl.setAttribute("font-size", "10");
-      txl.setAttribute("font-family", "ui-monospace, monospace");
-      txl.textContent = model.xLeft;
-      svg.appendChild(txl);
-    }
-    if (model.xRight) {
-      const txr = document.createElementNS(ns, "text");
-      txr.setAttribute("x", String(xr));
-      txr.setAttribute("y", String(H - 12));
-      txr.setAttribute("fill", "#8b949e");
-      txr.setAttribute("font-size", "10");
-      txr.setAttribute("font-family", "ui-monospace, monospace");
-      txr.setAttribute("text-anchor", "end");
-      txr.textContent = model.xRight;
-      svg.appendChild(txr);
-    }
-
-    const xAxisHint = document.createElementNS(ns, "text");
-    xAxisHint.setAttribute("x", String((xl + xr) / 2));
-    xAxisHint.setAttribute("y", String(H - 2));
-    xAxisHint.setAttribute("fill", "#6e7681");
-    xAxisHint.setAttribute("font-size", "9");
-    xAxisHint.setAttribute("font-family", "ui-sans-serif, system-ui, sans-serif");
-    xAxisHint.setAttribute("text-anchor", "middle");
-    xAxisHint.textContent = "Time (UTC)";
-    svg.appendChild(xAxisHint);
 
     return svg;
+  }
+
+  /** HTML grid + unstretched typography; plot layer fills allocated height. */
+  function domPingSparkChart(model) {
+    const rng = pingSparkScaledRange(model.ys);
+    if (!rng) {
+      const err = document.createElement("div");
+      err.className = "overview-ping-spark-empty meta";
+      err.textContent = "Could not derive latency axis range.";
+      return err;
+    }
+
+    const yFmtTop = Math.round(rng.vmax);
+    const yFmtBot = Math.round(rng.vmin);
+    const yFmtMid = Math.round((rng.vmin + rng.vmax) / 2);
+    const showYMid = yFmtTop !== yFmtBot && yFmtMid !== yFmtTop && yFmtMid !== yFmtBot;
+
+    let ariaLatMid = "";
+    if (showYMid) ariaLatMid = "; latency midpoint ~" + yFmtMid + " ms";
+
+    const aria =
+      "Average peer latency spark: " +
+      model.ys.length +
+      " buckets from " +
+      (model.xLeft || "?") +
+      " to " +
+      (model.xRight || "?") +
+      (model.xMid ? ", time midpoint " + model.xMid : "") +
+      ariaLatMid;
+
+    const shell = document.createElement("div");
+    shell.className = "overview-ping-spark-layout";
+    shell.setAttribute("role", "img");
+    shell.setAttribute("aria-label", aria);
+
+    const yAxis = document.createElement("div");
+    yAxis.className = "overview-ping-spark-y-axis";
+    yAxis.setAttribute("aria-hidden", "true");
+
+    function yLbl(ms) {
+      const el = document.createElement("div");
+      el.className = "overview-ping-spark-y-tick";
+      el.textContent = ms + " ms";
+      return el;
+    }
+
+    if (yFmtTop === yFmtBot) {
+      yAxis.classList.add("overview-ping-spark-y-axis-single");
+      yAxis.appendChild(yLbl(yFmtTop));
+    } else {
+      yAxis.appendChild(yLbl(yFmtTop));
+      if (showYMid) yAxis.appendChild(yLbl(yFmtMid));
+      yAxis.appendChild(yLbl(yFmtBot));
+    }
+
+    const plotWrap = document.createElement("div");
+    plotWrap.className = "overview-ping-spark-plot-wrap";
+    plotWrap.appendChild(buildPingSparkPlotSvg(model, rng, { showYMidTick: showYMid }));
+
+    const xAxis = document.createElement("div");
+    xAxis.className = "overview-ping-spark-x-axis meta";
+    xAxis.setAttribute("aria-hidden", "true");
+
+    const xInner = document.createElement("div");
+    xInner.className = "overview-ping-spark-x-row";
+
+    const xStart = document.createElement("span");
+    xStart.className = "overview-ping-spark-x-start";
+    xStart.textContent = model.xLeft || "";
+
+    const xMid = document.createElement("span");
+    xMid.className = "overview-ping-spark-x-mid";
+    xMid.textContent = model.xMid || "";
+
+    const xEnd = document.createElement("span");
+    xEnd.className = "overview-ping-spark-x-end";
+    xEnd.textContent = model.xRight || "";
+
+    xInner.appendChild(xStart);
+    xInner.appendChild(xMid);
+    xInner.appendChild(xEnd);
+    xAxis.appendChild(xInner);
+
+    const xCap = document.createElement("div");
+    xCap.className = "overview-ping-spark-x-caption meta";
+    xCap.textContent = "Time (UTC)";
+    xCap.setAttribute("aria-hidden", "true");
+
+    shell.appendChild(yAxis);
+    shell.appendChild(plotWrap);
+    shell.appendChild(xAxis);
+    shell.appendChild(xCap);
+    return shell;
   }
 
   function appendPingSparkInto(containerEl, met) {
@@ -997,11 +1098,12 @@
       containerEl.appendChild(p);
       return;
     }
-    containerEl.appendChild(svgPingSparkChart(model));
+    containerEl.appendChild(domPingSparkChart(model));
   }
 
   function overviewLatencyOverviewCard(met) {
     const wrap = document.createElement("div");
+    wrap.id = "overview-latency-card";
     wrap.className = "card overview-dash-card overview-dash-latency";
     wrap.setAttribute("role", "group");
     wrap.setAttribute("aria-label", "Peer ICMP latency summary and rolling average chart");
@@ -1134,10 +1236,23 @@
         meta.appendChild(srcSpan);
       }
 
-      const tsSpan = document.createElement("span");
-      tsSpan.className = "overview-geo-fresh-ts";
-      tsSpan.textContent = iso;
-      meta.appendChild(tsSpan);
+      const tsWrap = document.createElement("div");
+      tsWrap.className = "overview-geo-fresh-ts";
+      tsWrap.setAttribute("title", iso);
+      const utcParts = geoSuccessUtcParts(iso);
+      if (utcParts) {
+        const ds = document.createElement("span");
+        ds.className = "overview-geo-fresh-ts-date";
+        ds.textContent = utcParts.date;
+        const cs = document.createElement("span");
+        cs.className = "overview-geo-fresh-ts-clock";
+        cs.textContent = utcParts.clock;
+        tsWrap.appendChild(ds);
+        tsWrap.appendChild(cs);
+      } else {
+        tsWrap.textContent = iso;
+      }
+      meta.appendChild(tsWrap);
 
       root.appendChild(tag);
       root.appendChild(ageLine);
