@@ -43,6 +43,11 @@ func validPeerName(name string) error {
 	return nil
 }
 
+// ValidateCountryCode checks a geo country code (ISO 3166-1 alpha-2).
+func ValidateCountryCode(cc string) error {
+	return validateGeoCountryCode(cc)
+}
+
 func validateGeoCountryCode(cc string) error {
 	cc = strings.ToLower(strings.TrimSpace(cc))
 	if len(cc) != 2 || cc[0] < 'a' || cc[0] > 'z' || cc[1] < 'a' || cc[1] > 'z' {
@@ -164,6 +169,72 @@ func ValidateSourceAllowCIDRs(routeIndex int, cidrs []string) error {
 		}
 		if ip := net.ParseIP(s); ip == nil || ip.To4() == nil {
 			return fmt.Errorf("forwarding.routes[%d]: source_allow_cidrs: invalid IPv4 %q", routeIndex, s)
+		}
+	}
+	return nil
+}
+
+// ValidateSourceDenyCIDRs checks source_deny_cidrs (routeIndex -1 = forwarding global).
+func ValidateSourceDenyCIDRs(routeIndex int, cidrs []string) error {
+	if len(cidrs) == 0 {
+		return nil
+	}
+	if len(cidrs) > MaxSourceAllowCIDRs {
+		if routeIndex < 0 {
+			return fmt.Errorf("forwarding.source_deny_cidrs: at most %d entries", MaxSourceAllowCIDRs)
+		}
+		return fmt.Errorf("forwarding.routes[%d]: source_deny_cidrs: at most %d entries", routeIndex, MaxSourceAllowCIDRs)
+	}
+	for _, raw := range cidrs {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			if routeIndex < 0 {
+				return fmt.Errorf("forwarding.source_deny_cidrs: empty entry")
+			}
+			return fmt.Errorf("forwarding.routes[%d]: source_deny_cidrs: empty entry", routeIndex)
+		}
+		if strings.Contains(s, "/") {
+			ip, _, err := net.ParseCIDR(s)
+			if err != nil || ip == nil || ip.To4() == nil {
+				if routeIndex < 0 {
+					return fmt.Errorf("forwarding.source_deny_cidrs: invalid IPv4 CIDR %q", s)
+				}
+				return fmt.Errorf("forwarding.routes[%d]: source_deny_cidrs: invalid IPv4 CIDR %q", routeIndex, s)
+			}
+			continue
+		}
+		if ip := net.ParseIP(s); ip == nil || ip.To4() == nil {
+			if routeIndex < 0 {
+				return fmt.Errorf("forwarding.source_deny_cidrs: invalid IPv4 %q", s)
+			}
+			return fmt.Errorf("forwarding.routes[%d]: source_deny_cidrs: invalid IPv4 %q", routeIndex, s)
+		}
+	}
+	return nil
+}
+
+// ValidateBreakGlassCIDRs checks geo.break_glass_cidrs.
+func ValidateBreakGlassCIDRs(cidrs []string) error {
+	if len(cidrs) == 0 {
+		return nil
+	}
+	if len(cidrs) > MaxSourceAllowCIDRs {
+		return fmt.Errorf("geo.break_glass_cidrs: at most %d entries", MaxSourceAllowCIDRs)
+	}
+	for _, raw := range cidrs {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			return fmt.Errorf("geo.break_glass_cidrs: empty entry")
+		}
+		if strings.Contains(s, "/") {
+			ip, _, err := net.ParseCIDR(s)
+			if err != nil || ip == nil || ip.To4() == nil {
+				return fmt.Errorf("geo.break_glass_cidrs: invalid IPv4 CIDR %q", s)
+			}
+			continue
+		}
+		if ip := net.ParseIP(s); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("geo.break_glass_cidrs: invalid IPv4 %q", s)
 		}
 	}
 	return nil

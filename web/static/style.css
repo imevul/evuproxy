@@ -748,6 +748,24 @@ code.inline {
   display: none !important;
 }
 
+.route-port-map-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.route-port-map-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.route-port-map-row .meta {
+  margin: 0;
+}
+
 button {
   padding: 0.45rem 0.85rem;
   border-radius: 6px;

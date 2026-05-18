@@ -68,6 +68,16 @@
         <div id="overview-cards" class="card-grid overview-cards-compact"></div>
         <div id="overview-actions-card" class="card actions-card">
           <h3>Apply</h3>
+          <div class="field overview-maintenance-field">
+            <div class="toggle-switch-row">
+              <span class="toggle-switch-text" id="overview-maintenance-desc">Maintenance mode</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="overview-maintenance-toggle" class="toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" />
+                <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+              </label>
+            </div>
+            <p class="meta">When on, public forwards are omitted until you turn this off and reload.</p>
+          </div>
           <div class="btn-row">
             <button type="button" class="btn-primary" id="btn-reload">Reload config</button>
             <button type="button" class="btn-primary" id="btn-geo">Update geo lists</button>
@@ -469,6 +479,33 @@
                 <textarea id="route-f-source-allow" rows="3" placeholder="Leave empty for any source, or e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
                 <span class="meta">Comma or whitespace separated. Applied on <strong>Apply to host</strong>; wrong entries can block legitimate traffic.</span>
               </div>
+              <div id="route-advanced-fields" class="route-advanced-fields" hidden>
+                <div class="field">
+                  <label for="route-f-source-deny">Source denylist <span class="meta">(optional, WAN IPv4)</span></label>
+                  <textarea id="route-f-source-deny" rows="2" placeholder="e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
+                  <span class="meta">Comma or whitespace separated. Matched sources are dropped for this route before geo and forwarding.</span>
+                </div>
+                <div class="field">
+                  <span class="field-label">Port mapping</span>
+                  <select id="route-f-port-map-mode">
+                    <option value="same">Same as public</option>
+                    <option value="one">One internal port for all</option>
+                    <option value="table">Per-entry map</option>
+                  </select>
+                  <input type="text" id="route-f-internal-one" class="is-hidden" autocomplete="off" />
+                  <div id="route-port-map-rows" class="route-port-map-rows is-hidden"></div>
+                </div>
+                <div class="field">
+                  <label for="route-f-geo-mode">Route geo</label>
+                  <select id="route-f-geo-mode">
+                    <option value="inherit">Inherit global</option>
+                    <option value="off">Off</option>
+                    <option value="custom">Custom countries</option>
+                  </select>
+                  <input type="text" id="route-f-geo-countries" class="is-hidden" autocomplete="off" />
+                </div>
+              </div>
+              <p id="route-advanced-teaser" class="hint meta route-advanced-teaser">Advanced route options need <a href="#/settings">Advanced mode</a>.</p>
               <div class="field">
                 <div class="toggle-switch-row">
                   <span class="toggle-switch-label-group">
@@ -685,6 +722,14 @@
               <label for="geo-f-zone-dir">Zone directory on host</label>
               <input type="text" id="geo-f-zone-dir" placeholder="/etc/evuproxy/geo-zones" autocomplete="off" />
               <span class="meta">Directory for <code class="inline">.zone</code> files (required when enabled).</span>
+            </div>
+            <div class="field">
+              <label for="geo-f-break-glass">Break-glass CIDRs <span class="meta">(bypass geo)</span></label>
+              <textarea id="geo-f-break-glass" rows="2" autocomplete="off" spellcheck="false"></textarea>
+            </div>
+            <div class="field">
+              <label for="geo-f-global-deny">Global forward denylist</label>
+              <textarea id="geo-f-global-deny" rows="2" autocomplete="off" spellcheck="false"></textarea>
             </div>
             <div class="field">
               <div class="toggle-switch-row">

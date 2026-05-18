@@ -72,10 +72,10 @@ func TestNFTablesRoutesGeoBlockMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport { 25565 } drop") {
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport 25565 drop") {
 		t.Fatalf("expected block-first geo drop before dnat: %s", s)
 	}
-	if !strings.Contains(s, "tcp dport { 25565 } dnat to 10.100.0.2") {
+	if !strings.Contains(s, "tcp dport 25565 dnat to 10.100.0.2") {
 		t.Fatal("expected dnat after block rule")
 	}
 }
@@ -127,10 +127,10 @@ func TestNFTablesRoutesBothProtosOneRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s, "tcp dport { 19132 } dnat to 10.100.0.2") {
+	if !strings.Contains(s, "tcp dport 19132 dnat to 10.100.0.2") {
 		t.Fatalf("missing tcp dnat: %s", s)
 	}
-	if !strings.Contains(s, "udp dport { 19132 } dnat to 10.100.0.2") {
+	if !strings.Contains(s, "udp dport 19132 dnat to 10.100.0.2") {
 		t.Fatalf("missing udp dnat: %s", s)
 	}
 }
@@ -386,7 +386,7 @@ func TestNFTablesRouteSourceAllowlist(t *testing.T) {
 	if !strings.Contains(s, "ip saddr @route_src_0 ip daddr 10.100.0.2 tcp dport { 25565 } accept") {
 		t.Fatalf("expected forward rule with source set: %s", s)
 	}
-	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport { 25565 } dnat to 10.100.0.2") {
+	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport 25565 dnat to 10.100.0.2") {
 		t.Fatalf("expected dnat with source set: %s", s)
 	}
 }
@@ -420,7 +420,7 @@ func TestNFTablesRouteSourceAllowlistGeoAllow(t *testing.T) {
 	if !strings.Contains(s, "ip saddr @route_src_0 ip saddr @geo_v4 tcp dport { 443 } accept") {
 		t.Fatalf("expected geo+source on input: %s", s)
 	}
-	if !strings.Contains(s, "ip saddr @route_src_0 ip saddr @geo_v4 tcp dport { 443 } dnat to 10.100.0.2") {
+	if !strings.Contains(s, "ip saddr @route_src_0 ip saddr @geo_v4 tcp dport 443 dnat to 10.100.0.2") {
 		t.Fatalf("expected geo+source on dnat: %s", s)
 	}
 }
@@ -451,10 +451,10 @@ func TestNFTablesRouteSourceAllowlistGeoBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport { 443 } drop") {
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport 443 drop") {
 		t.Fatalf("expected geo block drop on dnat chain: %s", s)
 	}
-	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport { 443 } dnat to 10.100.0.2") {
+	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport 443 dnat to 10.100.0.2") {
 		t.Fatalf("expected whitelist-only dnat after geo drop: %s", s)
 	}
 	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport { 443 } limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop") {
@@ -462,5 +462,141 @@ func TestNFTablesRouteSourceAllowlistGeoBlock(t *testing.T) {
 	}
 	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport { 443 } accept") {
 		t.Fatalf("expected source allow on input after geo drop: %s", s)
+	}
+}
+
+func TestNFTablesPortMapping(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.Routes = []config.ForwardRoute{{
+		Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2",
+		PortMaps: []config.PortMap{{Public: "25565", Internal: "19132"}},
+	}}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "tcp dport 25565 dnat to 10.100.0.2:19132") {
+		t.Fatalf("expected mapped dnat: %s", s)
+	}
+}
+
+func TestNFTablesMaintenanceMode(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.MaintenanceMode = true
+	c.Forwarding.Routes = []config.ForwardRoute{{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"}}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s, "dnat to 10.100.0.2") {
+		t.Fatal("maintenance should omit dnat rules")
+	}
+}
+
+func TestNFTablesBreakGlassAndGlobalDeny(t *testing.T) {
+	c := baseNFTConfig()
+	c.Geo.Enabled = true
+	c.Geo.Mode = "allow"
+	c.Geo.SetName = "geo_v4"
+	c.Geo.Countries = []string{"no"}
+	c.Geo.ZoneDir = "/z"
+	c.Geo.BreakGlassCIDRs = []string{"203.0.113.5"}
+	c.Forwarding.SourceDenyCIDRs = []string{"198.51.100.0/24"}
+	c.Forwarding.Routes = []config.ForwardRoute{{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"}}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "set break_glass_v4") || !strings.Contains(s, "set global_src_deny_v4") {
+		t.Fatalf("expected policy sets: %s", s)
+	}
+	globalDrop := "ip saddr @global_src_deny_v4 tcp dport 25565 drop"
+	breakDNAT := "ip saddr @break_glass_v4 tcp dport 25565 dnat"
+	if !strings.Contains(s, globalDrop) {
+		t.Fatal("expected global deny drop before DNAT")
+	}
+	if !strings.Contains(s, breakDNAT) {
+		t.Fatal("expected break-glass dnat after geo allow")
+	}
+	if strings.Index(s, globalDrop) > strings.Index(s, breakDNAT) {
+		t.Fatal("global deny must be evaluated before break-glass dnat")
+	}
+}
+
+func TestNFTablesPerRouteDenyBeforeDnat(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.Routes = []config.ForwardRoute{{
+		Proto:           "tcp",
+		Ports:           []string{"25565"},
+		TargetIP:        "10.100.0.2",
+		SourceDenyCIDRs: []string{"198.51.100.0/24"},
+	}}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deny := "ip saddr @route_deny_0 tcp dport 25565 drop"
+	dnat := "tcp dport 25565 dnat to 10.100.0.2"
+	if !strings.Contains(s, deny) || !strings.Contains(s, dnat) {
+		t.Fatalf("expected deny and dnat: %s", s)
+	}
+	if strings.Index(s, deny) > strings.Index(s, dnat) {
+		t.Fatal("per-route deny must precede DNAT")
+	}
+}
+
+func TestNFTablesGeoBlockBreakGlassExcludesGeoDrop(t *testing.T) {
+	c := baseNFTConfig()
+	c.Geo.Enabled = true
+	c.Geo.Mode = "block"
+	c.Geo.SetName = "geo_v4"
+	c.Geo.Countries = []string{"no"}
+	c.Geo.ZoneDir = "/z"
+	c.Geo.BreakGlassCIDRs = []string{"203.0.113.5"}
+	c.Forwarding.Routes = []config.ForwardRoute{{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"}}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "ip saddr @geo_v4 ip saddr != @break_glass_v4 tcp dport 25565 drop"
+	if !strings.Contains(s, want) {
+		t.Fatalf("expected geo block with break-glass exclusion: %s", s)
+	}
+}
+
+func TestNFTablesRouteGeoOffSkipsGeo(t *testing.T) {
+	c := baseNFTConfig()
+	c.Geo.Enabled = true
+	c.Geo.Mode = "allow"
+	c.Geo.SetName = "geo_v4"
+	c.Geo.Countries = []string{"no"}
+	c.Geo.ZoneDir = "/z"
+	c.Forwarding.Routes = []config.ForwardRoute{{
+		Proto:    "tcp",
+		Ports:    []string{"25565"},
+		TargetIP: "10.100.0.2",
+		GeoMode:  config.RouteGeoOff,
+	}}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s, "ip saddr @geo_v4 tcp dport 25565 dnat") {
+		t.Fatal("geo_mode off should not reference geo set on route dnat")
+	}
+	if !strings.Contains(s, "tcp dport 25565 dnat to 10.100.0.2") {
+		t.Fatal("expected open dnat when geo off")
+	}
+}
+
+func baseNFTConfig() *config.Config {
+	return &config.Config{
+		WireGuard: config.WireGuard{
+			Interface: "wg0", ListenPort: 51830, PrivateKeyFile: "/k", Address: "10.100.0.1/24",
+		},
+		Network:    config.Network{PublicInterface: "eth0"},
+		Geo:        config.Geo{Enabled: false},
+		Forwarding: config.Forwarding{},
+		Peers:      []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},
 	}
 }

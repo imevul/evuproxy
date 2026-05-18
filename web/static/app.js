@@ -1421,6 +1421,15 @@
     if (o && o.geo_enabled && !o.geo_last_success_utc) {
       items.push("Geoblocking is on but geo zone files have never loaded successfully on this host.");
     }
+    if (cfg && cfg.forwarding && cfg.forwarding.maintenance_mode) {
+      items.push("Maintenance mode is on — public forwards are disabled until you turn it off and reload.");
+    }
+    for (let i = 0; i < routes.length; i++) {
+      const r = routes[i];
+      if (r.source_allow_cidrs && r.source_allow_cidrs.length) {
+        items.push("Route #" + (i + 1) + " restricts sources to an allowlist.");
+      }
+    }
     return items;
   }
 
@@ -1464,6 +1473,8 @@
       if (seq !== overviewRefreshSeq) return;
       lastOverview = o;
       lastConfig = cfg || lastConfig;
+      const maint = $("overview-maintenance-toggle");
+      if (maint && cfg && cfg.forwarding) maint.checked = !!cfg.forwarding.maintenance_mode;
       apiConnectionOk = true;
       applyNavRestriction();
       setApiStatus(true);
@@ -1553,6 +1564,7 @@
     }
     syncAdvancedSettingsToggle();
     syncGeoAdvancedFieldsVisibility();
+    syncRouteAdvancedFieldsVisibility();
   }
 
   function syncAdvancedSettingsToggle() {
@@ -1568,6 +1580,100 @@
     if (!fields || !teaser) return;
     fields.hidden = !adv;
     teaser.hidden = adv;
+  }
+
+  function syncRouteAdvancedFieldsVisibility() {
+    const adv = advancedSettingsEnabled();
+    const fields = $("route-advanced-fields");
+    const teaser = $("route-advanced-teaser");
+    if (fields) fields.hidden = !adv;
+    if (teaser) teaser.hidden = adv;
+  }
+
+  function syncRoutePortMapModeUI() {
+    const mode = ($("route-f-port-map-mode") && $("route-f-port-map-mode").value) || "same";
+    const one = $("route-f-internal-one");
+    const rows = $("route-port-map-rows");
+    if (one) one.classList.toggle("is-hidden", mode !== "one");
+    if (rows) rows.classList.toggle("is-hidden", mode !== "table");
+    if (mode === "table") renderRoutePortMapRows();
+  }
+
+  function syncRouteGeoModeUI() {
+    const gm = ($("route-f-geo-mode") && $("route-f-geo-mode").value) || "inherit";
+    const gc = $("route-f-geo-countries");
+    if (gc) {
+      gc.classList.toggle("is-hidden", gm !== "custom");
+      if (gm === "custom" && !gc.value.trim()) gc.placeholder = "se, no";
+    }
+  }
+
+  function renderRoutePortMapRows(existingMaps) {
+    const wrap = $("route-port-map-rows");
+    if (!wrap) return;
+    const ports = parsePortsList(($("route-f-ports") && $("route-f-ports").value) || "");
+    const byPub = {};
+    (existingMaps || []).forEach((m) => {
+      if (m && m.public) byPub[m.public] = m.internal || "";
+    });
+    wrap.innerHTML = ports
+      .map(
+        (p) =>
+          '<div class="route-port-map-row field"><span class="meta">' +
+          escapeHtml(p) +
+          ' →</span><input type="text" class="route-port-map-internal" data-public="' +
+          escapeHtml(p) +
+          '" placeholder="internal port" value="' +
+          escapeHtml(byPub[p] || "") +
+          '" autocomplete="off" /></div>'
+      )
+      .join("");
+  }
+
+  function readPortMapsFromForm(ports) {
+    if (!advancedSettingsEnabled()) return undefined;
+    const mode = ($("route-f-port-map-mode") && $("route-f-port-map-mode").value) || "same";
+    if (mode === "same") return undefined;
+    if (mode === "one") {
+      const internal = ($("route-f-internal-one") && $("route-f-internal-one").value.trim()) || "";
+      if (!internal) return undefined;
+      return ports.map((p) => ({ public: p, internal }));
+    }
+    const maps = [];
+    wrapQueryPortMapRows().forEach((inp) => {
+      const pub = inp.getAttribute("data-public") || "";
+      const internal = inp.value.trim();
+      if (pub && internal) maps.push({ public: pub, internal });
+    });
+    return maps.length ? maps : undefined;
+  }
+
+  function wrapQueryPortMapRows() {
+    const wrap = $("route-port-map-rows");
+    if (!wrap) return [];
+    return Array.from(wrap.querySelectorAll(".route-port-map-internal"));
+  }
+
+  function loadRoutePortMapsToForm(r) {
+    const maps = r.port_maps || [];
+    const modeEl = $("route-f-port-map-mode");
+    const oneEl = $("route-f-internal-one");
+    if (!modeEl) return;
+    if (!maps.length) {
+      modeEl.value = "same";
+    } else if (maps.length === 1 && parsePortsList(($("route-f-ports") && $("route-f-ports").value) || "").length > 1) {
+      const allSame = maps.every((m) => m.internal === maps[0].internal);
+      if (allSame && maps.length === parsePortsList(($("route-f-ports") && $("route-f-ports").value) || "").length) {
+        modeEl.value = "one";
+        if (oneEl) oneEl.value = maps[0].internal;
+      } else {
+        modeEl.value = "table";
+      }
+    } else {
+      modeEl.value = "table";
+    }
+    renderRoutePortMapRows(maps);
+    syncRoutePortMapModeUI();
   }
 
   function geoblockingFormSnapshotForCompare() {
@@ -1654,6 +1760,7 @@
     if (spl) spl.checked = !!lastUIPrefs.metrics_collection_enabled;
     syncAdvancedSettingsToggle();
     syncGeoAdvancedFieldsVisibility();
+    syncRouteAdvancedFieldsVisibility();
     syncContentWidthSelect();
     const notesEl = $("config-notes-body");
     const notesMsg = $("config-notes-msg");
@@ -2990,6 +3097,12 @@
       $("route-f-ports").value = "";
       const sa0 = $("route-f-source-allow");
       if (sa0) sa0.value = "";
+      const sd0 = $("route-f-source-deny");
+      if (sd0) sd0.value = "";
+      const gm0 = $("route-f-geo-mode");
+      if (gm0) gm0.value = "inherit";
+      const modeEl0 = $("route-f-port-map-mode");
+      if (modeEl0) modeEl0.value = "same";
     } else {
       const r = cfg.forwarding.routes[index];
       if (!r) return;
@@ -3000,8 +3113,18 @@
       $("route-f-target").value = r.target_ip || "";
       const sa = $("route-f-source-allow");
       if (sa) sa.value = (r.source_allow_cidrs || []).join(", ");
+      const sd = $("route-f-source-deny");
+      if (sd) sd.value = (r.source_deny_cidrs || []).join(", ");
+      const gm = $("route-f-geo-mode");
+      if (gm) gm.value = r.geo_mode || "inherit";
+      const gc = $("route-f-geo-countries");
+      if (gc) gc.value = (r.geo_countries || []).join(", ");
+      loadRoutePortMapsToForm(r);
       if (dis) dis.checked = !r.disabled;
     }
+    syncRouteAdvancedFieldsVisibility();
+    syncRoutePortMapModeUI();
+    syncRouteGeoModeUI();
     const modal = $("route-modal");
     if (modal) {
       modal.classList.remove("is-hidden");
@@ -3046,6 +3169,20 @@
       disabled: !(routeEn && routeEn.checked),
       source_allow_cidrs: srcList.length ? srcList : undefined,
     };
+    if (advancedSettingsEnabled()) {
+      const denyList = parseSourceAllowListInput(($("route-f-source-deny") && $("route-f-source-deny").value) || "");
+      if (denyList.length) entry.source_deny_cidrs = denyList;
+      const gm = ($("route-f-geo-mode") && $("route-f-geo-mode").value) || "inherit";
+      if (gm && gm !== "inherit") {
+        entry.geo_mode = gm;
+        if (gm === "custom") {
+          const gcc = parseSourceAllowListInput(($("route-f-geo-countries") && $("route-f-geo-countries").value) || "");
+          if (gcc.length) entry.geo_countries = gcc;
+        }
+      }
+      const maps = readPortMapsFromForm(ports);
+      if (maps) entry.port_maps = maps;
+    }
     const idxRaw = $("route-edit-index").value;
     if (idxRaw === "") cfg.forwarding.routes.push(entry);
     else cfg.forwarding.routes[+idxRaw] = entry;
@@ -3379,6 +3516,13 @@
     if (sn) sn.value = g.set_name || "";
     if (zd) zd.value = g.zone_dir || "";
     if (ap) ap.checked = !!g.apply_to_input_allows;
+    const bg = $("geo-f-break-glass");
+    const gd = $("geo-f-global-deny");
+    if (bg) bg.value = (g.break_glass_cidrs || []).join(", ");
+    if (gd) {
+      const fwd = (cfg && cfg.forwarding) || {};
+      gd.value = (fwd.source_deny_cidrs || []).join(", ");
+    }
     const mode = String(g.mode || "allow").toLowerCase() === "block" ? "block" : "allow";
     setGeoListMode(mode);
     geoSelectedCodes = Array.isArray(g.countries)
@@ -3469,6 +3613,9 @@
     g.set_name = ($("geo-f-set-name") && $("geo-f-set-name").value.trim()) || "";
     g.zone_dir = ($("geo-f-zone-dir") && $("geo-f-zone-dir").value.trim()) || "";
     g.apply_to_input_allows = !!($("geo-f-apply-input-allows") && $("geo-f-apply-input-allows").checked);
+    g.break_glass_cidrs = parseSourceAllowListInput(($("geo-f-break-glass") && $("geo-f-break-glass").value) || "");
+    if (!cfg.forwarding) cfg.forwarding = {};
+    cfg.forwarding.source_deny_cidrs = parseSourceAllowListInput(($("geo-f-global-deny") && $("geo-f-global-deny").value) || "");
     try {
       await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
       lastConfig = cfg;
@@ -4961,6 +5108,44 @@
       setApiStatus(false, String(e.message || e));
     }
   });
+
+  const overviewMaint = $("overview-maintenance-toggle");
+  if (overviewMaint) {
+    overviewMaint.addEventListener("change", async () => {
+      if (!lastConfig) return;
+      if (
+        overviewMaint.checked &&
+        !window.confirm("Enable maintenance mode? Public port forwards will stop until you disable this and reload.")
+      ) {
+        overviewMaint.checked = false;
+        return;
+      }
+      const cfg = JSON.parse(JSON.stringify(lastConfig));
+      if (!cfg.forwarding) cfg.forwarding = {};
+      cfg.forwarding.maintenance_mode = overviewMaint.checked;
+      setOverviewMsg("…");
+      try {
+        await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
+        lastConfig = cfg;
+        setOverviewMsg(
+          overviewMaint.checked
+            ? "Maintenance mode saved. Reload to apply."
+            : "Maintenance mode off. Reload to restore forwards."
+        );
+        refreshPendingBadge();
+      } catch (e) {
+        overviewMaint.checked = !!lastConfig.forwarding.maintenance_mode;
+        setOverviewMsg(String(e.message || e), true);
+      }
+    });
+  }
+
+  const routePortMapMode = $("route-f-port-map-mode");
+  if (routePortMapMode) routePortMapMode.addEventListener("change", syncRoutePortMapModeUI);
+  const routeGeoMode = $("route-f-geo-mode");
+  if (routeGeoMode) routeGeoMode.addEventListener("change", syncRouteGeoModeUI);
+  const routePortsInput = $("route-f-ports");
+  if (routePortsInput) routePortsInput.addEventListener("input", () => renderRoutePortMapRows(readPortMapsFromForm(parsePortsList(routePortsInput.value))));
 
   $("btn-reload").addEventListener("click", async () => {
     setOverviewMsg("…");

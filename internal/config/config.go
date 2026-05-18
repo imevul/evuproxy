@@ -43,6 +43,10 @@ type Network struct {
 
 type Forwarding struct {
 	Routes []ForwardRoute `yaml:"routes" json:"routes"`
+	// SourceDenyCIDRs drops forwarded traffic from matching WAN IPv4 sources (global).
+	SourceDenyCIDRs []string `yaml:"source_deny_cidrs,omitempty" json:"source_deny_cidrs,omitempty"`
+	// MaintenanceMode omits all forward DNAT / forward accept rules while keeping WireGuard and INPUT allows.
+	MaintenanceMode bool `yaml:"maintenance_mode,omitempty" json:"maintenance_mode,omitempty"`
 }
 
 // ForwardRoute maps public TCP or UDP ports to a peer tunnel IPv4 (must match a peer's tunnel_ip).
@@ -53,6 +57,14 @@ type ForwardRoute struct {
 	Disabled bool     `yaml:"disabled,omitempty" json:"disabled,omitempty"` // if true, omitted from generated nftables
 	// SourceAllowCIDRs restricts WAN sources for this route (IPv4 address or CIDR). Empty = any source.
 	SourceAllowCIDRs []string `yaml:"source_allow_cidrs,omitempty" json:"source_allow_cidrs,omitempty"`
+	// SourceDenyCIDRs drops traffic from matching WAN sources for this route (after allowlist / geo).
+	SourceDenyCIDRs []string `yaml:"source_deny_cidrs,omitempty" json:"source_deny_cidrs,omitempty"`
+	// PortMaps maps public port expressions to internal DNAT ports. Omitted = 1:1 public→internal.
+	PortMaps []PortMap `yaml:"port_maps,omitempty" json:"port_maps,omitempty"`
+	// GeoMode: inherit (default), off (skip geo on this route), or custom (use geo_countries).
+	GeoMode string `yaml:"geo_mode,omitempty" json:"geo_mode,omitempty"`
+	// GeoCountries used when geo_mode is custom (same codes as global geo.countries).
+	GeoCountries []string `yaml:"geo_countries,omitempty" json:"geo_countries,omitempty"`
 }
 
 type Geo struct {
@@ -65,6 +77,8 @@ type Geo struct {
 	// input_allows rules. When false (default), input_allows are unconditional accept lines (SSH, HTTP, etc.
 	// stay reachable from any source IPv4 regardless of geo mode).
 	ApplyToInputAllows bool `yaml:"apply_to_input_allows,omitempty" json:"apply_to_input_allows,omitempty"`
+	// BreakGlassCIDRs always pass geo filtering on INPUT and forward paths (dangerous; use sparingly).
+	BreakGlassCIDRs []string `yaml:"break_glass_cidrs,omitempty" json:"break_glass_cidrs,omitempty"`
 }
 
 type AllowRule struct {
@@ -205,7 +219,13 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("network.forward_extra_local_cidrs[%d]: IPv4 CIDR required", i)
 		}
 	}
+	if err := ValidateSourceDenyCIDRs(-1, c.Forwarding.SourceDenyCIDRs); err != nil {
+		return err
+	}
 	if err := c.validateForwardingRoutes(); err != nil {
+		return err
+	}
+	if err := ValidateBreakGlassCIDRs(c.Geo.BreakGlassCIDRs); err != nil {
 		return err
 	}
 	if c.Geo.Enabled {
@@ -296,8 +316,40 @@ func (c *Config) validateForwardingRoutes() error {
 		if err := ValidateSourceAllowCIDRs(i, r.SourceAllowCIDRs); err != nil {
 			return err
 		}
+		if err := ValidateSourceDenyCIDRs(i, r.SourceDenyCIDRs); err != nil {
+			return err
+		}
+		if err := ValidatePortMaps(i, r.Ports, r.PortMaps); err != nil {
+			return err
+		}
+		if err := validateRouteGeoMode(i, r); err != nil {
+			return err
+		}
 	}
 	return validateForwardingRoutePortOverlaps(c)
+}
+
+func validateRouteGeoMode(routeIndex int, r ForwardRoute) error {
+	mode := strings.ToLower(strings.TrimSpace(r.GeoMode))
+	if mode == "" {
+		mode = RouteGeoInherit
+	}
+	switch mode {
+	case RouteGeoInherit, RouteGeoOff, RouteGeoCustom:
+	default:
+		return fmt.Errorf("forwarding.routes[%d]: geo_mode must be inherit, off, or custom", routeIndex)
+	}
+	if mode == RouteGeoCustom {
+		if len(r.GeoCountries) == 0 {
+			return fmt.Errorf("forwarding.routes[%d]: geo_countries required when geo_mode is custom", routeIndex)
+		}
+		for _, cc := range r.GeoCountries {
+			if err := validateGeoCountryCode(cc); err != nil {
+				return fmt.Errorf("forwarding.routes[%d]: %w", routeIndex, err)
+			}
+		}
+	}
+	return nil
 }
 
 func validateForwardingRoutePortOverlaps(c *Config) error {
@@ -314,7 +366,7 @@ func validateForwardingRoutePortOverlaps(c *Config) error {
 		if err != nil {
 			return fmt.Errorf("forwarding.routes[%d]: %w", i, err)
 		}
-		ports, err := ExpandRoutePortNumbers(r.Ports)
+		ports, err := ExpandRoutePublicPortNumbers(r)
 		if err != nil {
 			return fmt.Errorf("forwarding.routes[%d]: ports: %w", i, err)
 		}

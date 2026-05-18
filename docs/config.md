@@ -47,6 +47,11 @@ The EvuProxy API (`evuproxy serve` on `127.0.0.1:9847`) is reached via **loopbac
 
 Forwarding is expressed as one or more **routes**. Each route publishes a set of **TCP** and/or **UDP** destination ports on the public host and DNATs matching traffic to a **peer tunnel IPv4**.
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `maintenance_mode` | bool (optional) | If `true`, **no** forward DNAT or forward-accept rules are generated (WireGuard and `input_allows` stay as configured). Use for maintenance windows. |
+| `source_deny_cidrs` | list of strings (optional) | Global IPv4/CIDR **denylist** for forwarded traffic (WAN sources). Evaluated before per-route rules. |
+
 ### `forwarding.routes[]`
 
 | Field | Type | Description |
@@ -55,6 +60,13 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | `ports` | list of strings | Port expressions passed through to nftables. Each element is a single port, range, or brace list fragment. Examples: `25565`, `80-81`, `80/tcp`-style is not used—use `proto` and plain port tokens. See **Port list syntax** below. |
 | `target_ip` | string | **IPv4 host address only** (no `/mask`), e.g. `10.100.0.2`. Must match the **IPv4** of a **non-disabled** peer’s `tunnel_ip`. |
 | `disabled` | bool (optional) | If `true`, the route is kept in config but **omitted** from generated nftables (no DNAT/forward rules until re-enabled). Other fields are not validated while disabled. |
+| `source_allow_cidrs` | list of strings (optional) | If non-empty, only these WAN IPv4 sources may use this route (allowlist). |
+| `source_deny_cidrs` | list of strings (optional) | Per-route WAN IPv4/CIDR denylist (after allowlist / geo). |
+| `port_maps` | list of objects (optional) | Maps **public** port expressions (must match a `ports[]` entry) to **internal** DNAT ports on `target_ip`. Omitted = 1:1 (public port equals internal). Each object: `public`, `internal` (same syntax as `ports[]`; ranges must have equal width). |
+| `geo_mode` | string (optional) | `inherit` (default), `off` (skip global geo for this route), or `custom` (use `geo_countries`). |
+| `geo_countries` | list of strings | Required when `geo_mode` is `custom` (same country codes as global `geo.countries`). |
+
+**nftables evaluation order (forward path):** global deny → per-route deny → geo (per route mode; break-glass skips geo only) → per-route allow → DNAT (break-glass DNAT after geo on allow-mode routes).
 
 ### Port list syntax
 
@@ -81,6 +93,7 @@ Controls whether forwarded traffic is restricted to source IPs in downloaded cou
 | `countries` | list of strings | Lowercase ISO country codes (e.g. `se`, `no`). Required when `enabled` is true. |
 | `zone_dir` | string | Directory where per-country zone files are stored (e.g. `/etc/evuproxy/geo-zones`). Required when `enabled` is true. |
 | `apply_to_input_allows` | bool | If `true` and `enabled` is true, **`input_allows`** use the same geo allow/block logic as forwarded ports. Default **`false`**: **`input_allows`** stay plain INPUT accepts (SSH, HTTP, etc. remain reachable from any IPv4 source regardless of country lists). In the admin UI this appears on the **Geoblocking** page under advanced fields (enable **Advanced mode** in **Settings**). Geo rules use **`ip saddr`** (IPv4 only); IPv6 to the same TCP/UDP ports is not matched by those lines and may hit the chain **policy** (often **drop**)—plan separate rules if you need IPv6 admin access. **`network.admin_tcp_ports`** are still emitted as unconditional TCP accepts after **`input_allows`**; they are **not** wrapped by this option—avoid duplicating sensitive ports there if you expect geo to cover them. |
+| `break_glass_cidrs` | list of strings (optional) | IPv4/CIDR sources that **always pass** geo filtering on INPUT and forward paths. Use sparingly for operator escape hatches. |
 
 When `geo.enabled` is true, `evuproxy reload` / `update-geo` expect zone files under `zone_dir`; empty or missing zones can block traffic when geo is enabled.
 
