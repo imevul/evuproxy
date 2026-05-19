@@ -19,6 +19,16 @@ const (
 
 // Reload writes generated artifacts and applies nftables + WireGuard.
 func Reload(cfgPath string) error {
+	err := reload(cfgPath)
+	if err != nil {
+		IncApplyFailure()
+		return err
+	}
+	IncApplySuccess()
+	return nil
+}
+
+func reload(cfgPath string) error {
 	c, err := config.Load(cfgPath)
 	if err != nil {
 		return err
@@ -84,6 +94,9 @@ func Reload(cfgPath string) error {
 	}
 	if err := RecordAppliedConfigSnapshot(cfgPath); err != nil {
 		return fmt.Errorf("record config snapshot: %w", err)
+	}
+	if c.CrowdSec.Enabled {
+		slog.Warn("crowdsec enabled: ensure CrowdSec nftables bouncer populates @crowdsec_block_v4 in table inet evuproxy (see contrib/crowdsec/)")
 	}
 	return nil
 }
@@ -176,6 +189,16 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 
 // UpdateGeo downloads zones and loads geo sets (nftables must already define the sets).
 func UpdateGeo(cfgPath string) error {
+	err := updateGeo(cfgPath)
+	if err != nil {
+		IncApplyFailure()
+		return err
+	}
+	IncApplySuccess()
+	return nil
+}
+
+func updateGeo(cfgPath string) error {
 	c, err := config.Load(cfgPath)
 	if err != nil {
 		return err

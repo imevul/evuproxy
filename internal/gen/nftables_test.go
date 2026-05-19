@@ -600,3 +600,118 @@ func baseNFTConfig() *config.Config {
 		Peers:      []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},
 	}
 }
+
+func TestNFTables_rateLimit_offByDefault(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s, "evuproxy-ratelimit:") {
+		t.Fatal("rate limits off by default")
+	}
+}
+
+func TestNFTables_rateLimit_tcpSynAndConn(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 40, MaxConnPerIP: 80}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "ct count ip saddr over 80 packets log prefix \"evuproxy-ratelimit: \" drop") {
+		t.Fatalf("missing max conn rule: %s", s)
+	}
+	if !strings.Contains(s, "tcp flags syn / ct state new ip saddr limit rate 40/second") {
+		t.Fatalf("missing syn rate rule: %s", s)
+	}
+	if !strings.Contains(s, `iifname "eth0" oifname "wg0"`) || !strings.Contains(s, "evuproxy-ratelimit:") {
+		t.Fatalf("missing forward-chain rate limit: %s", s)
+	}
+}
+
+func TestNFTables_rateLimit_forwardBeforeAccept(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 10}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwdIdx := strings.Index(s, "chain forward")
+	acceptIdx := strings.Index(s[fwdIdx:], "ip daddr 10.100.0.2 tcp dport")
+	limIdx := strings.Index(s[fwdIdx:], "evuproxy-ratelimit:")
+	if limIdx < 0 || acceptIdx < 0 || limIdx > acceptIdx {
+		t.Fatalf("rate limit should appear in forward before accept; fwd=%q", s[fwdIdx:])
+	}
+}
+
+func TestNFTables_rateLimit_breakGlassExempt(t *testing.T) {
+	c := baseNFTConfig()
+	c.Geo.BreakGlassCIDRs = []string{"203.0.113.5/32"}
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 10}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "ip saddr != @break_glass_v4 tcp dport") || !strings.Contains(s, "evuproxy-ratelimit:") {
+		t.Fatalf("expected break-glass exempt rate limit: %s", s)
+	}
+}
+
+func TestNFTables_rateLimit_crowdsecBeforeRateLimit(t *testing.T) {
+	c := baseNFTConfig()
+	c.CrowdSec.Enabled = true
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 10}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inIdx := strings.Index(s, "chain input")
+	if inIdx < 0 {
+		t.Fatal("no input chain")
+	}
+	chunk := s[inIdx:]
+	cs := strings.Index(chunk, "crowdsec_block_v4")
+	rl := strings.Index(chunk, "evuproxy-ratelimit:")
+	if cs < 0 || rl < 0 || cs > rl {
+		t.Fatalf("crowdsec drop should precede rate limit in input: %s", chunk)
+	}
+}
+
+func TestNFTables_rateLimit_routeOverrideUDP(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 10}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{
+			Proto:     "udp",
+			Ports:     []string{"19132"},
+			TargetIP:  "10.100.0.2",
+			RateLimit: config.RateLimit{UDPPerSecond: 200},
+		},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(s, "tcp flags syn") {
+		t.Fatal("udp route should not get tcp syn limit from global")
+	}
+	if !strings.Contains(s, "udp dport") || !strings.Contains(s, "limit rate 200/second burst") {
+		t.Fatalf("missing udp rate: %s", s)
+	}
+}

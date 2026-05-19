@@ -18,6 +18,15 @@ network:
 # Start empty; add routes after you define peers.
 forwarding:
   routes: []
+  # Optional rate limits for published ports (off by default). Per-route rate_limit overrides non-zero fields.
+  # rate_limit:
+  #   tcp_syn_per_second: 50
+  #   max_conn_per_ip: 200
+  #   udp_per_second: 500
+
+# Optional CrowdSec nftables bouncer (off by default). See contrib/crowdsec/README.md.
+# crowdsec:
+#   enabled: false
 
 geo:
   enabled: false

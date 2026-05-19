@@ -51,6 +51,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 |-------|------|-------------|
 | `maintenance_mode` | bool (optional) | If `true`, **no** forward DNAT or forward-accept rules are generated (WireGuard and `input_allows` stay as configured). Use for maintenance windows. |
 | `source_deny_cidrs` | list of strings (optional) | Global IPv4/CIDR **denylist** for forwarded traffic (WAN sources). Evaluated before per-route rules. |
+| `rate_limit` | object (optional) | Global defaults for rate limits on published forward ports (off when all fields zero). Per-route `rate_limit` overrides non-zero fields. |
 
 ### `forwarding.routes[]`
 
@@ -65,8 +66,27 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | `port_maps` | list of objects (optional) | Maps **public** port expressions (must match a `ports[]` entry) to **internal** DNAT ports on `target_ip`. Omitted = 1:1 (public port equals internal). Each object: `public`, `internal` (same syntax as `ports[]`; ranges must have equal width). |
 | `geo_mode` | string (optional) | `inherit` (default), `off` (skip global geo for this route), or `custom` (use `geo_countries`). |
 | `geo_countries` | list of strings | Required when `geo_mode` is `custom` (same country codes as global `geo.countries`). |
+| `rate_limit` | object (optional) | Per-route overrides; merges with `forwarding.rate_limit`. |
 
-**nftables evaluation order (forward path):** global deny → per-route deny → geo (per route mode; break-glass skips geo only) → per-route allow → DNAT (break-glass DNAT after geo on allow-mode routes).
+### `rate_limit` (global or per-route)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tcp_syn_per_second` | int (optional) | Drop excess **new** TCP SYNs per **source IP** to published ports (1–10000). |
+| `max_conn_per_ip` | int (optional) | Drop when a **source IP** exceeds concurrent connection count to the port (`ct count ip saddr over N`, 1–65535). |
+| `udp_per_second` | int (optional) | Drop excess **new** UDP packets per **source IP** (1–100000); can affect bursty game traffic. |
+
+Drops are logged with prefix `evuproxy-ratelimit` and appear in **Logs** when enabled.
+
+Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel DNAT path), and in **prerouting** before DNAT. **`geo.break_glass_cidrs` exempts rate limits** (same as CrowdSec/geo bypass).
+
+### `crowdsec` (optional)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
+
+**nftables evaluation order (forward path):** global deny → per-route deny → CrowdSec block on **inet** forward (if enabled; break-glass exempt) → per-source rate limits → geo on INPUT/prerouting (break-glass skips geo) → per-route allow → DNAT.
 
 ### Port list syntax
 

@@ -86,6 +86,9 @@ All paths below are under **`/api/v1`** unless noted.
 | `GET`         | `/events?limit=`                                                | Recent mutating-operation audit events (JSONL-backed, newest first; default **50**, max **200**). Omit **`limit`** or use **`1`–`200`**; other values return **400** with **`error_code`:** `invalid_limit`. |
 | `GET`         | `/geo/summary`                                                  | Per-country zone file stats (CIDR line counts, approximate IPv4 totals) and optional merged **`nft`** set size; short-lived server cache.                  |
 | `POST`        | `/routes/test`                                                  | On-demand **TCP/UDP** connect/probe from the host to a route’s **`target_ip`** and port (body: `{"route_index":0,"port":optional}`). Rate-limited.        |
+| `POST`        | `/validate`                                                     | Dry-run: validate config, generate nftables + WireGuard artifacts, run **`nft -c`**; **no** apply and **no** `.bak` changes. Optional JSON body = draft config (not persisted). Response: `{ok, errors?, warnings?, detected_client_ip, ip_detection_source, ip_detection_note?, validated_from_draft?}`. |
+| `GET`         | `/client-ip`                                                    | Operator IPv4 detection for lockout warnings (same logic as validate). |
+| `POST`        | `/peers/{index}/qr.png`                                         | PNG QR code of WireGuard client config text (plain-text body, max 16 KiB). Auth required. |
 
 
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
@@ -102,9 +105,28 @@ Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**) 
 
 **`dashboard.ping_history`** (optional) lists **approx. one‑minute buckets** of **average latency across peers** from **`peer_sample`** for about the **last fifteen minutes**, for simple Overview charts.
 
+## Prometheus metrics (optional)
+
+Host metrics are exposed on a **separate HTTP listener** from the JSON API. **Disabled by default.**
+
+- Enable: `evuproxy serve --metrics-listen 127.0.0.1:9848` or environment variable **`EVUPROXY_METRICS_LISTEN`**.
+- Endpoint: **`GET /metrics`** (Prometheus text exposition). **No authentication** — must bind to loopback (`127.0.0.1`, `::1`, or `localhost`). Non-loopback addresses are **rejected** unless you also pass **`--metrics-listen-insecure`** (not recommended).
+- Metrics include: `evuproxy_apply_success_total`, `evuproxy_apply_failure_total`, `evuproxy_geo_last_success_timestamp_seconds`, `evuproxy_peers_online`, `evuproxy_maintenance_mode`.
+
+Example scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: evuproxy
+    static_configs:
+      - targets: ["127.0.0.1:9848"]
+```
+
 ## File logging (`evuproxy serve`)
 
 When **`EVUPROXY_LOG_DIR`** is set (e.g. **`/var/log/evuproxy`**), **`evuproxy serve`** writes **JSON lines** to **`$EVUPROXY_LOG_DIR/evuproxy.jsonl`** in addition to **stderr** (journald). Unset in development to skip file logging. See [contrib/logrotate.d/evuproxy](../contrib/logrotate.d/evuproxy) for rotation notes.
+
+**`EVUPROXY_TRUST_XFF`:** when set to **`1`**, **`true`**, or **`yes`**, **`GET /client-ip`** and **`POST /validate`** use the first IPv4 hop in **`X-Forwarded-For`**. Default: ignore **`X-Forwarded-For`** and use the connection address only. Enable only behind a trusted reverse proxy.
 
 ## Audit events file
 

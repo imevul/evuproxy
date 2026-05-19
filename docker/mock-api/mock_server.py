@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import sys
+import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -272,6 +273,46 @@ def _uniq_sorted_targets(routes: list[tuple[str, str, str]]) -> list[str]:
     return s
 
 
+def _effective_rate_limit(cfg: dict, route: dict | None) -> dict:
+    fwd = cfg.get("forwarding") or {}
+    base = dict(fwd.get("rate_limit") or {})
+    if route:
+        for k, v in (route.get("rate_limit") or {}).items():
+            if v:
+                base[k] = v
+    return base
+
+
+def _rate_limit_enabled(rl: dict) -> bool:
+    return bool(
+        rl.get("tcp_syn_per_second")
+        or rl.get("max_conn_per_ip")
+        or rl.get("udp_per_second")
+    )
+
+
+def _rate_limit_mock_lines(scope: str, exempt: str, proto: str, port_expr: str, rl: dict) -> list[str]:
+    if not _rate_limit_enabled(rl):
+        return []
+    out: list[str] = []
+    if rl.get("max_conn_per_ip"):
+        out.append(
+            "%s%s%s dport %s ct count ip saddr over %s packets log prefix \"evuproxy-ratelimit: \" drop"
+            % (scope, exempt, proto, port_expr, int(rl["max_conn_per_ip"]))
+        )
+    if proto == "tcp" and rl.get("tcp_syn_per_second"):
+        out.append(
+            "%s%s%s dport %s tcp flags syn / ct state new ip saddr limit rate %s/second burst 20 packets log prefix \"evuproxy-ratelimit: \" drop"
+            % (scope, exempt, proto, port_expr, int(rl["tcp_syn_per_second"]))
+        )
+    if proto == "udp" and rl.get("udp_per_second"):
+        out.append(
+            "%s%s%s dport %s ct state new ip saddr limit rate %s/second burst 20 packets log prefix \"evuproxy-ratelimit: \" drop"
+            % (scope, exempt, proto, port_expr, int(rl["udp_per_second"]))
+        )
+    return out
+
+
 def _nft_from_config(cfg: dict) -> str:
     """Subset of internal/gen/nftables.go output — enough for a realistic mock diff."""
     lines: list[str] = [
@@ -287,9 +328,31 @@ def _nft_from_config(cfg: dict) -> str:
     geo_mode = (geo.get("mode") or "allow").lower().strip()
     block_listed = geo_enabled and geo_mode == "block"
     geo_set = (geo.get("set_name") or "geo_v4").strip() or "geo_v4"
+    crowdsec_on = bool((cfg.get("crowdsec") or {}).get("enabled"))
+    break_glass = geo.get("break_glass_cidrs") or []
+    exempt = "ip saddr != @break_glass_v4 " if break_glass else ""
     routes = _formatted_routes(cfg)
+    route_by_key = {}
+    for r in cfg.get("forwarding", {}).get("routes") or []:
+        if r.get("disabled"):
+            continue
+        expr = _format_port_set(r.get("ports") or [])
+        target = (r.get("target_ip") or "").strip()
+        for pr in _route_protocols(r.get("proto")):
+            route_by_key[(pr, expr, target)] = r
 
     lines.append("table inet evuproxy {")
+    if crowdsec_on:
+        lines.extend(
+            [
+                "    set crowdsec_block_v4 {",
+                "        type ipv4_addr",
+                "        flags interval",
+                "        auto-merge",
+                "    }",
+                "",
+            ]
+        )
     if geo_enabled:
         lines.extend(
             [
@@ -337,7 +400,20 @@ def _nft_from_config(cfg: dict) -> str:
             lines.append("        %s dport %s accept" % (p, d))
     lines.append("        udp dport %d accept" % wg_port)
 
-    for pr, port_expr, _target in routes:
+    for pr, port_expr, target in routes:
+        route = route_by_key.get((pr, port_expr, target), {})
+        rl = _effective_rate_limit(cfg, route)
+        if crowdsec_on:
+            if exempt:
+                lines.append(
+                    "        ip saddr @crowdsec_block_v4 %s%s dport %s drop"
+                    % (exempt, pr, port_expr)
+                )
+            else:
+                lines.append(
+                    "        ip saddr @crowdsec_block_v4 %s dport %s drop" % (pr, port_expr)
+                )
+        lines.extend(_rate_limit_mock_lines("        ", exempt, pr, port_expr, rl))
         if not geo_enabled:
             lines.append("        %s dport %s accept" % (pr, port_expr))
         elif block_listed:
@@ -366,6 +442,24 @@ def _nft_from_config(cfg: dict) -> str:
         ]
     )
     for pr, port_expr, target in routes:
+        route = route_by_key.get((pr, port_expr, target), {})
+        rl = _effective_rate_limit(cfg, route)
+        if crowdsec_on:
+            if exempt:
+                lines.append(
+                    '        iifname "%s" oifname "%s" ip saddr @crowdsec_block_v4 %s%s dport %s drop'
+                    % (pub, wg, exempt, pr, port_expr)
+                )
+            else:
+                lines.append(
+                    '        iifname "%s" oifname "%s" ip saddr @crowdsec_block_v4 %s dport %s drop'
+                    % (pub, wg, pr, port_expr)
+                )
+        lines.extend(
+            _rate_limit_mock_lines(
+                '        iifname "%s" oifname "%s" ' % (pub, wg), exempt, pr, port_expr, rl
+            )
+        )
         lines.append(
             '        iifname "%s" oifname "%s" ip daddr %s %s dport %s accept'
             % (pub, wg, target, pr, port_expr)
@@ -702,6 +796,28 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/v1/stats":
             return self._send_json(200, _mock_stats_response())
+        if path == "/api/v1/client-ip":
+            return self._send_json(
+                200,
+                {
+                    "detected_client_ip": "203.0.113.50",
+                    "ip_detection_source": "direct",
+                    "ip_detection_note": "mock API",
+                },
+            )
+        if path.startswith("/api/v1/peers/") and path.endswith("/qr.png"):
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.end_headers()
+            # 1x1 transparent PNG
+            self.wfile.write(
+                bytes.fromhex(
+                    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                    "1f15c4890000000a49444154789c6300010000050001"
+                    "0d0a2db40000000049454e44ae426082"
+                )
+            )
+            return
         if path == "/api/v1/pending":
             _ensure_mock_apply_bootstrap()
             disk = _disk_config_sha()
@@ -838,6 +954,37 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if not _auth_ok(self):
             return self._send_json(401, {"error": "unauthorized"})
+        if path == "/api/v1/validate":
+            cfg = copy.deepcopy(MOCK_CONFIG)
+            body = self._read_json_body(MAX_JSON_PUT) if _content_len(self) else None
+            if isinstance(body, dict) and body:
+                cfg = body
+            warnings = []
+            if cfg.get("forwarding", {}).get("maintenance_mode"):
+                warnings.append(
+                    {
+                        "code": "lockout_risk_maintenance",
+                        "message": "Maintenance mode is enabled (mock).",
+                    }
+                )
+            geo = cfg.get("geo") or {}
+            if geo.get("enabled") and (geo.get("mode") or "allow") == "allow":
+                warnings.append(
+                    {
+                        "code": "lockout_risk_geo",
+                        "message": "Mock: your IP may not match geo allow list.",
+                    }
+                )
+            return self._send_json(
+                200,
+                {
+                    "ok": True,
+                    "warnings": warnings,
+                    "detected_client_ip": "203.0.113.50",
+                    "ip_detection_source": "direct",
+                    "validated_from_draft": bool(isinstance(body, dict) and body),
+                },
+            )
         if path == "/api/v1/routes/test":
             if not _route_test_rate_ok():
                 return self._send_json(
@@ -964,6 +1111,45 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json(500, {"error": "unreachable mock post"})
 
 
+def _prometheus_stub_text() -> bytes:
+    return (
+        b"# HELP evuproxy_apply_success_total Successful reload operations (mock)\n"
+        b"# TYPE evuproxy_apply_success_total counter\n"
+        b"evuproxy_apply_success_total 0\n"
+        b"# HELP evuproxy_maintenance_mode 1 when maintenance_mode enabled (mock)\n"
+        b"# TYPE evuproxy_maintenance_mode gauge\n"
+        b"evuproxy_maintenance_mode 0\n"
+    )
+
+
+class _MetricsHandler(BaseHTTPRequestHandler):
+    def log_message(self, fmt: str, *args) -> None:  # noqa: D401
+        return
+
+    def do_GET(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if path == "/metrics":
+            body = _prometheus_stub_text()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+
+def _start_metrics_server(listen: str) -> None:
+    host, _, port_s = listen.rpartition(":")
+    if not host or not port_s:
+        raise SystemExit("MOCK_METRICS_LISTEN must be host:port")
+    port = int(port_s)
+    httpd = HTTPServer((host, port), _MetricsHandler)
+    print("mock Prometheus metrics on %s:%s" % (host, port), flush=True)
+    httpd.serve_forever()
+
+
 if __name__ == "__main__":
     tok = (os.environ.get("MOCK_API_TOKEN") or "").strip()
     if not tok:
@@ -974,6 +1160,11 @@ if __name__ == "__main__":
         sys.exit(1)
     TOKEN = tok
     _load_mock_config_from_disk()
+    metrics_listen = (os.environ.get("MOCK_METRICS_LISTEN") or "").strip()
+    if metrics_listen:
+        threading.Thread(
+            target=_start_metrics_server, args=(metrics_listen,), daemon=True
+        ).start()
     bind = (os.environ.get("MOCK_API_BIND") or "0.0.0.0").strip() or "0.0.0.0"
     httpd = HTTPServer((bind, PORT), Handler)
     print("mock EvuProxy API on %s:%s (auth required)" % (bind, PORT))

@@ -36,7 +36,7 @@
         <a href="#/routes" class="nav-link" data-route="routes">Routes</a>
         <a href="#/topology" class="nav-link" data-route="topology">Topology</a>
         <a href="#/inbound" class="nav-link" data-route="inbound">Inbound access</a>
-        <a href="#/geoblocking" class="nav-link" data-route="geoblocking">Geoblocking</a>
+        <a href="#/geoblocking" class="nav-link" data-route="geoblocking">Geoblock &amp; limits</a>
         <a href="#/pending" class="nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span></a>
         <a href="#/stats" class="nav-link" data-route="stats">Stats</a>
         <a href="#/logs" class="nav-link" data-route="logs">Logs</a>
@@ -383,9 +383,31 @@
                       </button>
                     </div>
                   </div>
-                  <h4 class="peer-section-title peer-section-title-spaced">Install on Linux (systemd)</h4>
-                  <div class="onboard-install-hint-row">
-                    <p class="hint onboard-install-hint">
+                  <div class="geo-segmented onboard-method-tabs" role="tablist" aria-label="Peer install method">
+                    <button
+                      type="button"
+                      class="geo-seg-btn is-active"
+                      id="onboard-tab-linux-btn"
+                      role="tab"
+                      aria-selected="true"
+                      aria-controls="onboard-tab-linux-panel"
+                    >
+                      Linux (systemd)
+                    </button>
+                    <button
+                      type="button"
+                      class="geo-seg-btn"
+                      id="onboard-tab-other-btn"
+                      role="tab"
+                      aria-selected="false"
+                      aria-controls="onboard-tab-other-panel"
+                    >
+                      Other
+                    </button>
+                  </div>
+                  <div id="onboard-tab-linux-panel" role="tabpanel" aria-labelledby="onboard-tab-linux-btn">
+                    <div class="onboard-install-hint-row">
+                      <p class="hint onboard-install-hint">
                       <code class="inline">curl … | sudo bash</code> installs <code class="inline">evuproxy-peer-apply</code>;
                       <code class="inline">sudo evuproxy-peer-apply</code> decrypts the EVUB bundle. Requires OpenSSL&nbsp;3 with
                       <code class="inline">openssl kdf</code>, plus <code class="inline">curl</code> and <code class="inline">xxd</code>.
@@ -407,15 +429,42 @@
                     </div>
                     <pre id="onboard-bundle-snippet-cmd" class="code-block onboard-bundle-cmd" aria-live="polite"></pre>
                   </div>
-                  <div class="onboard-toolbar">
+                  </div>
+                  <div id="onboard-tab-other-panel" role="tabpanel" aria-labelledby="onboard-tab-other-btn" hidden>
+                    <p class="hint">
+                      Install the WireGuard app on your device, then import the <code class="inline">.conf</code> below
+                      (Build → Download .conf). Use <strong>AllowedIPs</strong> limited to the tunnel subnet (e.g.
+                      <code class="inline">10.100.0.0/24</code>), not <code class="inline">0.0.0.0/0</code>, so local LAN traffic stays direct.
+                    </p>
+                    <ol class="hint">
+                      <li>Install WireGuard from your app store or vendor site.</li>
+                      <li>Import the downloaded config or scan the QR code.</li>
+                      <li>Activate the tunnel; verify you can reach services on the peer tunnel IP.</li>
+                    </ol>
+                  </div>
+                  <div class="onboard-toolbar onboard-build-toolbar">
                     <button type="button" id="onboard-build" class="btn-primary">Build YAML + WireGuard config</button>
                     <button type="button" id="onboard-download-conf" class="btn-quiet">Download .conf</button>
                     <button type="button" id="onboard-download-sh" class="btn-quiet">Download command snippet</button>
+                    <button type="button" id="onboard-show-qr" class="btn-quiet">Show QR code</button>
                   </div>
                   <p id="onboard-msg" class="msg" aria-live="polite"></p>
                   <pre id="onboard-out" class="code-block is-collapsed"></pre>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="peer-qr-modal" class="modal is-hidden" role="dialog" aria-modal="true" aria-labelledby="peer-qr-title">
+          <button type="button" class="modal-backdrop" aria-label="Close dialog"></button>
+          <div class="modal-panel modal-panel-narrow">
+            <h3 id="peer-qr-title">WireGuard QR code</h3>
+            <p class="hint warn-label">Sensitive — do not share. QR is cleared when you close this dialog.</p>
+            <div id="peer-qr-canvas-wrap" class="peer-qr-canvas-wrap"></div>
+            <p id="peer-qr-msg" class="msg" aria-live="polite"></p>
+            <div class="btn-row">
+              <button type="button" class="btn-quiet" id="peer-qr-close">Close</button>
             </div>
           </div>
         </div>
@@ -458,55 +507,7 @@
             <div id="route-editor" class="route-editor">
               <h3 id="route-editor-title">Edit route</h3>
               <input type="hidden" id="route-edit-index" value="" />
-              <div class="field">
-                <span class="field-label" id="route-proto-label">Protocol</span>
-                <div class="proto-checks" role="group" aria-labelledby="route-proto-label">
-                  <label class="check"><input type="checkbox" id="route-f-proto-tcp" checked /> TCP</label>
-                  <label class="check"><input type="checkbox" id="route-f-proto-udp" /> UDP</label>
-                </div>
-                <span class="meta">Choose one or both. Both is saved as <code class="inline">tcp,udp</code> in config.</span>
-              </div>
-              <div class="field">
-                <label for="route-f-ports">Ports <span class="meta">(comma-separated, same as YAML)</span></label>
-                <input type="text" id="route-f-ports" placeholder="25565, 27015-27020" autocomplete="off" />
-              </div>
-              <div class="field">
-                <label for="route-f-target">Target peer IP</label>
-                <select id="route-f-target"></select>
-              </div>
-              <div class="field">
-                <label for="route-f-source-allow">Source allowlist <span class="meta">(optional, WAN IPv4)</span></label>
-                <textarea id="route-f-source-allow" rows="3" placeholder="Leave empty for any source, or e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
-                <span class="meta">Comma or whitespace separated. Applied on <strong>Apply to host</strong>; wrong entries can block legitimate traffic.</span>
-              </div>
-              <div id="route-advanced-fields" class="route-advanced-fields" hidden>
-                <div class="field">
-                  <label for="route-f-source-deny">Source denylist <span class="meta">(optional, WAN IPv4)</span></label>
-                  <textarea id="route-f-source-deny" rows="2" placeholder="e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
-                  <span class="meta">Comma or whitespace separated. Matched sources are dropped for this route before geo and forwarding.</span>
-                </div>
-                <div class="field">
-                  <span class="field-label">Port mapping</span>
-                  <select id="route-f-port-map-mode">
-                    <option value="same">Same as public</option>
-                    <option value="one">One internal port for all</option>
-                    <option value="table">Per-entry map</option>
-                  </select>
-                  <input type="text" id="route-f-internal-one" class="is-hidden" autocomplete="off" />
-                  <div id="route-port-map-rows" class="route-port-map-rows is-hidden"></div>
-                </div>
-                <div class="field">
-                  <label for="route-f-geo-mode">Route geo</label>
-                  <select id="route-f-geo-mode">
-                    <option value="inherit">Inherit global</option>
-                    <option value="off">Off</option>
-                    <option value="custom">Custom countries</option>
-                  </select>
-                  <input type="text" id="route-f-geo-countries" class="is-hidden" autocomplete="off" />
-                </div>
-              </div>
-              <p id="route-advanced-teaser" class="hint meta route-advanced-teaser">Advanced route options need <a href="#/settings">Advanced mode</a>.</p>
-              <div class="field">
+              <div class="field route-editor-enabled-field">
                 <div class="toggle-switch-row">
                   <span class="toggle-switch-label-group">
                     <span class="toggle-switch-text" id="route-f-disabled-desc">Enabled</span>
@@ -533,11 +534,102 @@
                   </label>
                 </div>
               </div>
-              <div class="btn-row">
-                <button type="button" class="btn-primary" id="route-save">Save route</button>
-                <button type="button" class="btn-quiet" id="route-cancel">Cancel</button>
+              <div class="geo-segmented route-editor-tabs" role="tablist" aria-label="Route editor sections">
+                <button
+                  type="button"
+                  class="geo-seg-btn is-active"
+                  id="route-tab-default-btn"
+                  role="tab"
+                  aria-selected="true"
+                  aria-controls="route-tab-default-panel"
+                >
+                  Forwarding
+                </button>
+                <button
+                  type="button"
+                  class="geo-seg-btn"
+                  id="route-tab-advanced-btn"
+                  role="tab"
+                  aria-selected="false"
+                  aria-controls="route-tab-advanced-panel"
+                >
+                  Advanced
+                </button>
+              </div>
+              <div id="route-tab-default-panel" role="tabpanel" aria-labelledby="route-tab-default-btn">
+                <div class="field">
+                  <span class="field-label" id="route-proto-label">Protocol</span>
+                  <div class="proto-checks" role="group" aria-labelledby="route-proto-label">
+                    <label class="check"><input type="checkbox" id="route-f-proto-tcp" checked /> TCP</label>
+                    <label class="check"><input type="checkbox" id="route-f-proto-udp" /> UDP</label>
+                  </div>
+                  <span class="meta">Choose one or both. Both is saved as <code class="inline">tcp,udp</code> in config.</span>
+                </div>
+                <div class="field">
+                  <label for="route-f-ports">Ports <span class="meta">(comma-separated, same as YAML)</span></label>
+                  <input type="text" id="route-f-ports" placeholder="25565, 27015-27020" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label for="route-f-target">Target peer IP</label>
+                  <select id="route-f-target"></select>
+                </div>
+              </div>
+              <div id="route-tab-advanced-panel" role="tabpanel" aria-labelledby="route-tab-advanced-btn" hidden>
+                <div class="field">
+                  <label for="route-f-source-allow">Source allowlist <span class="meta">(optional, WAN IPv4)</span></label>
+                  <textarea id="route-f-source-allow" rows="3" placeholder="Leave empty for any source, or e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
+                  <span class="meta">Comma or whitespace separated. Applied on <strong>Apply to host</strong>; wrong entries can block legitimate traffic.</span>
+                </div>
+                <div class="field">
+                  <label for="route-f-source-deny">Source denylist <span class="meta">(optional, WAN IPv4)</span></label>
+                  <textarea id="route-f-source-deny" rows="2" placeholder="e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
+                  <span class="meta">Comma or whitespace separated. Matched sources are dropped for this route before geo and forwarding.</span>
+                </div>
+                <div class="field">
+                  <span class="field-label">Port mapping</span>
+                  <select id="route-f-port-map-mode">
+                    <option value="same">Same as public</option>
+                    <option value="one">One internal port for all</option>
+                    <option value="table">Per-entry map</option>
+                  </select>
+                  <input type="text" id="route-f-internal-one" class="is-hidden" autocomplete="off" />
+                  <div id="route-port-map-rows" class="route-port-map-rows is-hidden"></div>
+                </div>
+                <div class="field">
+                  <label for="route-f-geo-mode">Route geo</label>
+                  <select id="route-f-geo-mode">
+                    <option value="inherit">Inherit global</option>
+                    <option value="off">Off</option>
+                    <option value="custom">Custom countries</option>
+                  </select>
+                  <input type="text" id="route-f-geo-countries" class="is-hidden" placeholder="se, no" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <span class="field-label">Rate limits <span class="meta">(optional; overrides global defaults)</span></span>
+                  <div class="rate-limit-grid">
+                    <div class="field">
+                      <label for="route-f-rate-tcp-syn">TCP SYN / second</label>
+                      <input type="number" id="route-f-rate-tcp-syn" min="0" max="10000" placeholder="inherit" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label for="route-f-rate-max-conn">Max connections / IP</label>
+                      <input type="number" id="route-f-rate-max-conn" min="0" max="65535" placeholder="inherit" autocomplete="off" />
+                    </div>
+                    <div class="field">
+                      <label for="route-f-rate-udp">UDP packets / second</label>
+                      <input type="number" id="route-f-rate-udp" min="0" max="100000" placeholder="inherit" autocomplete="off" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="route-editor-actions">
+                <div class="btn-row">
+                  <button type="button" class="btn-primary" id="route-save">Save route</button>
+                  <button type="button" class="btn-quiet" id="route-cancel">Cancel</button>
+                </div>
               </div>
             </div>
+
           </div>
         </div>
       </section>
@@ -659,12 +751,12 @@
 
       <section id="page-geoblocking" class="page" hidden>
         <div class="page-title-row">
-          <h2 class="page-title">Geoblocking</h2>
+          <h2 class="page-title">Geoblock &amp; limits</h2>
           <button
             type="button"
             class="btn-help-trigger"
-            aria-label="More about geoblocking (dialog)"
-            data-help-title="Geoblocking"
+            aria-label="More about geoblock and limits (dialog)"
+            data-help-title="Geoblock &amp; limits"
             data-help-template="help-geoblocking-intro"
           >
             ?
@@ -673,8 +765,8 @@
         <p class="hint">
           Country-zone rules for forwarded ports (<code class="inline">geo</code> in config). Toggle list mode below, refresh zone files, then <strong>Pending changes</strong> → Apply.
         </p>
-        <div class="card">
-          <div class="field">
+        <div class="card geo-enable-card">
+          <div class="field geo-enable-field">
             <div class="toggle-switch-row">
               <span class="toggle-switch-text" id="geo-f-enabled-desc">Enable geoblocking</span>
               <label class="toggle-switch">
@@ -688,48 +780,56 @@
                 <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
               </label>
             </div>
+            <p class="meta geo-enable-hint">When off, country lists are kept in config but omitted from nftables until you turn this on and apply.</p>
           </div>
-          <div class="field">
-            <span class="field-label">List mode</span>
-            <div class="geo-segmented" role="group" aria-label="Allow or block listed countries">
-              <button type="button" class="geo-seg-btn" id="geo-mode-block" data-geo-mode="block" aria-pressed="false">
-                Block
-              </button>
-              <button type="button" class="geo-seg-btn is-active" id="geo-mode-allow" data-geo-mode="allow" aria-pressed="true">
-                Allow
-              </button>
-            </div>
-            <span class="meta" id="geo-mode-explainer"
-              >Listed countries may reach public ports; others are dropped (logged).</span
+        </div>
+        <div class="card geo-editor">
+          <div class="geo-segmented geo-page-tabs" role="tablist" aria-label="Geoblock and limits sections">
+            <button
+              type="button"
+              class="geo-seg-btn is-active"
+              id="geo-tab-default-btn"
+              role="tab"
+              aria-selected="true"
+              aria-controls="geo-tab-default-panel"
             >
+              Countries &amp; rules
+            </button>
+            <button
+              type="button"
+              class="geo-seg-btn"
+              id="geo-tab-advanced-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="geo-tab-advanced-panel"
+            >
+              Advanced
+            </button>
           </div>
-          <div class="field">
-            <span class="field-label" id="geo-tags-label">Countries</span>
-            <div id="geo-tags-wrap" class="geo-tags-wrap">
-              <div id="geo-tags-chips" class="geo-tags-chips" aria-labelledby="geo-tags-label"></div>
-              <button type="button" class="btn-quiet geo-tags-edit" id="geo-tags-edit" aria-expanded="false">
-                Edit <span class="geo-tags-edit-count" id="geo-tags-edit-count">(0)</span>
-              </button>
-            </div>
-            <span class="meta" id="geo-countries-meta">At least one country when geoblocking is on.</span>
-          </div>
-          <div id="geo-advanced-fields" class="geo-advanced-fields" hidden>
+          <div id="geo-tab-default-panel" role="tabpanel" aria-labelledby="geo-tab-default-btn">
             <div class="field">
-              <label for="geo-f-set-name">nftables set name <span class="meta">(optional)</span></label>
-              <input type="text" id="geo-f-set-name" placeholder="geo_v4" autocomplete="off" />
-            </div>
-            <div class="field">
-              <label for="geo-f-zone-dir">Zone directory on host</label>
-              <input type="text" id="geo-f-zone-dir" placeholder="/etc/evuproxy/geo-zones" autocomplete="off" />
-              <span class="meta">Directory for <code class="inline">.zone</code> files (required when enabled).</span>
+              <span class="field-label">List mode</span>
+              <div class="geo-segmented" role="group" aria-label="Allow or block listed countries">
+                <button type="button" class="geo-seg-btn" id="geo-mode-block" data-geo-mode="block" aria-pressed="false">
+                  Block
+                </button>
+                <button type="button" class="geo-seg-btn is-active" id="geo-mode-allow" data-geo-mode="allow" aria-pressed="true">
+                  Allow
+                </button>
+              </div>
+              <span class="meta" id="geo-mode-explainer"
+                >Listed countries may reach public ports; others are dropped (logged).</span
+              >
             </div>
             <div class="field">
-              <label for="geo-f-break-glass">Break-glass CIDRs <span class="meta">(bypass geo)</span></label>
-              <textarea id="geo-f-break-glass" rows="2" autocomplete="off" spellcheck="false"></textarea>
-            </div>
-            <div class="field">
-              <label for="geo-f-global-deny">Global forward denylist</label>
-              <textarea id="geo-f-global-deny" rows="2" autocomplete="off" spellcheck="false"></textarea>
+              <span class="field-label" id="geo-tags-label">Countries</span>
+              <div id="geo-tags-wrap" class="geo-tags-wrap">
+                <div id="geo-tags-chips" class="geo-tags-chips" aria-labelledby="geo-tags-label"></div>
+                <button type="button" class="btn-quiet geo-tags-edit" id="geo-tags-edit" aria-expanded="false">
+                  Edit <span class="geo-tags-edit-count" id="geo-tags-edit-count">(0)</span>
+                </button>
+              </div>
+              <span class="meta" id="geo-countries-meta">At least one country when geoblocking is on.</span>
             </div>
             <div class="field">
               <div class="toggle-switch-row">
@@ -749,15 +849,73 @@
               </div>
               <p class="hint meta geo-field-subhint geo-inbound-rule-hint">
                 When off (default), SSH, HTTP, and other <code class="inline">input_allows</code> stay reachable from any
-                source IPv4 even if geoblocking is on. When on, those ports use the same allow-list or block-list rules
-                as forwarded services. Click <strong>Save</strong> to store changes, then <strong>Apply</strong> on the host.
+                source IPv4 even if geoblocking is on. When on, those ports use the same allow-list or block-list rules as
+                forwarded services. Use <strong>Save</strong> below to store changes, then <strong>Apply</strong> on the host.
               </p>
             </div>
           </div>
-          <p id="geo-advanced-fields-teaser" class="hint geo-advanced-teaser">
-            Set name, zone directory, and the <code class="inline">input_allows</code> geoblocking option are hidden
-            until you turn on Advanced mode in <a href="#/settings">Settings</a>.
-          </p>
+          <div id="geo-tab-advanced-panel" role="tabpanel" aria-labelledby="geo-tab-advanced-btn" hidden>
+            <div class="field">
+              <label for="geo-f-set-name">nftables set name <span class="meta">(optional)</span></label>
+              <input type="text" id="geo-f-set-name" placeholder="geo_v4" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="geo-f-zone-dir">Zone directory on host</label>
+              <input type="text" id="geo-f-zone-dir" placeholder="/etc/evuproxy/geo-zones" autocomplete="off" />
+              <span class="meta">Directory for <code class="inline">.zone</code> files (required when enabled).</span>
+            </div>
+            <div class="field">
+              <label for="geo-f-break-glass">Break-glass CIDRs <span class="meta">(bypass geo)</span></label>
+              <div class="btn-row">
+                <button type="button" class="btn-quiet" id="geo-add-detected-ip">Add detected IP</button>
+              </div>
+              <textarea id="geo-f-break-glass" rows="2" placeholder="e.g. 203.0.113.5/32" autocomplete="off" spellcheck="false"></textarea>
+              <p id="geo-detected-ip-line" class="meta is-hidden" aria-live="polite"></p>
+            </div>
+            <div class="field">
+              <label for="geo-f-global-deny">Global forward denylist</label>
+              <textarea id="geo-f-global-deny" rows="2" placeholder="e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
+              <span class="meta">Comma or whitespace separated WAN IPv4 addresses or CIDRs.</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Global rate limits <span class="meta">(optional defaults for all routes)</span></span>
+              <p class="hint meta">
+                Limits new WAN traffic to published ports. Per-route overrides: Routes → Advanced. UDP limits can affect bursty game traffic.
+              </p>
+              <div class="rate-limit-grid">
+                <div class="field">
+                  <label for="geo-f-rate-tcp-syn">TCP SYN / second</label>
+                  <input type="number" id="geo-f-rate-tcp-syn" min="0" max="10000" placeholder="off" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label for="geo-f-rate-max-conn">Max connections / IP</label>
+                  <input type="number" id="geo-f-rate-max-conn" min="0" max="65535" placeholder="off" autocomplete="off" />
+                </div>
+                <div class="field">
+                  <label for="geo-f-rate-udp">UDP packets / second</label>
+                  <input type="number" id="geo-f-rate-udp" min="0" max="100000" placeholder="off" autocomplete="off" />
+                </div>
+              </div>
+            </div>
+          </div>
+            <div class="field">
+              <div class="toggle-switch-row">
+                <span class="toggle-switch-text" id="geo-crowdsec-desc">CrowdSec integration <span class="meta">(optional)</span></span>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="geo-f-crowdsec-enabled" class="toggle-switch-input" autocomplete="off" aria-labelledby="geo-crowdsec-desc" />
+                  <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                </label>
+              </div>
+              <p class="hint meta">
+                When enabled, generated nftables reference set <code class="inline">crowdsec_block_v4</code> (drops after break-glass).
+                Install the CrowdSec nftables bouncer separately —
+                <a href="https://doc.crowdsec.net/docs/bouncers/nftables" target="_blank" rel="noopener noreferrer">CrowdSec nftables bouncer docs</a>.
+                See <code class="inline">contrib/crowdsec/</code> in the repo.
+              </p>
+            </div>
+        </div>
+
+        <div class="card geo-actions-card">
           <div class="btn-row">
             <button type="button" class="btn-primary" id="geo-save">Save</button>
             <button type="button" class="btn-quiet" id="geo-refresh">Refresh</button>
@@ -766,6 +924,7 @@
           <p id="geo-unsaved-msg" class="msg geo-unsaved-msg meta" hidden aria-live="polite"></p>
           <p id="geo-msg" class="msg" aria-live="polite"></p>
         </div>
+
 
         <div id="geo-zones-summary" class="card geo-zones-card">
           <h3>Loaded zone files</h3>
@@ -903,6 +1062,7 @@
                 <select id="logs-filter-type" aria-label="Filter by log type">
                   <option value="">All</option>
                   <option value="geo">Geoblock</option>
+                  <option value="ratelimit">Rate limit</option>
                   <option value="forward">Forward drop</option>
                 </select>
               </label>
@@ -1098,8 +1258,8 @@
         </p>
         <p>Choose allow vs block via <strong>List mode</strong>, then run <strong>Update geo lists</strong> here or Overview, and <strong>Apply</strong> from Pending.</p>
         <p>
-          Inbound SSH/HTTP (<code class="inline">input_allows</code>) obey geo only if <strong>Apply geoblocking to inbound allow rules</strong> is on (shown when
-          <a href="#/settings">Settings</a> → Advanced is enabled).
+          Inbound SSH/HTTP (<code class="inline">input_allows</code>) obey geo only if <strong>Apply geoblocking to inbound allow rules</strong> is on (<strong>Countries &amp; rules</strong> tab).
+          Break-glass and global deny are on the <strong>Advanced</strong> tab.
         </p>
       </div>
     </template>
@@ -1144,7 +1304,8 @@
       <div class="help-modal-body">
         <p>
           Rows come from nftables <code class="inline">log</code> targets with prefixes
-          <code class="inline">evuproxy-geo-block</code> (IPv4 packets dropped by geoblocking rules) and
+          <code class="inline">evuproxy-geo-block</code> (IPv4 packets dropped by geoblocking rules),
+          <code class="inline">evuproxy-ratelimit</code> (rate-limit drops on published ports), and
           <code class="inline">evuproxy-forward-drop</code> (forward-chain drops, e.g. disallowed WAN traffic hitting forwarded ports).
         </p>
         <p>The API prefers <code class="inline">journalctl</code> (newest first) and falls back to <code class="inline">dmesg</code> when journal data is unavailable.</p>

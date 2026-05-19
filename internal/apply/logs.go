@@ -10,6 +10,7 @@ import (
 // Log prefixes emitted by generated nftables (see internal/gen/nftables.go).
 const (
 	LogPrefixGeoBlock    = "evuproxy-geo-block"
+	LogPrefixRateLimit   = "evuproxy-ratelimit"
 	LogPrefixForwardDrop = "evuproxy-forward-drop"
 )
 
@@ -65,7 +66,7 @@ func filterDropLines(blob string) []string {
 		if line == "" {
 			continue
 		}
-		if strings.Contains(line, LogPrefixGeoBlock) || strings.Contains(line, LogPrefixForwardDrop) {
+		if strings.Contains(line, LogPrefixGeoBlock) || strings.Contains(line, LogPrefixForwardDrop) || strings.Contains(line, LogPrefixRateLimit) {
 			out = append(out, line)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -25,6 +26,7 @@ import (
 	"github.com/imevul/evuproxy/internal/eventlog"
 	"github.com/imevul/evuproxy/internal/geoip"
 	"github.com/imevul/evuproxy/internal/metrics"
+	"github.com/imevul/evuproxy/internal/observability"
 )
 
 // Limits JSON body for PUT /config/notes (text is capped separately in apply.SaveConfigNotes).
@@ -52,9 +54,11 @@ func metricsOpenQuietReason(path string, err error) string {
 }
 
 type Server struct {
-	Listen    string
-	Token     string
-	Config    string
+	Listen                string
+	MetricsListen         string // optional loopback-only Prometheus scrape (GET /metrics), no auth
+	MetricsListenInsecure bool   // allow non-loopback MetricsListen (explicit opt-in)
+	Token                 string
+	Config        string
 	MetricsDB string
 	Logger    *slog.Logger
 	Version   string
@@ -143,6 +147,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/config/discard", s.auth(s.handleConfigDiscard))
 	mux.HandleFunc("POST /api/v1/config/restore-previous-applied", s.auth(s.handleConfigRestorePreviousApplied))
 	mux.HandleFunc("GET /api/v1/pending", s.auth(s.handlePending))
+	mux.HandleFunc("POST /api/v1/validate", s.auth(s.handleValidate))
+	mux.HandleFunc("GET /api/v1/client-ip", s.auth(s.handleClientIP))
+	mux.HandleFunc("GET /api/v1/peers/{index}/qr.png", s.auth(s.handlePeerQR))
+	mux.HandleFunc("POST /api/v1/peers/{index}/qr.png", s.auth(s.handlePeerQR))
 	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
 	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
 	mux.HandleFunc("GET /api/v1/config/notes", s.auth(s.handleConfigNotesGet))
@@ -742,5 +750,18 @@ func (s *Server) Run() error {
 		IdleTimeout:       120 * time.Second,
 	}
 	s.Logger.Info("evuproxy API listening", "addr", s.Listen)
+	if ml := strings.TrimSpace(s.MetricsListen); ml != "" {
+		if err := observability.ValidateMetricsListen(ml); err != nil {
+			if !s.MetricsListenInsecure {
+				return fmt.Errorf("metrics listen: %w (use --metrics-listen-insecure to bind anyway)", err)
+			}
+			s.Logger.Warn("metrics listen address (insecure override)", "err", err)
+		}
+		go func() {
+			if err := RunPrometheusServer(ml, s.Config, s.Logger); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				s.Logger.Error("prometheus metrics server", "err", err)
+			}
+		}()
+	}
 	return srv.ListenAndServe()
 }

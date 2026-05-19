@@ -16,6 +16,7 @@ type Config struct {
 	Network     Network     `yaml:"network" json:"network"`
 	Forwarding  Forwarding  `yaml:"forwarding" json:"forwarding"`
 	Geo         Geo         `yaml:"geo" json:"geo"`
+	CrowdSec    CrowdSec    `yaml:"crowdsec,omitempty" json:"crowdsec,omitempty"`
 	InputAllows []AllowRule `yaml:"input_allows" json:"input_allows"`
 	Peers       []Peer      `yaml:"peers" json:"peers"`
 }
@@ -47,6 +48,8 @@ type Forwarding struct {
 	SourceDenyCIDRs []string `yaml:"source_deny_cidrs,omitempty" json:"source_deny_cidrs,omitempty"`
 	// MaintenanceMode omits all forward DNAT / forward accept rules while keeping WireGuard and INPUT allows.
 	MaintenanceMode bool `yaml:"maintenance_mode,omitempty" json:"maintenance_mode,omitempty"`
+	// RateLimit optional global defaults for forwarded ports (per-route rate_limit overrides non-zero fields).
+	RateLimit RateLimit `yaml:"rate_limit,omitempty" json:"rate_limit,omitempty"`
 }
 
 // ForwardRoute maps public TCP or UDP ports to a peer tunnel IPv4 (must match a peer's tunnel_ip).
@@ -65,6 +68,8 @@ type ForwardRoute struct {
 	GeoMode string `yaml:"geo_mode,omitempty" json:"geo_mode,omitempty"`
 	// GeoCountries used when geo_mode is custom (same codes as global geo.countries).
 	GeoCountries []string `yaml:"geo_countries,omitempty" json:"geo_countries,omitempty"`
+	// RateLimit optional per-route overrides (Advanced); merges with forwarding.rate_limit.
+	RateLimit RateLimit `yaml:"rate_limit,omitempty" json:"rate_limit,omitempty"`
 }
 
 type Geo struct {
@@ -222,6 +227,9 @@ func (c *Config) Validate() error {
 	if err := ValidateSourceDenyCIDRs(-1, c.Forwarding.SourceDenyCIDRs); err != nil {
 		return err
 	}
+	if err := ValidateRateLimit("forwarding.rate_limit", c.Forwarding.RateLimit); err != nil {
+		return err
+	}
 	if err := c.validateForwardingRoutes(); err != nil {
 		return err
 	}
@@ -323,6 +331,9 @@ func (c *Config) validateForwardingRoutes() error {
 			return err
 		}
 		if err := validateRouteGeoMode(i, r); err != nil {
+			return err
+		}
+		if err := ValidateRateLimit(fmt.Sprintf("forwarding.routes[%d].rate_limit", i), r.RateLimit); err != nil {
 			return err
 		}
 	}

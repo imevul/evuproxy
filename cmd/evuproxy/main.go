@@ -14,6 +14,7 @@ import (
 	"github.com/imevul/evuproxy/internal/apply"
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/logging"
+	"github.com/imevul/evuproxy/internal/observability"
 )
 
 var (
@@ -42,6 +43,9 @@ func main() {
 		cmdDiscardPending(),
 		cmdRestorePreviousApplied(),
 		cmdPeerAdd(),
+		cmdPeerRemove(),
+		cmdPeerSet(),
+		cmdValidate(),
 	)
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -94,7 +98,8 @@ func cmdStatus() *cobra.Command {
 }
 
 func cmdServe() *cobra.Command {
-	var listen, tokenFile, corsOrigins, metricsDB string
+	var listen, tokenFile, corsOrigins, metricsDB, metricsListen string
+	var metricsListenInsecure bool
 	c := &cobra.Command{
 		Use:   "serve",
 		Short: "Run local HTTP API (bind127.0.0.1 by default)",
@@ -114,14 +119,28 @@ func cmdServe() *cobra.Command {
 				}
 				tok = strings.TrimSpace(string(b))
 			}
+			ml := strings.TrimSpace(metricsListen)
+			if ml == "" {
+				ml = strings.TrimSpace(os.Getenv("EVUPROXY_METRICS_LISTEN"))
+			}
+			if ml != "" {
+				if err := observability.ValidateMetricsListen(ml); err != nil {
+					if !metricsListenInsecure {
+						return fmt.Errorf("metrics listen: %w (use --metrics-listen-insecure to bind anyway)", err)
+					}
+					slog.Warn("metrics listen (insecure override)", "err", err)
+				}
+			}
 			s := &api.Server{
-				Listen:      listen,
-				Token:       tok,
-				Config:      cfgPath,
-				MetricsDB:   strings.TrimSpace(metricsDB),
-				Logger:      slog.Default(),
-				Version:     version,
-				CORSOrigins: corsOrigins,
+				Listen:                listen,
+				MetricsListen:         ml,
+				MetricsListenInsecure: metricsListenInsecure,
+				Token:                 tok,
+				Config:        cfgPath,
+				MetricsDB:     strings.TrimSpace(metricsDB),
+				Logger:        slog.Default(),
+				Version:       version,
+				CORSOrigins:   corsOrigins,
 			}
 			geopath := strings.TrimSpace(os.Getenv("EVUPROXY_GEOLITE_MMDB"))
 			if geopath != "" {
@@ -144,6 +163,8 @@ func cmdServe() *cobra.Command {
 	c.Flags().StringVar(&tokenFile, "token-file", "/etc/evuproxy/api.token", "file containing API bearer token")
 	c.Flags().StringVar(&corsOrigins, "cors-origins", "", "comma-separated allowed Origin values for cross-origin browser UIs; avoid * except local dev (token auth still required)")
 	c.Flags().StringVar(&metricsDB, "metrics-db", "", "peer metrics SQLite path (default: metrics.sqlite beside --config)")
+	c.Flags().StringVar(&metricsListen, "metrics-listen", "", "optional loopback Prometheus scrape address (e.g. 127.0.0.1:9848); also EVUPROXY_METRICS_LISTEN")
+	c.Flags().BoolVar(&metricsListenInsecure, "metrics-listen-insecure", false, "allow --metrics-listen on non-loopback addresses (unauthenticated /metrics)")
 	return c
 }
 
@@ -265,6 +286,108 @@ func cmdPeerAdd() *cobra.Command {
 	c.Flags().StringVar(&privateKeyOut, "private-key-out", "", "when generating a key pair, write the private key to this path (0600)")
 	c.Flags().BoolVar(&printGeneratedKey, "print-generated-key", false, "when generating a key pair, also print the private key to stderr (avoid in production logs)")
 	c.Flags().StringVar(&tunnelIP, "tunnel-ip", "", "tunnel address e.g. 10.100.0.5/32 (auto if omitted)")
+	c.Flags().BoolVar(&doApply, "apply", false, "run reload after saving")
+	return c
+}
+
+func cmdValidate() *cobra.Command {
+	var jsonOut bool
+	c := &cobra.Command{
+		Use:   "validate",
+		Short: "Validate config and generated nftables (dry-run, no apply)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			code, err := apply.ValidateConfigFileCLI(cfgPath, jsonOut, apply.ClientIPInfo{Source: apply.ClientIPSourceUnavailable}, nil)
+			if err != nil {
+				return err
+			}
+			if code != 0 {
+				return fmt.Errorf("validation failed")
+			}
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&jsonOut, "json", false, "print result as JSON on stdout")
+	return c
+}
+
+func cmdPeerRemove() *cobra.Command {
+	var name, publicKey string
+	var doApply bool
+	c := &cobra.Command{
+		Use:   "peer-remove",
+		Short: "Remove a WireGuard peer from config.yaml",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				return err
+			}
+			if err := apply.RemovePeerByNameOrKey(cfg, name, publicKey); err != nil {
+				return err
+			}
+			if err := apply.SaveConfigYAML(cfgPath, cfg); err != nil {
+				return err
+			}
+			if doApply {
+				return apply.Reload(cfgPath)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&name, "name", "", "peer name to remove")
+	c.Flags().StringVar(&publicKey, "public-key", "", "peer public key to remove")
+	c.Flags().BoolVar(&doApply, "apply", false, "run reload after saving")
+	return c
+}
+
+func cmdPeerSet() *cobra.Command {
+	var name, newName, tunnelIP, publicKey string
+	var disabled string
+	var doApply bool
+	c := &cobra.Command{
+		Use:   "peer-set",
+		Short: "Update fields on an existing WireGuard peer",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("--name is required")
+			}
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				return err
+			}
+			upd := apply.PeerSetUpdates{
+				NewName:   newName,
+				TunnelIP:  tunnelIP,
+				PublicKey: publicKey,
+			}
+			if disabled != "" {
+				switch strings.ToLower(strings.TrimSpace(disabled)) {
+				case "true", "1", "yes":
+					v := true
+					upd.Disabled = &v
+				case "false", "0", "no":
+					v := false
+					upd.Disabled = &v
+				default:
+					return fmt.Errorf("--disabled must be true or false")
+				}
+			}
+			if err := apply.UpdatePeerByName(cfg, name, upd); err != nil {
+				return err
+			}
+			if err := apply.SaveConfigYAML(cfgPath, cfg); err != nil {
+				return err
+			}
+			if doApply {
+				return apply.Reload(cfgPath)
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&name, "name", "", "peer name (required)")
+	c.Flags().StringVar(&newName, "new-name", "", "rename peer")
+	c.Flags().StringVar(&tunnelIP, "tunnel-ip", "", "new tunnel address")
+	c.Flags().StringVar(&publicKey, "public-key", "", "new public key")
+	c.Flags().StringVar(&disabled, "disabled", "", "true or false")
 	c.Flags().BoolVar(&doApply, "apply", false, "run reload after saving")
 	return c
 }

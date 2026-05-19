@@ -535,6 +535,87 @@
     return body;
   }
 
+  async function apiBlob(path, opts = {}) {
+    const r = await fetch(getApiBase() + path, {
+      ...opts,
+      headers: { ...headers(), ...opts.headers },
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      let err = text;
+      try {
+        const j = JSON.parse(text);
+        err = j.error || text;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(err);
+    }
+    return r.blob();
+  }
+
+  let pendingValidateHasLockout = false;
+
+  function clientIPSourceLabel(src) {
+    if (src === "direct") return "direct";
+    if (src === "xff") return "via proxy header";
+    return "unknown";
+  }
+
+  function renderPendingValidateResult(res) {
+    const panel = $("pending-validate-panel");
+    const ipLine = $("pending-client-ip");
+    const warnUl = $("pending-validate-warnings");
+    const ackWrap = $("pending-lockout-ack-wrap");
+    const ack = $("pending-lockout-ack");
+    if (panel) panel.classList.remove("is-hidden");
+    if (ipLine) {
+      const ip = res.detected_client_ip || "unknown";
+      const badge = clientIPSourceLabel(res.ip_detection_source);
+      ipLine.textContent = "Your connection appears as: " + ip + " (" + badge + ")";
+      if (res.ip_detection_note) {
+        ipLine.textContent += ". " + res.ip_detection_note;
+      }
+    }
+    pendingValidateHasLockout = false;
+    if (warnUl) {
+      warnUl.innerHTML = "";
+      const warnings = res.warnings || [];
+      const errors = res.errors || [];
+      if (!res.ok && errors.length) {
+        errors.forEach((e) => {
+          const li = document.createElement("li");
+          li.textContent = (e.code ? "[" + e.code + "] " : "") + (e.message || String(e));
+          warnUl.appendChild(li);
+        });
+        warnUl.classList.remove("is-hidden");
+      } else if (warnings.length) {
+        warnings.forEach((w) => {
+          const li = document.createElement("li");
+          li.textContent = (w.code ? "[" + w.code + "] " : "") + (w.message || String(w));
+          warnUl.appendChild(li);
+          if (w.code && String(w.code).startsWith("lockout_risk_")) pendingValidateHasLockout = true;
+        });
+        warnUl.classList.remove("is-hidden");
+      } else {
+        warnUl.classList.add("is-hidden");
+      }
+    }
+    if (ackWrap) ackWrap.classList.toggle("is-hidden", !pendingValidateHasLockout);
+    if (ack) ack.checked = false;
+  }
+
+  async function runPendingValidate() {
+    setPendingMsg("Checking config…");
+    try {
+      const res = await api("/v1/validate", { method: "POST" });
+      renderPendingValidateResult(res);
+      setPendingMsg(res.ok ? "Config check passed (nft -c)." : "Config check failed.", !res.ok);
+    } catch (e) {
+      setPendingMsg(String(e.message || e), true);
+    }
+  }
+
   let confirmModalCallback = null;
 
   function closeConfirmModal() {
@@ -585,6 +666,8 @@
     });
     const sec = $("page-" + name);
     if (sec) sec.hidden = false;
+    const contentEl = document.querySelector("main.content");
+    if (contentEl) contentEl.scrollTop = 0;
     document.querySelectorAll(".nav-link").forEach((a) => {
       a.classList.toggle("is-active", a.getAttribute("data-route") === name);
     });
@@ -1563,8 +1646,6 @@
       /* ignore */
     }
     syncAdvancedSettingsToggle();
-    syncGeoAdvancedFieldsVisibility();
-    syncRouteAdvancedFieldsVisibility();
   }
 
   function syncAdvancedSettingsToggle() {
@@ -1573,21 +1654,34 @@
     cb.checked = advancedSettingsEnabled();
   }
 
-  function syncGeoAdvancedFieldsVisibility() {
-    const adv = advancedSettingsEnabled();
-    const fields = $("geo-advanced-fields");
-    const teaser = $("geo-advanced-fields-teaser");
-    if (!fields || !teaser) return;
-    fields.hidden = !adv;
-    teaser.hidden = adv;
+  function setGeoEditorTab(which) {
+    const advanced = which === "advanced";
+    const defaultBtn = $("geo-tab-default-btn");
+    const advBtn = $("geo-tab-advanced-btn");
+    const defaultPanel = $("geo-tab-default-panel");
+    const advPanel = $("geo-tab-advanced-panel");
+    if (!defaultBtn || !advBtn || !defaultPanel || !advPanel) return;
+    defaultBtn.classList.toggle("is-active", !advanced);
+    advBtn.classList.toggle("is-active", advanced);
+    defaultBtn.setAttribute("aria-selected", advanced ? "false" : "true");
+    advBtn.setAttribute("aria-selected", advanced ? "true" : "false");
+    defaultPanel.hidden = advanced;
+    advPanel.hidden = !advanced;
   }
 
-  function syncRouteAdvancedFieldsVisibility() {
-    const adv = advancedSettingsEnabled();
-    const fields = $("route-advanced-fields");
-    const teaser = $("route-advanced-teaser");
-    if (fields) fields.hidden = !adv;
-    if (teaser) teaser.hidden = adv;
+  function setRouteEditorTab(which) {
+    const advanced = which === "advanced";
+    const defaultBtn = $("route-tab-default-btn");
+    const advBtn = $("route-tab-advanced-btn");
+    const defaultPanel = $("route-tab-default-panel");
+    const advPanel = $("route-tab-advanced-panel");
+    if (!defaultBtn || !advBtn || !defaultPanel || !advPanel) return;
+    defaultBtn.classList.toggle("is-active", !advanced);
+    advBtn.classList.toggle("is-active", advanced);
+    defaultBtn.setAttribute("aria-selected", advanced ? "false" : "true");
+    advBtn.setAttribute("aria-selected", advanced ? "true" : "false");
+    defaultPanel.hidden = advanced;
+    advPanel.hidden = !advanced;
   }
 
   function syncRoutePortMapModeUI() {
@@ -1631,7 +1725,6 @@
   }
 
   function readPortMapsFromForm(ports) {
-    if (!advancedSettingsEnabled()) return undefined;
     const mode = ($("route-f-port-map-mode") && $("route-f-port-map-mode").value) || "same";
     if (mode === "same") return undefined;
     if (mode === "one") {
@@ -1688,12 +1781,19 @@
       set_name: (($("geo-f-set-name") && $("geo-f-set-name").value) || "").trim(),
       zone_dir: (($("geo-f-zone-dir") && $("geo-f-zone-dir").value) || "").trim(),
       apply_to_input_allows: !!($("geo-f-apply-input-allows") && $("geo-f-apply-input-allows").checked),
+      break_glass: parseSourceAllowListInput(($("geo-f-break-glass") && $("geo-f-break-glass").value) || "")
+        .map((c) => c.toLowerCase())
+        .sort(),
+      global_deny: parseSourceAllowListInput(($("geo-f-global-deny") && $("geo-f-global-deny").value) || "")
+        .map((c) => c.toLowerCase())
+        .sort(),
     };
   }
 
   function geoblockingServerSnapshotForCompare() {
     if (!lastConfig) return null;
     const g = lastConfig.geo || {};
+    const fwd = lastConfig.forwarding || {};
     return {
       enabled: !!g.enabled,
       mode: String(g.mode || "allow").toLowerCase() === "block" ? "block" : "allow",
@@ -1704,6 +1804,14 @@
       set_name: String(g.set_name || "").trim(),
       zone_dir: String(g.zone_dir || "").trim(),
       apply_to_input_allows: !!g.apply_to_input_allows,
+      break_glass: (Array.isArray(g.break_glass_cidrs) ? g.break_glass_cidrs : [])
+        .map((c) => String(c).trim().toLowerCase())
+        .filter(Boolean)
+        .sort(),
+      global_deny: (Array.isArray(fwd.source_deny_cidrs) ? fwd.source_deny_cidrs : [])
+        .map((c) => String(c).trim().toLowerCase())
+        .filter(Boolean)
+        .sort(),
     };
   }
 
@@ -1759,8 +1867,6 @@
     const spl = $("settings-metrics-collection");
     if (spl) spl.checked = !!lastUIPrefs.metrics_collection_enabled;
     syncAdvancedSettingsToggle();
-    syncGeoAdvancedFieldsVisibility();
-    syncRouteAdvancedFieldsVisibility();
     syncContentWidthSelect();
     const notesEl = $("config-notes-body");
     const notesMsg = $("config-notes-msg");
@@ -2251,6 +2357,92 @@
     onboardPanel.hidden = !onboarding;
   }
 
+  function setOnboardMethodTab(which) {
+    const tab = which === "other" ? "other" : "linux";
+    const linuxBtn = $("onboard-tab-linux-btn");
+    const otherBtn = $("onboard-tab-other-btn");
+    const linuxPanel = $("onboard-tab-linux-panel");
+    const otherPanel = $("onboard-tab-other-panel");
+    if (!linuxBtn || !otherBtn || !linuxPanel || !otherPanel) return;
+    linuxBtn.classList.toggle("is-active", tab === "linux");
+    otherBtn.classList.toggle("is-active", tab === "other");
+    linuxBtn.setAttribute("aria-selected", tab === "linux" ? "true" : "false");
+    otherBtn.setAttribute("aria-selected", tab === "other" ? "true" : "false");
+    linuxPanel.hidden = tab !== "linux";
+    otherPanel.hidden = tab !== "other";
+  }
+
+  function closePeerQRModal() {
+    const modal = $("peer-qr-modal");
+    const wrap = $("peer-qr-canvas-wrap");
+    if (wrap) wrap.innerHTML = "";
+    if (modal) modal.classList.add("is-hidden");
+    const msg = $("peer-qr-msg");
+    if (msg) msg.textContent = "";
+  }
+
+  async function openPeerQRModal() {
+    const conf = extractOnboardConfFromOutput();
+    if (!conf) {
+      setOnboardMsg("Build YAML + WireGuard config first.", true);
+      return;
+    }
+    const idx = parseInt(($("peer-edit-index") && $("peer-edit-index").value) || "-1", 10);
+    if (idx < 0) {
+      setOnboardMsg("Save the peer first to show a stable QR.", true);
+      return;
+    }
+    const modal = $("peer-qr-modal");
+    const wrap = $("peer-qr-canvas-wrap");
+    const msg = $("peer-qr-msg");
+    if (!modal || !wrap) return;
+    wrap.innerHTML = "";
+    if (msg) msg.textContent = "Loading…";
+    modal.classList.remove("is-hidden");
+    try {
+      const blob = await apiBlob("/v1/peers/" + idx + "/qr.png", {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: conf,
+      });
+      const url = URL.createObjectURL(blob);
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "WireGuard config QR code";
+      img.onload = () => URL.revokeObjectURL(url);
+      wrap.appendChild(img);
+      if (msg) msg.textContent = "";
+    } catch (e) {
+      if (msg) msg.textContent = String(e.message || e);
+    }
+  }
+
+  async function geoAddDetectedIP() {
+    const bg = $("geo-f-break-glass");
+    if (!bg) return;
+    try {
+      const info = await api("/v1/client-ip");
+      const line = $("geo-detected-ip-line");
+      if (line) {
+        line.classList.remove("is-hidden");
+        const ip = info.detected_client_ip || "unknown";
+        line.textContent =
+          "Detected: " + ip + " (" + clientIPSourceLabel(info.ip_detection_source) + ")";
+      }
+      if (!info.detected_client_ip) {
+        setGeoMsg("Could not detect your IPv4 address.", true);
+        return;
+      }
+      const cidr = info.detected_client_ip + "/32";
+      const parts = parseSourceAllowListInput(bg.value);
+      if (!parts.includes(cidr)) parts.push(cidr);
+      bg.value = parts.join(", ");
+      setGeoMsg("Added " + cidr + " to break-glass.");
+    } catch (e) {
+      setGeoMsg(String(e.message || e), true);
+    }
+  }
+
   function openPeerEditor(index) {
     const cfg = lastConfig;
     if (!cfg || !cfg.peers[index]) return;
@@ -2314,6 +2506,7 @@
     const msg = $("onboard-msg");
     if (msg) msg.textContent = "";
     clearOnboardingBundleScriptPanels();
+    setOnboardMethodTab("linux");
   }
 
   async function savePeerEditor() {
@@ -3120,9 +3313,11 @@
       const gc = $("route-f-geo-countries");
       if (gc) gc.value = (r.geo_countries || []).join(", ");
       loadRoutePortMapsToForm(r);
+      writeRateLimitFields("route", r.rate_limit || {});
       if (dis) dis.checked = !r.disabled;
     }
-    syncRouteAdvancedFieldsVisibility();
+    if (index === -1) writeRateLimitFields("route", {});
+    setRouteEditorTab("default");
     syncRoutePortMapModeUI();
     syncRouteGeoModeUI();
     const modal = $("route-modal");
@@ -3143,6 +3338,60 @@
       .split(/[,]+/)
       .map((x) => x.trim())
       .filter(Boolean);
+  }
+
+  function readRateLimitField(id, max) {
+    const el = $(id);
+    if (!el) return 0;
+    const raw = String(el.value || "").trim();
+    if (raw === "") return 0;
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    if (max > 0 && n > max) return max;
+    return n;
+  }
+
+  function writeRateLimitFields(prefix, rl) {
+    const o = rl || {};
+    if (prefix === "route") {
+      const set = (suffix, val) => {
+        const el = $("route-f-rate-" + suffix);
+        if (el) el.value = val > 0 ? String(val) : "";
+      };
+      set("tcp-syn", o.tcp_syn_per_second || 0);
+      set("max-conn", o.max_conn_per_ip || 0);
+      set("udp", o.udp_per_second || 0);
+      return;
+    }
+    const tcp = $("geo-f-rate-tcp-syn");
+    if (tcp) tcp.value = o.tcp_syn_per_second > 0 ? String(o.tcp_syn_per_second) : "";
+    const mc = $("geo-f-rate-max-conn");
+    if (mc) mc.value = o.max_conn_per_ip > 0 ? String(o.max_conn_per_ip) : "";
+    const udp = $("geo-f-rate-udp");
+    if (udp) udp.value = o.udp_per_second > 0 ? String(o.udp_per_second) : "";
+  }
+
+  function readRateLimitFromForm(prefix) {
+    if (prefix === "route") {
+      const tcp = readRateLimitField("route-f-rate-tcp-syn", 10000);
+      const mc = readRateLimitField("route-f-rate-max-conn", 65535);
+      const udp = readRateLimitField("route-f-rate-udp", 100000);
+      if (!tcp && !mc && !udp) return null;
+      const rl = {};
+      if (tcp) rl.tcp_syn_per_second = tcp;
+      if (mc) rl.max_conn_per_ip = mc;
+      if (udp) rl.udp_per_second = udp;
+      return rl;
+    }
+    const tcp = readRateLimitField("geo-f-rate-tcp-syn", 10000);
+    const mc = readRateLimitField("geo-f-rate-max-conn", 65535);
+    const udp = readRateLimitField("geo-f-rate-udp", 100000);
+    if (!tcp && !mc && !udp) return null;
+    const rl = {};
+    if (tcp) rl.tcp_syn_per_second = tcp;
+    if (mc) rl.max_conn_per_ip = mc;
+    if (udp) rl.udp_per_second = udp;
+    return rl;
   }
 
   async function saveRouteEditor() {
@@ -3169,20 +3418,21 @@
       disabled: !(routeEn && routeEn.checked),
       source_allow_cidrs: srcList.length ? srcList : undefined,
     };
-    if (advancedSettingsEnabled()) {
-      const denyList = parseSourceAllowListInput(($("route-f-source-deny") && $("route-f-source-deny").value) || "");
-      if (denyList.length) entry.source_deny_cidrs = denyList;
-      const gm = ($("route-f-geo-mode") && $("route-f-geo-mode").value) || "inherit";
-      if (gm && gm !== "inherit") {
-        entry.geo_mode = gm;
-        if (gm === "custom") {
-          const gcc = parseSourceAllowListInput(($("route-f-geo-countries") && $("route-f-geo-countries").value) || "");
-          if (gcc.length) entry.geo_countries = gcc;
-        }
+    const denyList = parseSourceAllowListInput(($("route-f-source-deny") && $("route-f-source-deny").value) || "");
+    if (denyList.length) entry.source_deny_cidrs = denyList;
+    const gm = ($("route-f-geo-mode") && $("route-f-geo-mode").value) || "inherit";
+    if (gm && gm !== "inherit") {
+      entry.geo_mode = gm;
+      if (gm === "custom") {
+        const gcc = parseSourceAllowListInput(($("route-f-geo-countries") && $("route-f-geo-countries").value) || "");
+        if (gcc.length) entry.geo_countries = gcc;
       }
-      const maps = readPortMapsFromForm(ports);
-      if (maps) entry.port_maps = maps;
     }
+    const maps = readPortMapsFromForm(ports);
+    if (maps) entry.port_maps = maps;
+    const routeRL = readRateLimitFromForm("route");
+    if (routeRL) entry.rate_limit = routeRL;
+    else delete entry.rate_limit;
     const idxRaw = $("route-edit-index").value;
     if (idxRaw === "") cfg.forwarding.routes.push(entry);
     else cfg.forwarding.routes[+idxRaw] = entry;
@@ -3398,8 +3648,10 @@
   function setGeoMsg(text, isErr) {
     const el = $("geo-msg");
     if (!el) return;
-    el.textContent = text;
+    const t = String(text || "");
+    el.textContent = t;
     el.classList.toggle("err", !!isErr);
+    el.hidden = t.length === 0;
   }
 
   function countryFlagEmoji(code) {
@@ -3522,7 +3774,10 @@
     if (gd) {
       const fwd = (cfg && cfg.forwarding) || {};
       gd.value = (fwd.source_deny_cidrs || []).join(", ");
+      writeRateLimitFields("geo", fwd.rate_limit || {});
     }
+    const cs = $("geo-f-crowdsec-enabled");
+    if (cs) cs.checked = !!((cfg && cfg.crowdsec) || {}).enabled;
     const mode = String(g.mode || "allow").toLowerCase() === "block" ? "block" : "allow";
     setGeoListMode(mode);
     geoSelectedCodes = Array.isArray(g.countries)
@@ -3616,6 +3871,12 @@
     g.break_glass_cidrs = parseSourceAllowListInput(($("geo-f-break-glass") && $("geo-f-break-glass").value) || "");
     if (!cfg.forwarding) cfg.forwarding = {};
     cfg.forwarding.source_deny_cidrs = parseSourceAllowListInput(($("geo-f-global-deny") && $("geo-f-global-deny").value) || "");
+    const globalRL = readRateLimitFromForm("geo");
+    if (globalRL) cfg.forwarding.rate_limit = globalRL;
+    else delete cfg.forwarding.rate_limit;
+    const csOn = $("geo-f-crowdsec-enabled") && $("geo-f-crowdsec-enabled").checked;
+    if (csOn) cfg.crowdsec = { enabled: true };
+    else delete cfg.crowdsec;
     try {
       await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
       lastConfig = cfg;
@@ -3639,7 +3900,7 @@
       setApiStatus(false, String(e.message || e));
       setGeoMsg(String(e.message || e), true);
     }
-    syncGeoAdvancedFieldsVisibility();
+    setGeoEditorTab("default");
     void refreshGeoZonesTable();
   }
 
@@ -4160,6 +4421,7 @@
 
   /* ——— Logs ——— */
   const LOG_PREFIX_GEO = "evuproxy-geo-block";
+  const LOG_PREFIX_RATELIMIT = "evuproxy-ratelimit";
   const LOG_PREFIX_FWD = "evuproxy-forward-drop";
 
   /** journalctl: "TIME HOST kernel: …"; dmesg / fallback: prefix may appear without the " kernel: " marker. */
@@ -4178,15 +4440,32 @@
     let kind = "unknown";
     let rest = body.trim();
     const geoNeedle = LOG_PREFIX_GEO + ":";
+    const rlNeedle = LOG_PREFIX_RATELIMIT + ":";
     const fwdNeedle = LOG_PREFIX_FWD + ":";
     const gi = body.indexOf(geoNeedle);
+    const ri = body.indexOf(rlNeedle);
     const fi = body.indexOf(fwdNeedle);
-    if (gi >= 0 && (fi < 0 || gi <= fi)) {
-      kind = "geo";
-      rest = body.slice(gi + geoNeedle.length).trim();
-    } else if (fi >= 0) {
-      kind = "forward";
-      rest = body.slice(fi + fwdNeedle.length).trim();
+    let best = -1;
+    let bestKind = "";
+    let bestNeedle = "";
+    if (gi >= 0 && (best < 0 || gi < best)) {
+      best = gi;
+      bestKind = "geo";
+      bestNeedle = geoNeedle;
+    }
+    if (ri >= 0 && (best < 0 || ri < best)) {
+      best = ri;
+      bestKind = "ratelimit";
+      bestNeedle = rlNeedle;
+    }
+    if (fi >= 0 && (best < 0 || fi < best)) {
+      best = fi;
+      bestKind = "forward";
+      bestNeedle = fwdNeedle;
+    }
+    if (best >= 0) {
+      kind = bestKind;
+      rest = body.slice(best + bestNeedle.length).trim();
     }
     const kv = {};
     const flags = [];
@@ -4258,6 +4537,7 @@
     const toActive = rangeToMs != null && Number.isFinite(rangeToMs);
     return entries.filter((e) => {
       if (typeFilter === "geo" && e.kind !== "geo") return false;
+      if (typeFilter === "ratelimit" && e.kind !== "ratelimit") return false;
       if (typeFilter === "forward" && e.kind !== "forward") return false;
       if (needle && !e.searchBlob.includes(needle)) return false;
       if (fromActive || toActive) {
@@ -4271,6 +4551,7 @@
 
   function firewallLogKindLabel(kind) {
     if (kind === "geo") return "Geoblock";
+    if (kind === "ratelimit") return "Rate limit";
     if (kind === "forward") return "Forward drop";
     return "—";
   }
@@ -5423,6 +5704,21 @@
     peerTabFieldsBtn.addEventListener("click", () => setPeerEditorTab("fields"));
   if (peerTabOnboardBtn)
     peerTabOnboardBtn.addEventListener("click", () => setPeerEditorTab("onboard"));
+  const onboardTabLinuxBtn = $("onboard-tab-linux-btn");
+  const onboardTabOtherBtn = $("onboard-tab-other-btn");
+  if (onboardTabLinuxBtn) onboardTabLinuxBtn.addEventListener("click", () => setOnboardMethodTab("linux"));
+  if (onboardTabOtherBtn) onboardTabOtherBtn.addEventListener("click", () => setOnboardMethodTab("other"));
+  const onboardShowQR = $("onboard-show-qr");
+  if (onboardShowQR) onboardShowQR.addEventListener("click", () => void openPeerQRModal());
+  const peerQrClose = $("peer-qr-close");
+  if (peerQrClose) peerQrClose.addEventListener("click", closePeerQRModal);
+  const peerQrModal = $("peer-qr-modal");
+  if (peerQrModal) {
+    const backdrop = peerQrModal.querySelector(".modal-backdrop");
+    if (backdrop) backdrop.addEventListener("click", closePeerQRModal);
+  }
+  const geoAddIP = $("geo-add-detected-ip");
+  if (geoAddIP) geoAddIP.addEventListener("click", () => void geoAddDetectedIP());
   $("peers-add-start").addEventListener("click", async () => {
     if (!lastConfig) return;
     $("peer-edit-index").value = "";
@@ -5464,6 +5760,10 @@
     if (!lastConfig) refreshRoutesPage().then(() => openRouteEditor(-1));
     else openRouteEditor(-1);
   });
+  const routeTabDefault = $("route-tab-default-btn");
+  const routeTabAdvanced = $("route-tab-advanced-btn");
+  if (routeTabDefault) routeTabDefault.addEventListener("click", () => setRouteEditorTab("default"));
+  if (routeTabAdvanced) routeTabAdvanced.addEventListener("click", () => setRouteEditorTab("advanced"));
   $("route-save").addEventListener("click", saveRouteEditor);
   $("route-cancel").addEventListener("click", closeRouteEditor);
   $("inbound-refresh").addEventListener("click", refreshInboundPage);
@@ -5473,6 +5773,10 @@
   });
   $("inbound-save").addEventListener("click", saveInboundEditor);
   $("inbound-cancel").addEventListener("click", closeInboundEditor);
+  const geoTabDefault = $("geo-tab-default-btn");
+  const geoTabAdvanced = $("geo-tab-advanced-btn");
+  if (geoTabDefault) geoTabDefault.addEventListener("click", () => setGeoEditorTab("default"));
+  if (geoTabAdvanced) geoTabAdvanced.addEventListener("click", () => setGeoEditorTab("advanced"));
   $("geo-save").addEventListener("click", saveGeoblocking);
   $("geo-refresh").addEventListener("click", refreshGeoblockingPage);
   $("geo-update-lists").addEventListener("click", geoUpdateLists);
@@ -5484,6 +5788,10 @@
   if (geoZd) geoZd.addEventListener("input", syncGeoUnsavedIndicator);
   const geoApplyInputAllows = $("geo-f-apply-input-allows");
   if (geoApplyInputAllows) geoApplyInputAllows.addEventListener("change", syncGeoUnsavedIndicator);
+  const geoBreakGlass = $("geo-f-break-glass");
+  if (geoBreakGlass) geoBreakGlass.addEventListener("input", syncGeoUnsavedIndicator);
+  const geoGlobalDeny = $("geo-f-global-deny");
+  if (geoGlobalDeny) geoGlobalDeny.addEventListener("input", syncGeoUnsavedIndicator);
   const geoModeBlock = $("geo-mode-block");
   const geoModeAllow = $("geo-mode-allow");
   if (geoModeBlock) {
@@ -5786,7 +6094,17 @@
       renderPendingDiffPanel();
     });
   }
+  const pendingCheck = $("pending-check-config");
+  if (pendingCheck) pendingCheck.addEventListener("click", () => void runPendingValidate());
+
   $("pending-apply").addEventListener("click", async () => {
+    if (pendingValidateHasLockout) {
+      const ack = $("pending-lockout-ack");
+      if (!ack || !ack.checked) {
+        setPendingMsg("Check config and confirm you understand the lockout risks before applying.", true);
+        return;
+      }
+    }
     setPendingMsg("…");
     try {
       await api("/v1/reload", { method: "POST" });

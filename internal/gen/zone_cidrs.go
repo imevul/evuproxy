@@ -10,8 +10,8 @@ import (
 	"github.com/imevul/evuproxy/internal/config"
 )
 
-// zoneCIDRsForCountries reads IPDeny-style zone files and returns unique CIDR lines.
-func zoneCIDRsForCountries(zoneDir string, countries []string) ([]string, error) {
+// ZoneCIDRsForCountries reads IPDeny-style zone files and returns unique CIDR lines.
+func ZoneCIDRsForCountries(zoneDir string, countries []string) ([]string, error) {
 	seen := map[string]struct{}{}
 	var out []string
 	for _, cc := range countries {
