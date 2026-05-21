@@ -86,7 +86,7 @@ Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel path), n
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
+| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Drops are logged with prefix **`evuproxy-crowdsec`** (visible in the admin **Logs** view). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
 
 **nftables evaluation order (forward path):** global deny → per-route deny → CrowdSec block on **inet** forward (if enabled; break-glass exempt) → per-source rate limits → geo on INPUT/prerouting (break-glass skips geo) → per-route allow → DNAT.
 

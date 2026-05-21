@@ -4423,6 +4423,7 @@
   const LOG_PREFIX_GEO = "evuproxy-geo-block";
   const LOG_PREFIX_RATELIMIT = "evuproxy-ratelimit";
   const LOG_PREFIX_FWD = "evuproxy-forward-drop";
+  const LOG_PREFIX_CROWDSEC = "evuproxy-crowdsec";
 
   /** journalctl: "TIME HOST kernel: …"; dmesg / fallback: prefix may appear without the " kernel: " marker. */
   function parseFirewallLogLine(raw) {
@@ -4442,9 +4443,11 @@
     const geoNeedle = LOG_PREFIX_GEO + ":";
     const rlNeedle = LOG_PREFIX_RATELIMIT + ":";
     const fwdNeedle = LOG_PREFIX_FWD + ":";
+    const csNeedle = LOG_PREFIX_CROWDSEC + ":";
     const gi = body.indexOf(geoNeedle);
     const ri = body.indexOf(rlNeedle);
     const fi = body.indexOf(fwdNeedle);
+    const ci = body.indexOf(csNeedle);
     let best = -1;
     let bestKind = "";
     let bestNeedle = "";
@@ -4462,6 +4465,11 @@
       best = fi;
       bestKind = "forward";
       bestNeedle = fwdNeedle;
+    }
+    if (ci >= 0 && (best < 0 || ci < best)) {
+      best = ci;
+      bestKind = "crowdsec";
+      bestNeedle = csNeedle;
     }
     if (best >= 0) {
       kind = bestKind;
@@ -4539,6 +4547,7 @@
       if (typeFilter === "geo" && e.kind !== "geo") return false;
       if (typeFilter === "ratelimit" && e.kind !== "ratelimit") return false;
       if (typeFilter === "forward" && e.kind !== "forward") return false;
+      if (typeFilter === "crowdsec" && e.kind !== "crowdsec") return false;
       if (needle && !e.searchBlob.includes(needle)) return false;
       if (fromActive || toActive) {
         if (!Number.isFinite(e.parsedTimeMs)) return false;
@@ -4553,6 +4562,7 @@
     if (kind === "geo") return "Geoblock";
     if (kind === "ratelimit") return "Rate limit";
     if (kind === "forward") return "Forward drop";
+    if (kind === "crowdsec") return "CrowdSec";
     return "—";
   }
 

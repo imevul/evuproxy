@@ -12,6 +12,7 @@ const (
 	LogPrefixGeoBlock    = "evuproxy-geo-block"
 	LogPrefixRateLimit   = "evuproxy-ratelimit"
 	LogPrefixForwardDrop = "evuproxy-forward-drop"
+	LogPrefixCrowdsec    = "evuproxy-crowdsec"
 )
 
 // FirewallDropLogs returns recent lines for geoblock and forward drop events.
@@ -66,7 +67,7 @@ func filterDropLines(blob string) []string {
 		if line == "" {
 			continue
 		}
-		if strings.Contains(line, LogPrefixGeoBlock) || strings.Contains(line, LogPrefixForwardDrop) || strings.Contains(line, LogPrefixRateLimit) {
+		if strings.Contains(line, LogPrefixGeoBlock) || strings.Contains(line, LogPrefixForwardDrop) || strings.Contains(line, LogPrefixRateLimit) || strings.Contains(line, LogPrefixCrowdsec) {
 			out = append(out, line)
 		}
 	}

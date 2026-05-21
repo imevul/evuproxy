@@ -1063,6 +1063,7 @@
                   <option value="">All</option>
                   <option value="geo">Geoblock</option>
                   <option value="ratelimit">Rate limit</option>
+                  <option value="crowdsec">CrowdSec</option>
                   <option value="forward">Forward drop</option>
                 </select>
               </label>
@@ -1305,7 +1306,8 @@
         <p>
           Rows come from nftables <code class="inline">log</code> targets with prefixes
           <code class="inline">evuproxy-geo-block</code> (IPv4 packets dropped by geoblocking rules),
-          <code class="inline">evuproxy-ratelimit</code> (rate-limit drops on published ports), and
+          <code class="inline">evuproxy-ratelimit</code> (rate-limit drops on published ports),
+          <code class="inline">evuproxy-crowdsec</code> (CrowdSec ban drops on published ports), and
           <code class="inline">evuproxy-forward-drop</code> (forward-chain drops, e.g. disallowed WAN traffic hitting forwarded ports).
         </p>
         <p>The API prefers <code class="inline">journalctl</code> (newest first) and falls back to <code class="inline">dmesg</code> when journal data is unavailable.</p>

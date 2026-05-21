@@ -21,7 +21,7 @@ labels:
 
 # --- EvuProxy / nftables kernel drops (geo, rate limit, forward catch-all) ---
 # Generated rules log with prefixes: evuproxy-geo-block, evuproxy-ratelimit,
-# evuproxy-forward-drop (see internal/apply/logs.go).
+# evuproxy-crowdsec, evuproxy-forward-drop (see internal/apply/logs.go).
 #
 # Kernel lines look like:  kernel: evuproxy-ratelimit: IN=eth0 SRC=1.2.3.4 ...
 # A generic iptables/netfilter parser may extract SRC=; for production, add a

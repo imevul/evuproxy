@@ -29,6 +29,7 @@ func TestNFTables_crowdsec_enabled(t *testing.T) {
 		"set crowdsec_block_v4",
 		"ip saddr @crowdsec_block_v4",
 		`iifname "eth0" oifname "wg0" ip saddr @crowdsec_block_v4`,
+		`log prefix "evuproxy-crowdsec: "`,
 	} {
 		if !strings.Contains(s, needle) {
 			t.Fatalf("missing %q in generated nft", needle)

@@ -186,11 +186,7 @@ func writePolicyForwardDrops(b *strings.Builder, pub, wg string, routeIndex int,
 		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, srcDeny, proto, portExpr)
 	}
 	if crowdsecSet != "" {
-		if breakGlass != "" {
-			fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s ip saddr != @%s %s dport %s drop\n", pub, wg, crowdsecSet, breakGlass, proto, portExpr)
-		} else {
-			fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, crowdsecSet, proto, portExpr)
-		}
+		writePolicyCrowdsecForwardDrop(b, pub, wg, crowdsecSet, breakGlass, proto, portExpr)
 	}
 	writePolicyForwardRateLimit(b, pub, wg, routeIndex, global, route, proto, portExpr, breakGlass)
 }
