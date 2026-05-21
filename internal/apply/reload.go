@@ -21,10 +21,10 @@ const (
 func Reload(cfgPath string) error {
 	err := reload(cfgPath)
 	if err != nil {
-		IncApplyFailure()
+		_ = RecordApplyFailure(cfgPath)
 		return err
 	}
-	IncApplySuccess()
+	_ = RecordApplySuccess(cfgPath)
 	return nil
 }
 
@@ -97,6 +97,7 @@ func reload(cfgPath string) error {
 	}
 	if c.CrowdSec.Enabled {
 		slog.Warn("crowdsec enabled: ensure CrowdSec nftables bouncer populates @crowdsec_block_v4 in table inet evuproxy (see contrib/crowdsec/)")
+		tryRestartCrowdsecBouncer(cfgPath)
 	}
 	return nil
 }
@@ -191,10 +192,10 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 func UpdateGeo(cfgPath string) error {
 	err := updateGeo(cfgPath)
 	if err != nil {
-		IncApplyFailure()
+		_ = RecordApplyFailure(cfgPath)
 		return err
 	}
-	IncApplySuccess()
+	_ = RecordApplySuccess(cfgPath)
 	return nil
 }
 

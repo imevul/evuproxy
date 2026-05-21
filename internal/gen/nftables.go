@@ -32,14 +32,16 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	crowdsecSet := crowdsecSetName(c.CrowdSec.Enabled)
 
 	type formattedRoute struct {
-		proto     string
-		portExpr  string
-		target    string
-		srcAllow  string
-		srcDeny   string
-		geo       routeGeoParams
-		rateLimit config.RateLimit
-		dnat      []routeDNATLine
+		routeIndex  int
+		proto       string
+		portExpr    string
+		target      string
+		srcAllow    string
+		srcDeny     string
+		geo         routeGeoParams
+		globalRL    config.RateLimit
+		routeRL     config.RateLimit
+		dnat        []routeDNATLine
 	}
 	var routes []formattedRoute
 	uniqTargets := map[string]struct{}{}
@@ -76,9 +78,8 @@ func nftablesRoutes(c *config.Config) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("forwarding.routes[%d]: %w", i, err)
 			}
-			rl := config.EffectiveRateLimit(c.Forwarding.RateLimit, r.RateLimit)
 			for _, p := range protos {
-				routes = append(routes, formattedRoute{p, expr, target, srcAllow, srcDeny, gp, rl, dnatLines})
+				routes = append(routes, formattedRoute{i, p, expr, target, srcAllow, srcDeny, gp, c.Forwarding.RateLimit, r.RateLimit, dnatLines})
 				uniqTargets[target] = struct{}{}
 			}
 		}
@@ -104,6 +105,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	if err := writeRouteCustomGeoSets(&b, c); err != nil {
 		return "", err
 	}
+	writeRateLimitSets(&b, rateLimitSetNeedsFor(c))
 
 	fmt.Fprintf(&b, `    chain input {
         type filter hook input priority 0; policy drop;
@@ -136,7 +138,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	fmt.Fprintf(&b, "        udp dport %d accept\n", c.WireGuard.ListenPort)
 
 	for _, r := range routes {
-		writePolicyInputPort(&b, r.geo, r.rateLimit, r.proto, r.portExpr, r.srcAllow, r.srcDeny, crowdsecSet, breakGlass, globalDeny)
+		writePolicyInputPort(&b, r.geo, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.srcAllow, r.srcDeny, crowdsecSet, breakGlass, globalDeny)
 	}
 
 	fmt.Fprintf(&b, `    }
@@ -155,7 +157,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	}
 
 	for _, r := range routes {
-		writePolicyForwardDrops(&b, pub, wg, r.rateLimit, r.proto, r.portExpr, r.srcDeny, crowdsecSet, breakGlass, globalDeny)
+		writePolicyForwardDrops(&b, pub, wg, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.srcDeny, crowdsecSet, breakGlass, globalDeny)
 	}
 
 	for _, r := range routes {
@@ -194,7 +196,7 @@ table ip evuproxy {
 
 	for _, r := range routes {
 		for _, line := range r.dnat {
-			writePolicyDnatLine(&b, r.geo, r.rateLimit, r.proto, line.publicDport, line.dnatTo, r.srcAllow, r.srcDeny, breakGlass, globalDeny)
+			writePolicyDnatLine(&b, r.geo, r.proto, line.publicDport, line.dnatTo, r.srcAllow, r.srcDeny, breakGlass, globalDeny)
 		}
 	}
 

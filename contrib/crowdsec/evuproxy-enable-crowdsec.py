@@ -9,14 +9,28 @@ import sys
 from pathlib import Path
 
 
+def _parse_enabled_token(token: str) -> bool | None:
+    """Match Go yaml.v3 bool parsing: true/True; quoted strings are not bool true."""
+    raw = token.strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+        return None
+    low = raw.lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    return None
+
+
 def is_enabled(text: str) -> bool:
-    return bool(
-        re.search(
-            r"^crowdsec:\s*\n(?:[ \t#].*\n)*?[ \t]+enabled:\s*true\b",
-            text,
-            re.MULTILINE,
-        )
+    m = re.search(
+        r"^crowdsec:\s*\n(?:[ \t#].*\n)*?[ \t]+enabled:\s*(\S+)",
+        text,
+        re.MULTILINE,
     )
+    if not m:
+        return False
+    return _parse_enabled_token(m.group(1)) is True
 
 
 def enable(text: str) -> str:

@@ -6,14 +6,14 @@ Operational notes for operating EvuProxy safely. The HTTP API reference is in [L
 
 - **No project telemetry:** EvuProxy does not phone home or report usage to the authors. Outbound connections are **operational only** (e.g. GeoIP zone downloads to IPDeny or your configured source, HTTPS for install scripts if you use them).
 - **Logs and stats:** **`GET /logs`** returns recent firewall-related journal lines (may include source/destination IPs). **`GET /stats`** and authenticated **`GET /api/v1/metrics`** expose WireGuard and nftables-derived data (keys, endpoints, counters). Treat API responses and host logs as **sensitive** in multi-tenant or shared-log environments.
-- **Prometheus (optional):** When enabled via **`--metrics-listen`** (loopback only by default), **`GET /metrics`** on that separate port has **no authentication** and exposes coarse host metrics (apply counters, maintenance mode, peer online count). Do not bind to non-loopback without **`--metrics-listen-insecure`** and a firewall.
+- **Prometheus (optional):** When enabled via **`--metrics-listen`** (loopback only by default), **`GET /metrics`** on that separate port has **no authentication** and exposes coarse host metrics (apply counters from **`apply-metrics.json`**, maintenance mode, peer online count). Do not bind to non-loopback without **`--metrics-listen-insecure`** and a firewall.
 - **Structured file logs:** With **`EVUPROXY_LOG_DIR`**, **`evuproxy serve`** writes JSON lines under that directory (e.g. **`/var/log/evuproxy/evuproxy.jsonl`**). Forward these to your SIEM with Vector, Fluent Bit, or rsyslog. Do not log API tokens or private keys; keep log files root-readable.
 - **Audit events:** **`state/events.jsonl`** records high-level apply/config events (no full config bodies). Same confidentiality as host audit logs.
 - **Geo fetches:** Zone downloads are made from the **server’s public IP** (or the egress used for HTTPS). See [Third-party data](third-party-data.md) for IPDeny terms.
 
 ## Security roadmap (scoped access)
 
-**Deferred:** separate read vs write API tokens, CSRF hardening beyond bearer tokens, and a strict **Content-Security-Policy** for the static UI are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost.
+**Deferred:** separate read vs write API tokens, CSRF hardening beyond bearer tokens, and a strict **Content-Security-Policy** for the static UI are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost. **`evuproxy serve` warns** when the API bind is not loopback and `--cors-origins` is `*`.
 
 ## Operational security notes
 

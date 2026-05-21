@@ -31,7 +31,7 @@ peers: []
 	if err := os.WriteFile(filepath.Join(dir, "wg.key"), []byte("dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXk=\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	apply.IncApplySuccess()
+	_ = apply.RecordApplySuccess(cfgPath)
 	out, err := PrometheusText(cfgPath)
 	if err != nil {
 		t.Fatal(err)

@@ -63,7 +63,8 @@ CROWDSEC_INSTALL_YES=1 CROWDSEC_INSTALL_MODE=docker make crowdsec-install
 | [`docker-compose.example.yaml`](docker-compose.example.yaml) | Docker: CrowdSec + nft bouncer services |
 | [`native-bouncer.yaml.example`](native-bouncer.yaml.example) | Native nft bouncer config template (table/set for EvuProxy) |
 | [`.env.example`](.env.example) | Docker: bouncer API key template (install writes `.env`) |
-| [`.install-mode`](.install-mode) | Written by install: `docker` or `native` (gitignored) |
+| [`.install-mode`](.install-mode) | Legacy copy beside this directory (gitignored) |
+| `/etc/evuproxy/crowdsec-install-mode` | Host canonical install mode: `docker` or `native` |
 
 ---
 
@@ -165,11 +166,15 @@ docker compose -f docker-compose.example.yaml up -d crowdsec-firewall-bouncer
 
 ## After `evuproxy reload`
 
-Every `evuproxy reload` **recreates** table `inet evuproxy` and **clears** `crowdsec_block_v4` until the bouncer repopulates it (usually seconds). During an incident you may restart the bouncer:
+Every `evuproxy reload` **recreates** table `inet evuproxy` and **clears** `crowdsec_block_v4` until the bouncer repopulates it (usually seconds, native bouncer default poll **10s**). During an incident you may restart the bouncer:
 
 ```bash
 docker compose -f docker-compose.example.yaml restart crowdsec-firewall-bouncer
+# or native:
+sudo systemctl restart crowdsec-firewall-bouncer
 ```
+
+**Optional:** set **`EVUPROXY_CROWDSEC_BOUNCER_RESTART=1`** so `evuproxy reload` runs **`systemctl try-restart crowdsec-firewall-bouncer`** when `crowdsec.enabled` (native installs only; Docker restart is manual — see compose path above).
 
 ---
 
@@ -207,7 +212,14 @@ CROWDSEC_INSTALL_MODE=native make crowdsec-install
 
 The script installs acquisition config, Hub collection, bouncer registration, and (if no existing bouncer config) writes `/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml` from `native-bouncer.yaml.example` with **set-only** mode targeting **`inet evuproxy` / `crowdsec_block_v4`**.
 
-If you already have a bouncer config, merge those settings manually and store the API key in `/etc/evuproxy/crowdsec-bouncer.key`.
+**Existing bouncer config:** If `/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml` already exists but does **not** target EvuProxy, install **fails** with instructions. Options:
+
+- Merge manually using `native-bouncer.yaml.example`, then re-run install.
+- **`CROWDSEC_FORCE_BOUNCER_CONFIG=1`** — backup the existing file and install the EvuProxy template.
+- **`CROWDSEC_SKIP_BOUNCER_CONFIG=1`** — skip bouncer config (you manage CrowdSec elsewhere).
+- If **fail2ban** or another tool owns the host nftables bouncer, use **Docker** instead: `CROWDSEC_INSTALL_MODE=docker make crowdsec-install`.
+
+Store the API key in `/etc/evuproxy/crowdsec-bouncer.key` when merging manually.
 
 ---
 

@@ -17,15 +17,15 @@ func RemovePeerByNameOrKey(cfg *config.Config, name, publicKey string) error {
 	if name == "" && publicKey == "" {
 		return fmt.Errorf("at least one of --name or --public-key is required")
 	}
+	both := name != "" && publicKey != ""
 	var kept []config.Peer
 	var removed bool
 	for _, p := range cfg.Peers {
-		match := false
-		if name != "" && strings.EqualFold(strings.TrimSpace(p.Name), name) {
-			match = true
-		}
-		if publicKey != "" && strings.TrimSpace(p.PublicKey) == publicKey {
-			match = true
+		nameMatch := name != "" && strings.EqualFold(strings.TrimSpace(p.Name), name)
+		keyMatch := publicKey != "" && strings.TrimSpace(p.PublicKey) == publicKey
+		match := nameMatch || keyMatch
+		if both {
+			match = nameMatch && keyMatch
 		}
 		if match {
 			removed = true

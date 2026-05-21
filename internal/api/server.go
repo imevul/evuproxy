@@ -149,7 +149,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/pending", s.auth(s.handlePending))
 	mux.HandleFunc("POST /api/v1/validate", s.auth(s.handleValidate))
 	mux.HandleFunc("GET /api/v1/client-ip", s.auth(s.handleClientIP))
-	mux.HandleFunc("GET /api/v1/peers/{index}/qr.png", s.auth(s.handlePeerQR))
 	mux.HandleFunc("POST /api/v1/peers/{index}/qr.png", s.auth(s.handlePeerQR))
 	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
 	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
@@ -735,6 +734,9 @@ func (s *Server) Run() error {
 	}
 	handler := http.Handler(s.Routes())
 	if cors := parseCORSOrigins(s.CORSOrigins); cors != nil {
+		if cors.allowAll && !isLoopbackListen(s.Listen) {
+			s.Logger.Warn("API listen is not loopback and --cors-origins allows any origin; use an explicit origin list when the API is reachable beyond localhost")
+		}
 		handler = cors.wrap(handler)
 	}
 	// ReadHeaderTimeout caps slow request headers (slowloris). ReadTimeout bounds the full
@@ -764,4 +766,13 @@ func (s *Server) Run() error {
 		}()
 	}
 	return srv.ListenAndServe()
+}
+
+func isLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		host = strings.TrimSpace(addr)
+	}
+	host = strings.Trim(host, "[]")
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
 }

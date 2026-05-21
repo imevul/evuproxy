@@ -135,7 +135,7 @@ func writeRouteCustomGeoSets(b *strings.Builder, c *config.Config) error {
 	return nil
 }
 
-func writePolicyDnatLine(b *strings.Builder, gp routeGeoParams, rl config.RateLimit, proto, publicDport, dnatTo, srcAllow, srcDeny, breakGlass, globalDeny string) {
+func writePolicyDnatLine(b *strings.Builder, gp routeGeoParams, proto, publicDport, dnatTo, srcAllow, srcDeny, breakGlass, globalDeny string) {
 	if publicDport == "" || dnatTo == "" {
 		return
 	}
@@ -145,7 +145,6 @@ func writePolicyDnatLine(b *strings.Builder, gp routeGeoParams, rl config.RateLi
 	if srcDeny != "" {
 		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", srcDeny, proto, publicDport)
 	}
-	writePolicyRateLimit(b, rl, proto, publicDport, breakGlass)
 	if !gp.enabled {
 		writePolicyDnatAllow(b, proto, publicDport, dnatTo, srcAllow)
 		return
@@ -185,7 +184,7 @@ func writePolicyGeoBlockDrop(b *strings.Builder, geoSet, breakGlass, proto, port
 	fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", geoSet, proto, portExpr)
 }
 
-func writePolicyInputPort(b *strings.Builder, gp routeGeoParams, rl config.RateLimit, proto, portExpr, srcAllow, srcDeny, crowdsecSet, breakGlass, globalDeny string) {
+func writePolicyInputPort(b *strings.Builder, gp routeGeoParams, routeIndex int, globalRL, routeRL config.RateLimit, proto, portExpr, srcAllow, srcDeny, crowdsecSet, breakGlass, globalDeny string) {
 	if portExpr == "" {
 		return
 	}
@@ -196,7 +195,7 @@ func writePolicyInputPort(b *strings.Builder, gp routeGeoParams, rl config.RateL
 		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", srcDeny, proto, portExpr)
 	}
 	writePolicyCrowdsecDrop(b, crowdsecSet, breakGlass, proto, portExpr)
-	writePolicyRateLimit(b, rl, proto, portExpr, breakGlass)
+	writePolicyRateLimit(b, routeIndex, globalRL, routeRL, proto, portExpr, breakGlass)
 	if !gp.enabled {
 		writePolicyInputAllow(b, proto, portExpr, srcAllow)
 		return

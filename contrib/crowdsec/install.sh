@@ -13,6 +13,7 @@ COMPOSE_FILE="${DIR}/docker-compose.example.yaml"
 BOUNCER_NAME="${CROWDSEC_BOUNCER_NAME:-evuproxy-nft-bouncer}"
 ENV_FILE="${DIR}/.env"
 INSTALL_MODE_FILE="${DIR}/.install-mode"
+HOST_INSTALL_MODE_FILE="/etc/evuproxy/crowdsec-install-mode"
 ENABLE_HELPER="${DIR}/evuproxy-enable-crowdsec.py"
 NATIVE_BOUNCER_TEMPLATE="${DIR}/native-bouncer.yaml.example"
 NATIVE_ACQUIS_DEST="/etc/crowdsec/acquis.d/evuproxy.yaml"
@@ -78,7 +79,7 @@ config_crowdsec_enabled() {
 
 enable_crowdsec_in_config() {
 	local cfg="$1"
-	python3 "$ENABLE_HELPER" --enable "$cfg"
+	run_root python3 "$ENABLE_HELPER" --enable "$cfg"
 }
 
 run_evuproxy_reload() {
@@ -151,13 +152,51 @@ choose_install_method() {
 
 save_install_method() {
 	printf '%s\n' "$1" >"$INSTALL_MODE_FILE"
+	if [[ "$1" == "docker" || "$1" == "native" ]]; then
+		run_root install -d -m 0755 /etc/evuproxy
+		printf '%s\n' "$1" | run_root tee "$HOST_INSTALL_MODE_FILE" >/dev/null
+		run_root chmod 0644 "$HOST_INSTALL_MODE_FILE"
+	fi
+}
+
+detect_install_method() {
+	if systemctl is-active --quiet crowdsec-firewall-bouncer.service 2>/dev/null; then
+		printf 'native'
+		return 0
+	fi
+	if compose ps --status running 2>/dev/null | grep -qE 'crowdsec|crowdsec-firewall-bouncer'; then
+		printf 'docker'
+		return 0
+	fi
+	return 1
 }
 
 read_install_method() {
+	if [[ -n "${CROWDSEC_INSTALL_MODE:-}" ]]; then
+		case "${CROWDSEC_INSTALL_MODE,,}" in
+			docker | native) printf '%s' "${CROWDSEC_INSTALL_MODE,,}"; return 0 ;;
+		esac
+	fi
+	if [[ -f "$HOST_INSTALL_MODE_FILE" ]]; then
+		local m
+		m="$(tr -d '[:space:]' <"$HOST_INSTALL_MODE_FILE")"
+		if [[ "$m" == "docker" || "$m" == "native" ]]; then
+			printf '%s' "$m"
+			return 0
+		fi
+	fi
 	if [[ -f "$INSTALL_MODE_FILE" ]]; then
-		tr -d '[:space:]' <"$INSTALL_MODE_FILE"
+		local m
+		m="$(tr -d '[:space:]' <"$INSTALL_MODE_FILE")"
+		if [[ "$m" == "docker" || "$m" == "native" ]]; then
+			printf '%s' "$m"
+			return 0
+		fi
+	fi
+	if detect_install_method; then
 		return 0
 	fi
+	warn "install mode unknown — assuming docker (re-run install or set CROWDSEC_INSTALL_MODE)"
 	printf 'docker'
 }
 
@@ -375,22 +414,59 @@ ensure_native_bouncer_key() {
 	printf '%s' "$key"
 }
 
-configure_native_bouncer() {
+native_bouncer_targets_evuproxy() {
+	[[ -f "$NATIVE_BOUNCER_CFG" ]] || return 1
+	grep -qE '^[[:space:]]*set-only:[[:space:]]*true[[:space:]]*$' "$NATIVE_BOUNCER_CFG" 2>/dev/null || return 1
+	grep -qE '^[[:space:]]*table:[[:space:]]*evuproxy[[:space:]]*$' "$NATIVE_BOUNCER_CFG" 2>/dev/null || return 1
+	grep -qE '^[[:space:]]*set:[[:space:]]*crowdsec_block_v4[[:space:]]*$' "$NATIVE_BOUNCER_CFG" 2>/dev/null || return 1
+	return 0
+}
+
+install_native_bouncer_config() {
 	local key="$1"
-	if [[ -f "$NATIVE_BOUNCER_CFG" ]]; then
-		if grep -q 'crowdsec_block_v4' "$NATIVE_BOUNCER_CFG" 2>/dev/null && grep -q 'evuproxy' "$NATIVE_BOUNCER_CFG" 2>/dev/null; then
-			info "bouncer config already references evuproxy / crowdsec_block_v4"
-			return 0
-		fi
-		warn "existing bouncer config: $NATIVE_BOUNCER_CFG"
-		warn "merge EvuProxy table/set (inet evuproxy, crowdsec_block_v4, set-only: true)"
-		warn "see native-bouncer.yaml.example and https://doc.crowdsec.net/docs/bouncers/nftables"
-		return 0
-	fi
 	info "installing bouncer config to $NATIVE_BOUNCER_CFG"
 	run_root install -d -m 0755 /etc/crowdsec/bouncers
-	sed "s/__BOUNCER_KEY__/${key}/" "$NATIVE_BOUNCER_TEMPLATE" | run_root tee "$NATIVE_BOUNCER_CFG" >/dev/null
+	python3 - "$NATIVE_BOUNCER_TEMPLATE" "$key" <<'PY' | run_root tee "$NATIVE_BOUNCER_CFG" >/dev/null
+import sys
+from pathlib import Path
+template = Path(sys.argv[1]).read_text(encoding="utf-8")
+key = sys.argv[2]
+if "__BOUNCER_KEY__" not in template:
+    sys.exit("template missing __BOUNCER_KEY__ placeholder")
+sys.stdout.write(template.replace("__BOUNCER_KEY__", key))
+PY
 	run_root chmod 600 "$NATIVE_BOUNCER_CFG"
+}
+
+configure_native_bouncer() {
+	local key="$1"
+	if native_bouncer_targets_evuproxy; then
+		info "bouncer config already targets EvuProxy (inet evuproxy / crowdsec_block_v4)"
+		return 0
+	fi
+	if [[ -f "$NATIVE_BOUNCER_CFG" ]]; then
+		warn "existing bouncer config: $NATIVE_BOUNCER_CFG"
+		warn "EvuProxy needs set-only bouncer on table evuproxy, set crowdsec_block_v4"
+		if [[ "${CROWDSEC_SKIP_BOUNCER_CONFIG:-}" == "1" ]]; then
+			warn "CROWDSEC_SKIP_BOUNCER_CONFIG=1 — leaving bouncer config unchanged"
+			return 0
+		fi
+		if [[ "${CROWDSEC_FORCE_BOUNCER_CONFIG:-}" == "1" ]]; then
+			local bak="${NATIVE_BOUNCER_CFG}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+			run_root cp -a "$NATIVE_BOUNCER_CFG" "$bak"
+			info "backed up existing config to $bak"
+		else
+			die "Refusing to overwrite existing CrowdSec bouncer config.
+
+Merge manually (see native-bouncer.yaml.example), then re-run install, or use:
+  CROWDSEC_FORCE_BOUNCER_CONFIG=1   backup and install EvuProxy bouncer config
+  CROWDSEC_SKIP_BOUNCER_CONFIG=1    skip bouncer config (you manage it)
+
+If fail2ban or another tool already uses the host nftables bouncer, consider Docker instead:
+  CROWDSEC_INSTALL_MODE=docker ./contrib/crowdsec/install.sh install"
+		fi
+	fi
+	install_native_bouncer_config "$key"
 }
 
 start_native_services() {
@@ -551,6 +627,8 @@ Environment:
   CROWDSEC_INSTALL_MODE   docker | native (skip interactive method prompt)
   CROWDSEC_BOUNCER_NAME   bouncer name (default: evuproxy-nft-bouncer)
   CROWDSEC_INSTALL_YES=1  accept EvuProxy enable+reload prompt non-interactively
+  CROWDSEC_FORCE_BOUNCER_CONFIG=1  (native) backup and replace existing bouncer yaml
+  CROWDSEC_SKIP_BOUNCER_CONFIG=1   (native) skip bouncer config when file exists
 
 From repo root: make crowdsec-install  |  make crowdsec-up
 EOF

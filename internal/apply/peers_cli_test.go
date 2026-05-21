@@ -51,6 +51,26 @@ func TestRemovePeerRequiresSelector(t *testing.T) {
 	}
 }
 
+func TestRemovePeerByNameAndKeyRequiresBoth(t *testing.T) {
+	cfg := testPeerConfig(
+		config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"},
+		config.Peer{Name: "b", PublicKey: "pk2", TunnelIP: "10.100.0.3/32"},
+	)
+	err := RemovePeerByNameOrKey(cfg, "a", "pk2")
+	if err == nil || !strings.Contains(err.Error(), "no peer matched") {
+		t.Fatalf("expected no match when name and key disagree: %v", err)
+	}
+	if len(cfg.Peers) != 2 {
+		t.Fatalf("peers must be unchanged: %+v", cfg.Peers)
+	}
+	if err := RemovePeerByNameOrKey(cfg, "a", "pk1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Peers) != 1 || cfg.Peers[0].Name != "b" {
+		t.Fatalf("got %+v", cfg.Peers)
+	}
+}
+
 func TestRemovePeerNoMatch(t *testing.T) {
 	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"})
 	err := RemovePeerByNameOrKey(cfg, "missing", "")

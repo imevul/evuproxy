@@ -73,12 +73,14 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | Field | Type | Description |
 |-------|------|-------------|
 | `tcp_syn_per_second` | int (optional) | Drop excess **new** TCP SYNs per **source IP** to published ports (1–10000). |
-| `max_conn_per_ip` | int (optional) | Drop when a **source IP** exceeds concurrent connection count to the port (`ct count ip saddr over N`, 1–65535). |
+| `max_conn_per_ip` | int (optional) | Drop when a **source IP** exceeds concurrent connection count to the port (dynamic nft set + `ct count over N`, 1–65535). |
 | `udp_per_second` | int (optional) | Drop excess **new** UDP packets per **source IP** (1–100000); can affect bursty game traffic. |
 
 Drops are logged with prefix `evuproxy-ratelimit` and appear in **Logs** when enabled.
 
-Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel DNAT path), and in **prerouting** before DNAT. **`geo.break_glass_cidrs` exempts rate limits** (same as CrowdSec/geo bypass).
+Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel path), not in nat prerouting. **`geo.break_glass_cidrs` exempts rate limits** (same as CrowdSec/geo bypass).
+
+**Global vs per-route sets:** Fields set under **`forwarding.rate_limit`** use shared nft sets (`ratelimit_*_v4`) on every route that does not override that field. A per-route **`rate_limit`** override uses route-scoped sets (`ratelimit_*_rN`) so limits apply only to that route’s published ports. Example: global `tcp_syn_per_second: 10` on all routes, but route 0 overrides to `100` — route 0 uses its own meter; other routes share the global 10/s cap per source IP.
 
 ### `crowdsec` (optional)
 
@@ -87,6 +89,8 @@ Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel DNAT pat
 | `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
 
 **nftables evaluation order (forward path):** global deny → per-route deny → CrowdSec block on **inet** forward (if enabled; break-glass exempt) → per-source rate limits → geo on INPUT/prerouting (break-glass skips geo) → per-route allow → DNAT.
+
+CrowdSec drops apply on **inet** INPUT/forward only (not **`ip` prerouting** before DNAT). Banned sources are still DNAT’d, then dropped in forward — functionally blocked. Early drop in prerouting is deferred (v2) if needed.
 
 ### Port list syntax
 

@@ -1,6 +1,8 @@
 package gen
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -625,10 +627,16 @@ func TestNFTables_rateLimit_tcpSynAndConn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s, "ct count ip saddr over 80 packets log prefix \"evuproxy-ratelimit: \" drop") {
-		t.Fatalf("missing max conn rule: %s", s)
+	if !strings.Contains(s, "set ratelimit_conn_v4") || !strings.Contains(s, "set ratelimit_syn_v4") {
+		t.Fatalf("missing rate limit dynamic sets: %s", s)
 	}
-	if !strings.Contains(s, "tcp flags syn / ct state new ip saddr limit rate 40/second") {
+	if !strings.Contains(s, "update @ratelimit_conn_v4 { ip saddr } ct count over 80") {
+		t.Fatalf("missing max conn update rule: %s", s)
+	}
+	if !strings.Contains(s, "ip saddr @ratelimit_conn_v4") {
+		t.Fatalf("missing max conn drop rule: %s", s)
+	}
+	if !strings.Contains(s, "tcp flags syn ct state new add @ratelimit_syn_v4 { ip saddr limit rate 40/second") {
 		t.Fatalf("missing syn rate rule: %s", s)
 	}
 	if !strings.Contains(s, `iifname "eth0" oifname "wg0"`) || !strings.Contains(s, "evuproxy-ratelimit:") {
@@ -711,7 +719,100 @@ func TestNFTables_rateLimit_routeOverrideUDP(t *testing.T) {
 	if strings.Contains(s, "tcp flags syn") {
 		t.Fatal("udp route should not get tcp syn limit from global")
 	}
-	if !strings.Contains(s, "udp dport") || !strings.Contains(s, "limit rate 200/second burst") {
+	if !strings.Contains(s, "set ratelimit_udp_r0") {
+		t.Fatalf("route override should use per-route udp set: %s", s)
+	}
+	if !strings.Contains(s, "udp dport") || !strings.Contains(s, "add @ratelimit_udp_r0 { ip saddr limit rate 200/second") {
 		t.Fatalf("missing udp rate: %s", s)
+	}
+}
+
+func TestNFTables_rateLimit_globalAndPerRouteSets(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 10}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2", RateLimit: config.RateLimit{TCPSynPerSecond: 100}},
+		{Proto: "tcp", Ports: []string{"8080"}, TargetIP: "10.100.0.3"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "set ratelimit_syn_v4") {
+		t.Fatalf("missing global syn set: %s", s)
+	}
+	if !strings.Contains(s, "set ratelimit_syn_r0") {
+		t.Fatalf("missing per-route syn set for route 0: %s", s)
+	}
+	if strings.Contains(s, "set ratelimit_syn_r1") {
+		t.Fatal("route 1 should use global set, not per-route set")
+	}
+	if !strings.Contains(s, "add @ratelimit_syn_r0 { ip saddr limit rate 100/second") {
+		t.Fatalf("route 0 should use 100/s on per-route set: %s", s)
+	}
+	if !strings.Contains(s, "add @ratelimit_syn_v4 { ip saddr limit rate 10/second") {
+		t.Fatalf("route 1 should use global 10/s: %s", s)
+	}
+}
+
+func TestNFTables_rateLimit_notInPrerouting(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 10, MaxConnPerIP: 20}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre := strings.Index(s, "chain prerouting")
+	post := strings.Index(s, "chain postrouting")
+	if pre < 0 || post < 0 || pre >= post {
+		t.Fatalf("expected prerouting/postrouting chains: %s", s)
+	}
+	if strings.Contains(s[pre:post], "evuproxy-ratelimit:") {
+		t.Fatalf("rate limits must not appear in nat prerouting: %s", s[pre:post])
+	}
+}
+
+func TestNFTables_rateLimit_nftCheck(t *testing.T) {
+	if _, err := exec.LookPath("nft"); err != nil {
+		t.Skip("nft not in PATH")
+	}
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 40, MaxConnPerIP: 80, UDPPerSecond: 100}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp,udp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.CreateTemp("", "evuproxy-ratelimit-*.nft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := f.Name()
+	defer os.Remove(path)
+	if _, err := f.WriteString(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("nft", "-c", "-f", path).CombinedOutput()
+	if err != nil {
+		syntax := []string{}
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.Contains(line, "syntax error") {
+				syntax = append(syntax, line)
+			}
+		}
+		if len(syntax) > 0 {
+			t.Fatalf("nft -c syntax errors:\n%s", strings.Join(syntax, "\n"))
+		}
+		if !strings.Contains(string(out), "netlink") {
+			t.Fatalf("nft -c failed: %v\n%s", err, out)
+		}
 	}
 }

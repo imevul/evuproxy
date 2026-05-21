@@ -23,8 +23,8 @@ func PrometheusText(cfgPath string) ([]byte, error) {
 	geo := apply.ReadGeoLastSuccess(cfgPath)
 
 	var b strings.Builder
-	writeCounter(&b, "evuproxy_apply_success_total", "Successful reload or update-geo apply operations since process start", apply.ApplySuccessTotal())
-	writeCounter(&b, "evuproxy_apply_failure_total", "Failed reload or update-geo apply operations since process start", apply.ApplyFailureTotal())
+	writeCounter(&b, "evuproxy_apply_success_total", "Successful reload or update-geo apply operations (persisted beside config)", apply.ApplySuccessTotal(cfgPath))
+	writeCounter(&b, "evuproxy_apply_failure_total", "Failed reload or update-geo apply operations (persisted beside config)", apply.ApplyFailureTotal(cfgPath))
 
 	geoTS := 0.0
 	if geo.UTC != "" {

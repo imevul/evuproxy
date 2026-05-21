@@ -6,7 +6,7 @@ set -euo pipefail
 # Optional: EVUPROXY_SRC=/path/to/repo to build the binary with Go.
 # Optional: EVUPROXY_INSTALL_API — if set, controls whether evuproxy-api.service is
 #   enabled (0 / false / no / off = disabled; anything else = enabled). When unset,
-#   an interactive TTY gets a prompt; non-interactive default is enable. See docs/http-api.md.
+#   an interactive TTY gets a prompt; non-interactive default is disable (set EVUPROXY_INSTALL_API=1 to enable). See docs/http-api.md.
 
 PREFIX="${PREFIX:-/usr/local}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/evuproxy}"
@@ -87,7 +87,7 @@ elif [[ -t 0 ]]; then
   *) INSTALL_API=1 ;;
   esac
 else
-  INSTALL_API=1
+  INSTALL_API=0
 fi
 
 systemctl daemon-reload

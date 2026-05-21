@@ -14,6 +14,15 @@ import (
 const maxPeerQRConfBytes = 16 << 10
 
 func (s *Server) handlePeerQR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		if r.Method == http.MethodGet && strings.TrimSpace(r.URL.Query().Get("conf")) != "" {
+			s.jsonErr(w, http.StatusBadRequest, "WireGuard config must be sent in POST body, not query string")
+			return
+		}
+		w.Header().Set("Allow", http.MethodPost)
+		s.jsonErr(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
 	idxStr := strings.TrimSpace(r.PathValue("index"))
 	idx, err := strconv.Atoi(idxStr)
 	if err != nil || idx < 0 {
@@ -30,19 +39,14 @@ func (s *Server) handlePeerQR(w http.ResponseWriter, r *http.Request) {
 		s.jsonErr(w, http.StatusNotFound, "peer not found")
 		return
 	}
-	var confText string
-	if r.Method == http.MethodPost {
-		r.Body = http.MaxBytesReader(w, r.Body, maxPeerQRConfBytes)
-		defer r.Body.Close()
-		b, err := io.ReadAll(r.Body)
-		if err != nil {
-			s.jsonErr(w, http.StatusBadRequest, "could not read request body")
-			return
-		}
-		confText = strings.TrimSpace(string(b))
-	} else {
-		confText = strings.TrimSpace(r.URL.Query().Get("conf"))
+	r.Body = http.MaxBytesReader(w, r.Body, maxPeerQRConfBytes)
+	defer r.Body.Close()
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.jsonErr(w, http.StatusBadRequest, "could not read request body")
+		return
 	}
+	confText := strings.TrimSpace(string(b))
 	if confText == "" {
 		s.jsonErr(w, http.StatusBadRequest, "WireGuard client config text required in POST body")
 		return
