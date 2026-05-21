@@ -1,0 +1,60 @@
+# CrowdSec acquisition config for EvuProxy lab stacks.
+# Copy to the CrowdSec container/host, e.g.:
+#   /etc/crowdsec/acquis.yaml
+# or a drop-in:
+#   /etc/crowdsec/acquis.d/evuproxy.yaml
+#
+# Acquisition only defines *which logs to read*. You still need parsers/scenarios
+# from the Hub (e.g. cscli collections install crowdsecurity/sshd) or custom
+# parsers before bans are created. The EvuProxy nftables bouncer then adds
+# decisions to set crowdsec_block_v4 in table inet evuproxy.
+#
+# See README.md in this directory. Quick install: make crowdsec-install
+
+# --- SSH (recommended for a working lab: Hub sshd collection parses these) ---
+---
+source: journalctl
+journalctl_filter:
+  - "_SYSTEMD_UNIT=ssh.service"
+labels:
+  type: syslog
+
+# --- EvuProxy / nftables kernel drops (geo, rate limit, forward catch-all) ---
+# Generated rules log with prefixes: evuproxy-geo-block, evuproxy-ratelimit,
+# evuproxy-forward-drop (see internal/apply/logs.go).
+#
+# Kernel lines look like:  kernel: evuproxy-ratelimit: IN=eth0 SRC=1.2.3.4 ...
+# A generic iptables/netfilter parser may extract SRC=; for production, add a
+# custom scenario or extend Hub parsers.
+---
+source: journalctl
+journalctl_filter:
+  - "_TRANSPORT=kernel"
+  - "--grep=evuproxy-"
+labels:
+  type: syslog
+  program: evuproxy
+
+# --- Optional: EvuProxy API service stderr (audit events, not firewall drops) ---
+# Uncomment if you want CrowdSec to read the API unit journal (usually not needed
+# for port-scan / brute-force style scenarios).
+# ---
+# source: journalctl
+# journalctl_filter:
+#   - "_SYSTEMD_UNIT=evuproxy-api.service"
+# labels:
+#   type: syslog
+#   program: evuproxy-api
+
+# --- Alternate: read an *exported* host journal directory (offline / sidecar) ---
+# Use this only when journal files are copied or bind-mounted under one path
+# (not the usual live /var/log/journal mount). Each filter is passed to journalctl.
+# ---
+# source: journalctl
+# journalctl_filter:
+#   - "--directory=/var/log/host/"
+#   - "_TRANSPORT=kernel"
+#   - "--grep=evuproxy-"
+# labels:
+#   type: syslog
+#   program: evuproxy

@@ -1,6 +1,9 @@
-.PHONY: all up down dev dev-fresh playwright-deps playwright-visual
+.PHONY: all up down dev dev-fresh playwright-deps playwright-visual \
+	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs
 
 # Run from the repository root. Requires Go 1.22+, Docker, and `docker compose` (v2).
+
+CROWDSEC_DIR := contrib/crowdsec
 
 PLAYWRIGHT_DIR := devtools/playwright-visual
 
@@ -37,3 +40,19 @@ playwright-visual:
 	  }; \
 	fi
 	cd $(PLAYWRIGHT_DIR) && npm run test
+
+# Optional CrowdSec stack (same host as EvuProxy). See contrib/crowdsec/README.md.
+crowdsec-install:
+	./$(CROWDSEC_DIR)/install.sh install
+
+crowdsec-up:
+	./$(CROWDSEC_DIR)/install.sh up
+
+crowdsec-status:
+	./$(CROWDSEC_DIR)/install.sh status
+
+crowdsec-down:
+	./$(CROWDSEC_DIR)/install.sh down
+
+crowdsec-logs:
+	./$(CROWDSEC_DIR)/install.sh logs

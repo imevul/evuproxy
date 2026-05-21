@@ -1,0 +1,41 @@
+# Example CrowdSec + nftables bouncer on the same Linux host as EvuProxy.
+# Prefer: make crowdsec-install   or   ./install.sh
+# Manual: see README.md
+
+services:
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    restart: unless-stopped
+    environment:
+      # Hub collection on first start (SSH and common Linux scenarios).
+      COLLECTIONS: "crowdsecurity/linux"
+    ports:
+      # Local API — bouncer on the host uses http://127.0.0.1:8080
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./acquis.yaml:/etc/crowdsec/acquis.d/evuproxy.yaml:ro
+      - crowdsec-data:/var/lib/crowdsec/data
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+
+  crowdsec-firewall-bouncer:
+    image: crowdsecurity/cs-firewall-bouncer-nftables:latest
+    container_name: crowdsec-firewall-bouncer
+    restart: unless-stopped
+    depends_on:
+      - crowdsec
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - crowdsec-data:/var/lib/crowdsec/data:ro
+    environment:
+      BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:?Set CROWDSEC_BOUNCER_KEY in .env — see README.md}
+      CROWDSEC_LAPI_URL: ${CROWDSEC_LAPI_URL:-http://127.0.0.1:8080}
+      NFTABLES_TABLE: inet:evuproxy
+      NFTABLES_SET: crowdsec_block_v4
+
+volumes:
+  crowdsec-data:

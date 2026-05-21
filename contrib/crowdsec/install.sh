@@ -1,0 +1,574 @@
+#!/usr/bin/env bash
+# Install optional CrowdSec + nftables bouncer for EvuProxy.
+# Not run by scripts/install.sh. See README.md.
+#
+# Usage (from repo root or this directory):
+#   ./contrib/crowdsec/install.sh install
+#   make crowdsec-install
+
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_FILE="${DIR}/docker-compose.example.yaml"
+BOUNCER_NAME="${CROWDSEC_BOUNCER_NAME:-evuproxy-nft-bouncer}"
+ENV_FILE="${DIR}/.env"
+INSTALL_MODE_FILE="${DIR}/.install-mode"
+ENABLE_HELPER="${DIR}/evuproxy-enable-crowdsec.py"
+NATIVE_BOUNCER_TEMPLATE="${DIR}/native-bouncer.yaml.example"
+NATIVE_ACQUIS_DEST="/etc/crowdsec/acquis.d/evuproxy.yaml"
+NATIVE_BOUNCER_CFG="/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml"
+NATIVE_KEY_FILE="/etc/evuproxy/crowdsec-bouncer.key"
+DEFAULT_CONFIG="/etc/evuproxy/config.yaml"
+
+cd "$DIR"
+
+die() { printf 'crowdsec install: %s\n' "$*" >&2; exit 1; }
+info() { printf '==> %s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+
+run_root() {
+	if [[ "$(id -u)" -eq 0 ]]; then
+		"$@"
+	elif command -v sudo >/dev/null 2>&1; then
+		sudo "$@"
+	else
+		die "need root or sudo for: $*"
+	fi
+}
+
+prompt_yes() {
+	local msg="$1"
+	if [[ "${CROWDSEC_INSTALL_YES:-}" == "1" ]]; then
+		return 0
+	fi
+	if [[ ! -t 0 ]]; then
+		return 1
+	fi
+	local ans
+	read -r -p "$msg [y/N] " ans || true
+	[[ "$ans" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
+find_evuproxy_config() {
+	local cfg=""
+	if [[ -n "${EVUPROXY_CONFIG:-}" ]]; then
+		cfg="$EVUPROXY_CONFIG"
+	elif [[ -f "$DEFAULT_CONFIG" ]]; then
+		cfg="$DEFAULT_CONFIG"
+	fi
+	if [[ -n "$cfg" && -f "$cfg" ]]; then
+		printf '%s' "$cfg"
+		return 0
+	fi
+	if [[ -t 0 ]]; then
+		read -r -p "Path to EvuProxy config.yaml [$DEFAULT_CONFIG]: " cfg || true
+		cfg="${cfg:-$DEFAULT_CONFIG}"
+		if [[ -f "$cfg" ]]; then
+			printf '%s' "$cfg"
+			return 0
+		fi
+	fi
+	return 1
+}
+
+config_crowdsec_enabled() {
+	local cfg="$1"
+	python3 "$ENABLE_HELPER" --check "$cfg"
+}
+
+enable_crowdsec_in_config() {
+	local cfg="$1"
+	python3 "$ENABLE_HELPER" --enable "$cfg"
+}
+
+run_evuproxy_reload() {
+	local cfg="$1"
+	local -a cmd
+	if command -v evuproxy >/dev/null 2>&1; then
+		cmd=(evuproxy reload --config "$cfg")
+	elif [[ -x /usr/local/bin/evuproxy ]]; then
+		cmd=(/usr/local/bin/evuproxy reload --config "$cfg")
+	else
+		die "evuproxy not found in PATH — enable crowdsec in config manually, then run: sudo evuproxy reload --config $cfg"
+	fi
+	info "running: ${cmd[*]}"
+	run_root "${cmd[@]}"
+}
+
+ensure_evuproxy_crowdsec() {
+	need_cmd python3
+	local cfg
+	if ! cfg="$(find_evuproxy_config)"; then
+		die "EvuProxy config not found — set EVUPROXY_CONFIG or install config at $DEFAULT_CONFIG"
+	fi
+	info "EvuProxy config: $cfg"
+	if config_crowdsec_enabled "$cfg"; then
+		info "crowdsec.enabled is already true"
+		if command -v nft >/dev/null 2>&1 && ! nft list set inet evuproxy crowdsec_block_v4 >/dev/null 2>&1; then
+			warn "nft set crowdsec_block_v4 missing — reload required"
+			if prompt_yes "Run evuproxy reload now?"; then
+				run_evuproxy_reload "$cfg"
+			fi
+		fi
+		return 0
+	fi
+	warn "crowdsec.enabled is false or missing in $cfg"
+	if prompt_yes "Enable crowdsec.enabled in config and run evuproxy reload?"; then
+		enable_crowdsec_in_config "$cfg"
+		info "updated config (backup: ${cfg}.bak.crowdsec-install)"
+		run_evuproxy_reload "$cfg"
+		if command -v nft >/dev/null 2>&1 && ! nft list set inet evuproxy crowdsec_block_v4 >/dev/null 2>&1; then
+			warn "nft set still missing after reload — check evuproxy reload output"
+		fi
+		return 0
+	fi
+	die "CrowdSec requires crowdsec.enabled: true in EvuProxy config. Enable via UI or re-run with CROWDSEC_INSTALL_YES=1 on a TTY."
+}
+
+choose_install_method() {
+	local method=""
+	if [[ -n "${CROWDSEC_INSTALL_MODE:-}" ]]; then
+		method="${CROWDSEC_INSTALL_MODE,,}"
+		case "$method" in
+			docker | native) printf '%s' "$method"; return 0 ;;
+			*) die "CROWDSEC_INSTALL_MODE must be docker or native (got: $CROWDSEC_INSTALL_MODE)" ;;
+		esac
+	fi
+	if [[ ! -t 0 ]]; then
+		printf 'docker'
+		return 0
+	fi
+	printf '\nHow should CrowdSec run on this host?\n' >&2
+	printf '  1) docker (default) — containerized CrowdSec + nft bouncer\n' >&2
+	printf '  2) native — distro packages + systemd on the host\n' >&2
+	local choice
+	read -r -p "Choice [1]: " choice || true
+	case "${choice:-1}" in
+		2 | native | n | N) printf 'native' ;;
+		*) printf 'docker' ;;
+	esac
+}
+
+save_install_method() {
+	printf '%s\n' "$1" >"$INSTALL_MODE_FILE"
+}
+
+read_install_method() {
+	if [[ -f "$INSTALL_MODE_FILE" ]]; then
+		tr -d '[:space:]' <"$INSTALL_MODE_FILE"
+		return 0
+	fi
+	printf 'docker'
+}
+
+need_cmd() {
+	command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+compose() {
+	if docker compose version >/dev/null 2>&1; then
+		docker compose -f "$COMPOSE_FILE" "$@"
+	elif command -v docker-compose >/dev/null 2>&1; then
+		docker-compose -f "$COMPOSE_FILE" "$@"
+	else
+		die "docker compose (v2) or docker-compose is required"
+	fi
+}
+
+docker_cscli() {
+	compose exec -T crowdsec cscli "$@"
+}
+
+wait_docker_crowdsec() {
+	local i
+	for i in $(seq 1 30); do
+		if docker_cscli version >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep 2
+	done
+	die "CrowdSec container did not become ready (try: compose logs crowdsec)"
+}
+
+native_cscli() {
+	if command -v cscli >/dev/null 2>&1; then
+		run_root cscli "$@"
+	else
+		die "cscli not found — install CrowdSec packages first (see README.md § Native install)"
+	fi
+}
+
+check_journal_mounts() {
+	local ok=0
+	[[ -d /var/log/journal || -d /run/log/journal ]] || ok=1
+	if [[ "$ok" -eq 1 ]]; then
+		warn "host journal not found under /var/log/journal or /run/log/journal"
+		warn "CrowdSec may not read SSH/kernel logs — enable persistent journal or adjust acquis.yaml"
+	fi
+}
+
+check_evuproxy_set() {
+	if ! command -v nft >/dev/null 2>&1; then
+		warn "nft not in PATH — skipping EvuProxy set check"
+		return 0
+	fi
+	if nft list set inet evuproxy crowdsec_block_v4 >/dev/null 2>&1; then
+		info "EvuProxy set inet evuproxy crowdsec_block_v4 is present"
+		return 0
+	fi
+	warn "nft set crowdsec_block_v4 not found in table inet evuproxy"
+}
+
+ensure_local_acquis() {
+	if [[ -f acquis.yaml ]]; then
+		info "using existing acquis.yaml"
+	else
+		cp acquis.yaml.example acquis.yaml
+		info "created acquis.yaml from acquis.yaml.example"
+	fi
+}
+
+write_env_key() {
+	local key="$1"
+	cat >"$ENV_FILE" <<EOF
+# Generated by install.sh — do not commit.
+CROWDSEC_BOUNCER_KEY=${key}
+CROWDSEC_LAPI_URL=http://127.0.0.1:8080
+EOF
+	chmod 600 "$ENV_FILE" 2>/dev/null || true
+	info "wrote ${ENV_FILE}"
+}
+
+read_env_key() {
+	if [[ ! -f "$ENV_FILE" ]]; then
+		return 1
+	fi
+	local line
+	line="$(grep -E '^CROWDSEC_BOUNCER_KEY=' "$ENV_FILE" 2>/dev/null | tail -1 || true)"
+	[[ -n "$line" ]] || return 1
+	local val="${line#CROWDSEC_BOUNCER_KEY=}"
+	val="$(printf '%s' "$val" | tr -d '[:space:]"'"'"'')"
+	[[ -n "$val" ]] || return 1
+	printf '%s' "$val"
+}
+
+# --- Docker install ---
+
+ensure_docker_collection() {
+	if docker_cscli collections list 2>/dev/null | grep -q 'crowdsecurity/linux'; then
+		info "Hub collection crowdsecurity/linux already installed"
+		return 0
+	fi
+	info "installing Hub collection crowdsecurity/linux …"
+	docker_cscli collections install crowdsecurity/linux
+}
+
+ensure_docker_bouncer_key() {
+	local key
+	if key="$(read_env_key 2>/dev/null)"; then
+		info "using CROWDSEC_BOUNCER_KEY from .env"
+		return 0
+	fi
+	if docker_cscli bouncers list 2>/dev/null | grep -qF "$BOUNCER_NAME"; then
+		die "bouncer ${BOUNCER_NAME} already exists but .env has no key — delete the bouncer and re-run install:
+  docker compose -f docker-compose.example.yaml exec crowdsec cscli bouncers delete ${BOUNCER_NAME}
+  rm -f .env && ./install.sh install"
+	fi
+	info "registering bouncer ${BOUNCER_NAME} with CrowdSec Local API …"
+	key="$(docker_cscli bouncers add "$BOUNCER_NAME" -o raw)"
+	[[ -n "$key" ]] || die "cscli bouncers add returned empty key"
+	write_env_key "$key"
+}
+
+cmd_install_docker() {
+	need_cmd docker
+	check_journal_mounts
+	ensure_local_acquis
+	info "starting CrowdSec (Docker) …"
+	compose up -d crowdsec
+	wait_docker_crowdsec
+	ensure_docker_collection
+	ensure_docker_bouncer_key
+	info "starting nftables bouncer (Docker) …"
+	compose up -d crowdsec-firewall-bouncer
+	info "CrowdSec Docker install complete."
+}
+
+cmd_up_docker() {
+	need_cmd docker
+	[[ -f acquis.yaml ]] || die "missing acquis.yaml — run: ./install.sh install"
+	[[ -f "$ENV_FILE" ]] && read_env_key >/dev/null 2>&1 || die "missing .env with CROWDSEC_BOUNCER_KEY — run: ./install.sh install"
+	info "starting CrowdSec stack (Docker) …"
+	compose up -d
+	wait_docker_crowdsec 2>/dev/null || true
+}
+
+cmd_down_docker() {
+	compose down
+	info "stopped CrowdSec Docker stack (data volume kept)"
+}
+
+cmd_logs_docker() {
+	compose logs -f "${@:-}"
+}
+
+# --- Native install ---
+
+need_native_prereqs() {
+	command -v cscli >/dev/null 2>&1 || die "native install requires cscli — install CrowdSec from https://docs.crowdsec.net/docs/getting_started/install_crowdsec"
+	if ! systemctl list-unit-files crowdsec.service >/dev/null 2>&1; then
+		warn "crowdsec.service not found — install the crowdsec package"
+	fi
+}
+
+ensure_native_acquis() {
+	ensure_local_acquis
+	if [[ -f "$NATIVE_ACQUIS_DEST" ]] && cmp -s acquis.yaml "$NATIVE_ACQUIS_DEST" 2>/dev/null; then
+		info "acquisition config already installed at $NATIVE_ACQUIS_DEST"
+		return 0
+	fi
+	info "installing acquisition config to $NATIVE_ACQUIS_DEST"
+	run_root install -d -m 0755 /etc/crowdsec/acquis.d
+	run_root install -m 0644 acquis.yaml "$NATIVE_ACQUIS_DEST"
+}
+
+ensure_native_collection() {
+	if native_cscli collections list 2>/dev/null | grep -q 'crowdsecurity/linux'; then
+		info "Hub collection crowdsecurity/linux already installed"
+		return 0
+	fi
+	info "installing Hub collection crowdsecurity/linux …"
+	native_cscli collections install crowdsecurity/linux
+}
+
+read_native_key() {
+	if [[ -f "$NATIVE_KEY_FILE" ]]; then
+		tr -d '[:space:]' <"$NATIVE_KEY_FILE"
+		return 0
+	fi
+	return 1
+}
+
+write_native_key() {
+	local key="$1"
+	printf '%s' "$key" | run_root tee "$NATIVE_KEY_FILE" >/dev/null
+	run_root chmod 600 "$NATIVE_KEY_FILE"
+	info "wrote bouncer API key to $NATIVE_KEY_FILE"
+}
+
+ensure_native_bouncer_key() {
+	local key
+	if key="$(read_native_key 2>/dev/null)"; then
+		info "using existing bouncer API key at $NATIVE_KEY_FILE"
+		printf '%s' "$key"
+		return 0
+	fi
+	if native_cscli bouncers list 2>/dev/null | grep -qF "$BOUNCER_NAME"; then
+		die "bouncer ${BOUNCER_NAME} already exists but $NATIVE_KEY_FILE is missing — rotate:
+  sudo cscli bouncers delete ${BOUNCER_NAME}
+  sudo rm -f ${NATIVE_KEY_FILE} && ./install.sh install"
+	fi
+	info "registering bouncer ${BOUNCER_NAME} with CrowdSec Local API …"
+	key="$(native_cscli bouncers add "$BOUNCER_NAME" -o raw)"
+	[[ -n "$key" ]] || die "cscli bouncers add returned empty key"
+	write_native_key "$key"
+	printf '%s' "$key"
+}
+
+configure_native_bouncer() {
+	local key="$1"
+	if [[ -f "$NATIVE_BOUNCER_CFG" ]]; then
+		if grep -q 'crowdsec_block_v4' "$NATIVE_BOUNCER_CFG" 2>/dev/null && grep -q 'evuproxy' "$NATIVE_BOUNCER_CFG" 2>/dev/null; then
+			info "bouncer config already references evuproxy / crowdsec_block_v4"
+			return 0
+		fi
+		warn "existing bouncer config: $NATIVE_BOUNCER_CFG"
+		warn "merge EvuProxy table/set (inet evuproxy, crowdsec_block_v4, set-only: true)"
+		warn "see native-bouncer.yaml.example and https://doc.crowdsec.net/docs/bouncers/nftables"
+		return 0
+	fi
+	info "installing bouncer config to $NATIVE_BOUNCER_CFG"
+	run_root install -d -m 0755 /etc/crowdsec/bouncers
+	sed "s/__BOUNCER_KEY__/${key}/" "$NATIVE_BOUNCER_TEMPLATE" | run_root tee "$NATIVE_BOUNCER_CFG" >/dev/null
+	run_root chmod 600 "$NATIVE_BOUNCER_CFG"
+}
+
+start_native_services() {
+	if systemctl list-unit-files crowdsec.service 2>/dev/null | grep -q '^crowdsec\.service'; then
+		info "enabling and starting crowdsec.service"
+		run_root systemctl enable --now crowdsec.service
+	else
+		warn "crowdsec.service not found"
+	fi
+	if systemctl list-unit-files crowdsec-firewall-bouncer.service 2>/dev/null | grep -q '^crowdsec-firewall-bouncer\.service'; then
+		info "enabling and starting crowdsec-firewall-bouncer.service"
+		run_root systemctl enable --now crowdsec-firewall-bouncer.service
+	else
+		warn "crowdsec-firewall-bouncer.service not found — install nftables bouncer package"
+	fi
+}
+
+cmd_install_native() {
+	need_native_prereqs
+	ensure_native_acquis
+	info "reloading CrowdSec to pick up acquisition config …"
+	run_root systemctl reload crowdsec 2>/dev/null || run_root systemctl restart crowdsec
+	ensure_native_collection
+	local key
+	key="$(ensure_native_bouncer_key)"
+	configure_native_bouncer "$key"
+	start_native_services
+	info "CrowdSec native install complete."
+}
+
+cmd_up_native() {
+	need_native_prereqs
+	info "starting CrowdSec services (native) …"
+	run_root systemctl start crowdsec.service
+	if systemctl list-unit-files crowdsec-firewall-bouncer.service >/dev/null 2>&1; then
+		run_root systemctl start crowdsec-firewall-bouncer.service
+	fi
+}
+
+cmd_down_native() {
+	info "stopping CrowdSec services (native) …"
+	run_root systemctl stop crowdsec-firewall-bouncer.service 2>/dev/null || true
+	run_root systemctl stop crowdsec.service 2>/dev/null || true
+}
+
+# --- Shared commands ---
+
+print_nft_set_status() {
+	if command -v nft >/dev/null 2>&1; then
+		printf '\n--- nft set (host) ---\n'
+		nft list set inet evuproxy crowdsec_block_v4 2>/dev/null || warn "set not present — enable crowdsec in EvuProxy and reload"
+	fi
+}
+
+print_cscli_status() {
+	local runner="$1"
+	printf '\n--- bouncers ---\n'
+	$runner bouncers list 2>/dev/null || true
+	printf '\n--- recent decisions ---\n'
+	$runner decisions list 2>/dev/null | head -20 || true
+}
+
+cmd_status() {
+	local method
+	method="$(read_install_method)"
+	info "install mode: $method"
+	case "$method" in
+		native)
+			if command -v cscli >/dev/null 2>&1; then
+				print_cscli_status "run_root cscli"
+			fi
+			systemctl is-active crowdsec.service crowdsec-firewall-bouncer.service 2>/dev/null || true
+			;;
+		*)
+			compose ps 2>/dev/null || true
+			if docker_cscli version >/dev/null 2>&1; then
+				print_cscli_status docker_cscli
+			fi
+			;;
+	esac
+	print_nft_set_status
+}
+
+cmd_install() {
+	ensure_evuproxy_crowdsec
+	check_evuproxy_set
+	local method
+	method="$(choose_install_method)"
+	save_install_method "$method"
+	info "install method: $method"
+	case "$method" in
+		native) cmd_install_native ;;
+		*) cmd_install_docker ;;
+	esac
+	cmd_status
+	printf '\n'
+	info "Next: trigger a scenario (e.g. failed SSH) or add a test ban — see README.md § Verify"
+}
+
+cmd_up() {
+	case "$(read_install_method)" in
+		native) cmd_up_native ;;
+		*) cmd_up_docker ;;
+	esac
+	cmd_status
+}
+
+cmd_down() {
+	case "$(read_install_method)" in
+		native) cmd_down_native ;;
+		*) cmd_down_docker ;;
+	esac
+}
+
+cmd_logs() {
+	case "$(read_install_method)" in
+		native)
+			run_root journalctl -u crowdsec.service -u crowdsec-firewall-bouncer.service -f --no-pager
+			;;
+		*) cmd_logs_docker "$@" ;;
+	esac
+}
+
+cmd_bouncer_key() {
+	case "$(read_install_method)" in
+		native)
+			ensure_native_bouncer_key >/dev/null
+			configure_native_bouncer "$(read_native_key)"
+			info "restart bouncer: sudo systemctl restart crowdsec-firewall-bouncer"
+			;;
+		*)
+			wait_docker_crowdsec 2>/dev/null || compose up -d crowdsec && wait_docker_crowdsec
+			if docker_cscli bouncers list 2>/dev/null | grep -qF "$BOUNCER_NAME"; then
+				die "bouncer ${BOUNCER_NAME} already registered. Keys are shown only once at creation."
+			fi
+			local key
+			key="$(docker_cscli bouncers add "$BOUNCER_NAME" -o raw)"
+			write_env_key "$key"
+			info "bouncer key saved to .env — run: ./install.sh up"
+			;;
+	esac
+}
+
+usage() {
+	cat <<EOF
+Usage: $(basename "$0") [command]
+
+Commands:
+  install       EvuProxy config check, then Docker or native CrowdSec setup (default)
+  up            Start existing stack (method from .install-mode)
+  status        Bouncers, decisions, nft set
+  down          Stop stack (Docker: compose down; native: systemctl stop)
+  logs          Follow logs
+  bouncer-key   Register bouncer and store API key
+
+Environment:
+  EVUPROXY_CONFIG         path to config.yaml (default: /etc/evuproxy/config.yaml)
+  CROWDSEC_INSTALL_MODE   docker | native (skip interactive method prompt)
+  CROWDSEC_BOUNCER_NAME   bouncer name (default: evuproxy-nft-bouncer)
+  CROWDSEC_INSTALL_YES=1  accept EvuProxy enable+reload prompt non-interactively
+
+From repo root: make crowdsec-install  |  make crowdsec-up
+EOF
+}
+
+main() {
+	local cmd="${1:-install}"
+	shift || true
+	case "$cmd" in
+	install) cmd_install ;;
+	up) cmd_up ;;
+	status) cmd_status ;;
+	down) cmd_down ;;
+	logs) cmd_logs "$@" ;;
+	bouncer-key) cmd_bouncer_key ;;
+	-h | --help | help) usage ;;
+	*) die "unknown command: $cmd (try --help)" ;;
+	esac
+}
+
+main "$@"

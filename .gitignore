@@ -4,6 +4,8 @@
 
 # Local Docker Compose overrides (copy from .env.example)
 .env
+contrib/crowdsec/.env
+contrib/crowdsec/.install-mode
 
 # Private / local-only docs (not published in this repo)
 .cursor/

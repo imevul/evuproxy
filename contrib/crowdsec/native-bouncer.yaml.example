@@ -1,0 +1,27 @@
+# Native nftables bouncer config for EvuProxy (set-only — rules come from evuproxy reload).
+# Installed by install.sh to /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
+# when that file does not exist. See README.md.
+#
+# Replace __BOUNCER_KEY__ with the key from: cscli bouncers add evuproxy-nft-bouncer -o raw
+
+mode: nftables
+pid_dir: /var/run/
+update_frequency: 10s
+daemonize: true
+log_mode: file
+log_dir: /var/log/
+
+crowdsec_config:
+  lapi_url: http://127.0.0.1:8080/
+  lapi_key: __BOUNCER_KEY__
+  insecure_skip_verify: false
+  update_frequency: 10s
+
+nftables:
+  ipv4:
+    enabled: true
+    set-only: true
+    table: evuproxy
+    set: crowdsec_block_v4
+  ipv6:
+    enabled: false
