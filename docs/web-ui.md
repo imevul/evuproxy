@@ -14,6 +14,16 @@ See also [Security and privacy](security-and-privacy.md) and [Local HTTP API](ht
 
 The UI is **dark-themed** only. **Overview** shows recent **audit events** (from the API) and geo list freshness when available. **Settings** uses tabs (**Preferences**, **Notes & backups**, **Advanced**) and can download raw **`config.yaml`** from Preferences. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API. **Topology** shows a read-only graph of `forwarding.routes` from the EvuProxy host (ingress) to each target peer, using `GET /v1/stats` for WireGuard handshake-style edge coloring.
 
+## Stats page
+
+**WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft list table … -a`).
+
+Generated EvuProxy enforcement drops (geoblock, rate limits, CrowdSec, forward catch-all) use **`log prefix`** and **`drop`** — not **`counter`** — so hit counts show up on the **Logs** page (journal/dmesg), not in the Stats nftables table, even when those features are enabled and dropping traffic.
+
+**Deferred:** add optional **`counter`** on selected drop rules (or dedicated summary rules) so rate-limit and CrowdSec packet counts could also appear on Stats, in addition to log lines on Logs.
+
+**Advanced mode** (Settings) **disables** the **Advanced** tab on **Routes** and **Geoblocking** in this browser (`localStorage`) until turned on — the tab stays visible with a hint linking to Settings. It does not gate **Apply geoblocking to inbound allow rules** — that control stays on the Geoblocking default tab. When only one tab is actionable, the tab control uses subdued styling so the active segment reads as a section label, not a lone button.
+
 ## Local UI with mock API
 
 To try the admin UI **without** `evuproxy serve` on the host (no WireGuard or nftables changes), use the dev stack: a stub API in Docker plus the same UI image, wired on the compose network.

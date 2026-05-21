@@ -196,7 +196,7 @@
           <div class="card">
             <h3>Advanced settings</h3>
             <p class="hint">
-              Enables advanced options across this admin UI. Stored only in this browser (<code class="inline">localStorage</code>).
+              Shows the <strong>Advanced</strong> tab on <strong>Routes</strong> and <strong>Geoblocking</strong> (rate limits, port maps, break-glass, etc.). When off, that tab is visible but disabled with a link here. Stored only in this browser (<code class="inline">localStorage</code>).
             </p>
             <div class="toggle-switch-row">
               <span class="toggle-switch-text" id="settings-advanced-toggle-desc">Advanced mode</span>
@@ -552,10 +552,15 @@
                   role="tab"
                   aria-selected="false"
                   aria-controls="route-tab-advanced-panel"
+                  data-tab-tier="advanced"
                 >
                   Advanced
                 </button>
               </div>
+              <p class="meta editor-tabs-gated-hint" id="route-tabs-gated-hint" hidden>
+                Advanced editing is off. Turn on <strong>Advanced mode</strong> in
+                <a href="#/settings">Settings</a> to edit source lists, port maps, route geo, and rate limits.
+              </p>
               <div id="route-tab-default-panel" role="tabpanel" aria-labelledby="route-tab-default-btn">
                 <div class="field">
                   <span class="field-label" id="route-proto-label">Protocol</span>
@@ -802,10 +807,15 @@
               role="tab"
               aria-selected="false"
               aria-controls="geo-tab-advanced-panel"
+              data-tab-tier="advanced"
             >
               Advanced
             </button>
           </div>
+          <p class="meta editor-tabs-gated-hint" id="geo-tabs-gated-hint" hidden>
+            Advanced editing is off. Turn on <strong>Advanced mode</strong> in
+            <a href="#/settings">Settings</a> to edit nftables set name, zone paths, break-glass CIDRs, and rate limits.
+          </p>
           <div id="geo-tab-default-panel" role="tabpanel" aria-labelledby="geo-tab-default-btn">
             <div class="field">
               <span class="field-label">List mode</span>

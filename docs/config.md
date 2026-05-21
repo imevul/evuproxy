@@ -76,7 +76,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | `max_conn_per_ip` | int (optional) | Drop when a **source IP** exceeds concurrent connection count to the port (dynamic nft set + `ct count over N`, 1–65535). |
 | `udp_per_second` | int (optional) | Drop excess **new** UDP packets per **source IP** (1–100000); can affect bursty game traffic. |
 
-Drops are logged with prefix `evuproxy-ratelimit` and appear in **Logs** when enabled.
+Drops are logged with prefix `evuproxy-ratelimit` and appear in **Logs** when enabled (not in **Stats** nftables counters — see [Web UI — Stats page](web-ui.md#stats-page)).
 
 Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel path), not in nat prerouting. **`geo.break_glass_cidrs` exempts rate limits** (same as CrowdSec/geo bypass).
 
@@ -86,7 +86,7 @@ Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel path), n
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Drops are logged with prefix **`evuproxy-crowdsec`** (visible in the admin **Logs** view). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
+| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Drops are logged with prefix **`evuproxy-crowdsec`** (visible in the admin **Logs** view; not **Stats** nftables counters — see [Web UI — Stats page](web-ui.md#stats-page)). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
 
 **nftables evaluation order (forward path):** global deny → per-route deny → CrowdSec block on **inet** forward (if enabled; break-glass exempt) → per-source rate limits → geo on INPUT/prerouting (break-glass skips geo) → per-route allow → DNAT.
 
@@ -116,7 +116,7 @@ Controls whether forwarded traffic is restricted to source IPs in downloaded cou
 | `set_name` | string | nftables set name for IPv4 sources (default `geo_v4` when `enabled`). |
 | `countries` | list of strings | Lowercase ISO country codes (e.g. `se`, `no`). Required when `enabled` is true. |
 | `zone_dir` | string | Directory where per-country zone files are stored (e.g. `/etc/evuproxy/geo-zones`). Required when `enabled` is true. |
-| `apply_to_input_allows` | bool | If `true` and `enabled` is true, **`input_allows`** use the same geo allow/block logic as forwarded ports. Default **`false`**: **`input_allows`** stay plain INPUT accepts (SSH, HTTP, etc. remain reachable from any IPv4 source regardless of country lists). In the admin UI this appears on the **Geoblocking** page under advanced fields (enable **Advanced mode** in **Settings**). Geo rules use **`ip saddr`** (IPv4 only); IPv6 to the same TCP/UDP ports is not matched by those lines and may hit the chain **policy** (often **drop**)—plan separate rules if you need IPv6 admin access. **`network.admin_tcp_ports`** are still emitted as unconditional TCP accepts after **`input_allows`**; they are **not** wrapped by this option—avoid duplicating sensitive ports there if you expect geo to cover them. |
+| `apply_to_input_allows` | bool | If `true` and `enabled` is true, **`input_allows`** use the same geo allow/block logic as forwarded ports. Default **`false`**: **`input_allows`** stay plain INPUT accepts (SSH, HTTP, etc. remain reachable from any IPv4 source regardless of country lists). In the admin UI this toggle is on the **Geoblocking** page (**Countries &amp; rules** tab), not behind **Advanced mode**. Geo rules use **`ip saddr`** (IPv4 only); IPv6 to the same TCP/UDP ports is not matched by those lines and may hit the chain **policy** (often **drop**)—plan separate rules if you need IPv6 admin access. **`network.admin_tcp_ports`** are still emitted as unconditional TCP accepts after **`input_allows`**; they are **not** wrapped by this option—avoid duplicating sensitive ports there if you expect geo to cover them. |
 | `break_glass_cidrs` | list of strings (optional) | IPv4/CIDR sources that **always pass** geo filtering on INPUT and forward paths. Use sparingly for operator escape hatches. |
 
 When `geo.enabled` is true, `evuproxy reload` / `update-geo` expect zone files under `zone_dir`; empty or missing zones can block traffic when geo is enabled.
