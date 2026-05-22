@@ -3,9 +3,12 @@
 
 import copy
 import hashlib
+import hmac
 import ipaddress
 import json
 import os
+import struct
+import subprocess
 import sys
 import threading
 import time
@@ -21,6 +24,94 @@ _ROUTE_TEST_LIMIT = 30
 _ROUTE_TEST_WINDOW_SEC = 60.0
 _route_test_times: list[float] = []
 DEFAULT_PEER_TUNNEL_SUBNET_CIDR = "10.100.0.0/24"
+PEER_BUNDLE_MAGIC = b"EVUB"
+PEER_BUNDLE_VERSION = 1
+PEER_BUNDLE_PBDF2_ITER = 310_000
+PEER_BUNDLE_SALT_LEN = 16
+PEER_BUNDLE_IV_LEN = 16
+
+
+def _pkcs7_pad(data: bytes, block_size: int = 16) -> bytes:
+    pad = block_size - (len(data) % block_size)
+    if pad == 0:
+        pad = block_size
+    return data + bytes([pad]) * pad
+
+
+def _aes_cbc_encrypt(key: bytes, iv: bytes, plaintext: bytes) -> bytes:
+    proc = subprocess.run(
+        [
+            "openssl",
+            "enc",
+            "-aes-256-cbc",
+            "-K",
+            key.hex(),
+            "-iv",
+            iv.hex(),
+            "-nosalt",
+        ],
+        input=_pkcs7_pad(plaintext),
+        capture_output=True,
+        check=True,
+    )
+    return proc.stdout
+
+
+def _encrypt_peer_onboard_bundle(passphrase: str, params: dict) -> bytes:
+    plain_obj = {
+        "v": PEER_BUNDLE_VERSION,
+        "peerPrivateKey": params["peer_private_key"],
+        "peerTunnelAddress": params["peer_tunnel_address"],
+        "serverPublicKey": params["server_public_key"],
+        "endpoint": params["endpoint"],
+        "allowedIPs": params["allowed_ips"],
+        "interfaceName": params.get("interface_name") or "evuproxy",
+    }
+    plain = json.dumps(plain_obj, separators=(",", ":")).encode("utf-8")
+    salt = os.urandom(PEER_BUNDLE_SALT_LEN)
+    iv = os.urandom(PEER_BUNDLE_IV_LEN)
+    dk = hashlib.pbkdf2_hmac(
+        "sha256",
+        passphrase.encode("utf-8"),
+        salt,
+        PEER_BUNDLE_PBDF2_ITER,
+        dklen=64,
+    )
+    aes_key = dk[:32]
+    mac_key = dk[32:64]
+    ciphertext = _aes_cbc_encrypt(aes_key, iv, plain)
+    mac_payload = iv + ciphertext
+    mac = hmac.new(mac_key, mac_payload, hashlib.sha256).digest()
+    header_len = 4 + 1 + 4 + 1 + PEER_BUNDLE_SALT_LEN + PEER_BUNDLE_IV_LEN + 4
+    out = bytearray(header_len + len(ciphertext) + len(mac))
+    o = 0
+    out[o : o + 4] = PEER_BUNDLE_MAGIC
+    o += 4
+    out[o] = PEER_BUNDLE_VERSION
+    o += 1
+    struct.pack_into(">I", out, o, PEER_BUNDLE_PBDF2_ITER)
+    o += 4
+    out[o] = PEER_BUNDLE_SALT_LEN
+    o += 1
+    out[o : o + PEER_BUNDLE_SALT_LEN] = salt
+    o += PEER_BUNDLE_SALT_LEN
+    out[o : o + PEER_BUNDLE_IV_LEN] = iv
+    o += PEER_BUNDLE_IV_LEN
+    struct.pack_into(">I", out, o, len(ciphertext))
+    o += 4
+    out[o : o + len(ciphertext)] = ciphertext
+    o += len(ciphertext)
+    out[o : o + len(mac)] = mac
+    return bytes(out)
+
+
+def _mock_generate_wireguard_keypair() -> dict[str, str]:
+    import base64
+
+    return {
+        "private_key": base64.b64encode(os.urandom(32)).decode("ascii"),
+        "public_key": base64.b64encode(os.urandom(32)).decode("ascii"),
+    }
 
 # Last "applied" snapshot (simulates generated/nftables.nft + apply state before current edits).
 MOCK_CONFIG_BASELINE = {
@@ -1040,6 +1131,50 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 )
             return self._send_json(200, {"results": results})
+        if path == "/api/v1/peers/generate-keypair":
+            return self._send_json(200, _mock_generate_wireguard_keypair())
+        if path == "/api/v1/peers/onboard-bundle":
+            if _content_len(self) > MAX_JSON_SMALL:
+                return self._send_json(413, {"error": "request body too large"})
+            body = self._read_json_body(MAX_JSON_SMALL)
+            if not isinstance(body, dict):
+                return self._send_json(400, {"error": "invalid JSON"})
+            passphrase = str(body.get("passphrase") or "").strip()
+            if not passphrase:
+                return self._send_json(400, {"error": "passphrase required"})
+            required = (
+                "peer_private_key",
+                "peer_tunnel_address",
+                "server_public_key",
+                "endpoint",
+                "allowed_ips",
+            )
+            for key in required:
+                if not str(body.get(key) or "").strip():
+                    return self._send_json(400, {"error": f"{key} required"})
+            try:
+                blob = _encrypt_peer_onboard_bundle(
+                    passphrase,
+                    {
+                        "peer_private_key": str(body["peer_private_key"]).strip(),
+                        "peer_tunnel_address": str(body["peer_tunnel_address"]).strip(),
+                        "server_public_key": str(body["server_public_key"]).strip(),
+                        "endpoint": str(body["endpoint"]).strip(),
+                        "allowed_ips": str(body["allowed_ips"]).strip(),
+                        "interface_name": str(body.get("interface_name") or "evuproxy").strip(),
+                    },
+                )
+            except subprocess.CalledProcessError:
+                return self._send_json(
+                    500,
+                    {"error": "bundle encryption failed (openssl required in mock API image)"},
+                )
+            import base64
+
+            return self._send_json(
+                200,
+                {"blob_base64": base64.b64encode(blob).decode("ascii")},
+            )
         if path not in (
             "/api/v1/reload",
             "/api/v1/update-geo",

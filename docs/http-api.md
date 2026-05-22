@@ -91,6 +91,8 @@ All paths below are under **`/api/v1`** unless noted.
 | `POST`        | `/validate`                                                     | Dry-run: validate config, generate nftables + WireGuard artifacts, run **`nft -c`**; **no** apply and **no** `.bak` changes. Optional JSON body = draft config (not persisted). Response: `{ok, errors?, warnings?, detected_client_ip, ip_detection_source, ip_detection_note?, validated_from_draft?}`. |
 | `GET`         | `/client-ip`                                                    | Operator IPv4 detection for lockout warnings (same logic as validate). |
 | `POST`        | `/peers/{index}/qr.png`                                         | PNG QR code of WireGuard client config text (plain-text body, max 16 KiB). Auth required. |
+| `POST`        | `/peers/generate-keypair`                                       | Generate a WireGuard keypair when the admin UI cannot use Web Crypto (plain HTTP). Returns `{private_key, public_key}` (base64). Auth required. Prefer HTTPS or localhost so keys stay in the browser when possible. |
+| `POST`        | `/peers/onboard-bundle`                                         | Build an **EVUB** onboarding blob (JSON body: `passphrase`, `peer_private_key`, `peer_tunnel_address`, `server_public_key`, `endpoint`, `allowed_ips`, optional `interface_name`). Returns `{blob_base64}`. Same HTTP caveat as keypair generation. |
 
 
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.

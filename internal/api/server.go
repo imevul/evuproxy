@@ -150,6 +150,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/validate", s.auth(s.handleValidate))
 	mux.HandleFunc("GET /api/v1/client-ip", s.auth(s.handleClientIP))
 	mux.HandleFunc("POST /api/v1/peers/{index}/qr.png", s.auth(s.handlePeerQR))
+	mux.HandleFunc("POST /api/v1/peers/generate-keypair", s.auth(s.handlePeerGenerateKeypair))
+	mux.HandleFunc("POST /api/v1/peers/onboard-bundle", s.auth(s.handlePeerOnboardBundle))
 	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
 	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
 	mux.HandleFunc("GET /api/v1/config/notes", s.auth(s.handleConfigNotesGet))

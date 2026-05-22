@@ -15,6 +15,19 @@ func GenerateWireGuardPrivateKey() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// GenerateWireGuardKeypair runs `wg genkey` and `wg pubkey`.
+func GenerateWireGuardKeypair() (privateKey, publicKey string, err error) {
+	privateKey, err = GenerateWireGuardPrivateKey()
+	if err != nil {
+		return "", "", err
+	}
+	publicKey, err = WireGuardPublicKey(privateKey)
+	if err != nil {
+		return "", "", err
+	}
+	return privateKey, publicKey, nil
+}
+
 // WireGuardPublicKey runs `wg pubkey` with the given private key on stdin.
 func WireGuardPublicKey(privateKey string) (string, error) {
 	cmd := exec.Command("wg", "pubkey")

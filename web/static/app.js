@@ -4963,6 +4963,18 @@
     return btoa(s);
   }
 
+  function b64ToU8(b64) {
+    const bin = atob(String(b64 || ""));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  /** Web Crypto subtle is only available in secure contexts (HTTPS or localhost). */
+  function browserSubtleCryptoAvailable() {
+    return !!(globalThis.isSecureContext && globalThis.crypto?.subtle);
+  }
+
   function base64UrlToBytes(b64url) {
     let s = String(b64url || "").replace(/-/g, "+").replace(/_/g, "/");
     const pad = s.length % 4;
@@ -4993,6 +5005,16 @@
       privateKey: u8ToB64(privRaw),
       publicKey: u8ToB64(pubRaw),
     };
+  }
+
+  /** Prefer browser keygen; fall back to authenticated API on plain HTTP (insecure testing). */
+  async function generatePeerKeypair() {
+    if (browserSubtleCryptoAvailable()) return generatePeerKeypairBrowser();
+    const body = await api("/api/v1/peers/generate-keypair", { method: "POST" });
+    if (!body.private_key || !body.public_key) {
+      throw new Error("API key generation returned an incomplete response.");
+    }
+    return { privateKey: body.private_key, publicKey: body.public_key };
   }
 
   function yamlPeerName(name) {
@@ -5071,7 +5093,7 @@
     return hex;
   }
 
-  async function peerBundleEncryptedBytes(passphraseStr, wgParams) {
+  async function peerBundleEncryptedBytesBrowser(passphraseStr, wgParams) {
     const subtle = globalThis.crypto?.subtle;
     if (!subtle) throw new Error("Web Crypto not available (use HTTPS).");
     const enc = new TextEncoder();
@@ -5138,6 +5160,29 @@
     o += ciphertext.length;
     out.set(mac, o);
     return out;
+  }
+
+  async function peerBundleEncryptedBytes(passphraseStr, wgParams) {
+    if (browserSubtleCryptoAvailable()) {
+      return peerBundleEncryptedBytesBrowser(passphraseStr, wgParams);
+    }
+    const body = await api("/api/v1/peers/onboard-bundle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        passphrase: passphraseStr,
+        peer_private_key: wgParams.priv,
+        peer_tunnel_address: wgParams.tip,
+        server_public_key: wgParams.serverPublicKey,
+        endpoint: wgParams.ep,
+        allowed_ips: wgParams.subnet,
+        interface_name: "evuproxy",
+      }),
+    });
+    if (!body.blob_base64) {
+      throw new Error("API onboard bundle returned an incomplete response.");
+    }
+    return b64ToU8(body.blob_base64);
   }
 
   function peerToolInstallUrlResolved() {
@@ -5804,7 +5849,7 @@
       setPeerEditorTab("fields");
     }
     try {
-      const kp = await generatePeerKeypairBrowser();
+      const kp = await generatePeerKeypair();
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
     } catch (e) {
@@ -6025,7 +6070,7 @@
     }
     setOnboardMsg("…");
     try {
-      const kp = await generatePeerKeypairBrowser();
+      const kp = await generatePeerKeypair();
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
       setOnboardMsg("New keypair generated.");
