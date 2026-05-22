@@ -5010,7 +5010,7 @@
   /** Prefer browser keygen; fall back to authenticated API on plain HTTP (insecure testing). */
   async function generatePeerKeypair() {
     if (browserSubtleCryptoAvailable()) return generatePeerKeypairBrowser();
-    const body = await api("/api/v1/peers/generate-keypair", { method: "POST" });
+    const body = await api("/v1/peers/generate-keypair", { method: "POST" });
     if (!body.private_key || !body.public_key) {
       throw new Error("API key generation returned an incomplete response.");
     }
@@ -5166,7 +5166,7 @@
     if (browserSubtleCryptoAvailable()) {
       return peerBundleEncryptedBytesBrowser(passphraseStr, wgParams);
     }
-    const body = await api("/api/v1/peers/onboard-bundle", {
+    const body = await api("/v1/peers/onboard-bundle", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
