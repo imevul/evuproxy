@@ -97,6 +97,15 @@ docker compose -f docker-compose.example.yaml exec crowdsec \
 sudo nft list set inet evuproxy crowdsec_block_v4
 ```
 
+If `cscli` reports `dial tcp 0.0.0.0:8080: connect: connection refused`, the CrowdSec
+container was started without `LOCAL_API_URL` (older compose) or needs a restart after
+updating `docker-compose.example.yaml`:
+
+```bash
+docker compose -f docker-compose.example.yaml up -d crowdsec
+docker compose -f docker-compose.example.yaml exec crowdsec cscli lapi status
+```
+
 From that IP, a **published forward port** should be dropped (unless the IP is in **break-glass** CIDRs). Remove the test:
 
 ```bash
@@ -233,6 +242,7 @@ Store the API key in `/etc/evuproxy/crowdsec-bouncer.key` when merging manually.
 |---------|------------------|
 | Install fails: missing key | Run `install.sh bouncer-key` or delete bouncer and re-run install (see script message) |
 | Bouncer image build fails | `install.sh` downloads the binary on the **host** first (`vendor/`); image build is offline COPY-only. If download fails, check host DNS/curl to GitHub. Docker build DNS issues (`deb.debian.org`) should no longer block install. Native fallback: `CROWDSEC_INSTALL_MODE=native make crowdsec-install` |
+| `cscli` / `0.0.0.0:8080` connection refused | Compose sets `LOCAL_API_URL=http://127.0.0.1:8080` on the `crowdsec` service; `docker compose up -d crowdsec` then `cscli lapi status` |
 | Bouncer auth errors | `.env` key matches `cscli bouncers list`; LAPI at `http://127.0.0.1:8080` |
 | No decisions | Hub collection installed; logs acquired (`cscli metrics show acquisition`) |
 | Set always empty | Bouncer running with `NET_ADMIN`, `network_mode: host`; EvuProxy `crowdsec.enabled` + reload |

@@ -10,6 +10,9 @@ services:
     environment:
       # Hub collection on first start (SSH and common Linux scenarios).
       COLLECTIONS: "crowdsecurity/linux"
+      # cscli reads local_api_credentials.yaml; without this the entrypoint leaves
+      # url at http://0.0.0.0:8080 (listen_uri) and cscli cannot connect as a client.
+      LOCAL_API_URL: http://127.0.0.1:8080
     ports:
       # Local API — bouncer on the host uses http://127.0.0.1:8080
       - "127.0.0.1:8080:8080"
