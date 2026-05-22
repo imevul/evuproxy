@@ -21,7 +21,10 @@ services:
       - /etc/machine-id:/etc/machine-id:ro
 
   crowdsec-firewall-bouncer:
-    image: crowdsecurity/cs-firewall-bouncer-nftables:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.bouncer
+    image: evuproxy-crowdsec-firewall-bouncer:local
     container_name: crowdsec-firewall-bouncer
     restart: unless-stopped
     depends_on:
@@ -29,14 +32,12 @@ services:
     network_mode: host
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     volumes:
-      - crowdsec-data:/var/lib/crowdsec/data:ro
+      - ./docker-bouncer.yaml:/config/crowdsec-firewall-bouncer.yaml:ro
     environment:
-      # Set in .env after cscli bouncers add (install.sh does this before starting this service).
-      BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:-}
+      CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:-}
       CROWDSEC_LAPI_URL: ${CROWDSEC_LAPI_URL:-http://127.0.0.1:8080}
-      NFTABLES_TABLE: inet:evuproxy
-      NFTABLES_SET: crowdsec_block_v4
 
 volumes:
   crowdsec-data:

@@ -1,0 +1,15 @@
+# EvuProxy CrowdSec nftables bouncer — host network + NET_ADMIN updates inet evuproxy.
+# Built locally by install.sh / docker compose (no official CrowdSec bouncer image on Docker Hub).
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends curl ca-certificates gettext-base \
+	&& curl -fsSL https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash \
+	&& apt-get install -y --no-install-recommends crowdsec-firewall-bouncer-nftables \
+	&& rm -rf /var/lib/apt/lists/*
+
+COPY docker-bouncer-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

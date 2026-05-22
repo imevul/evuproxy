@@ -32,7 +32,7 @@ The installer will:
 2. **Ask how to run CrowdSec** — **Docker** (default) or **native** (systemd packages). Set `CROWDSEC_INSTALL_MODE=docker|native` to skip the prompt.  
 3. Install acquisition config, Hub collection, bouncer API key, and start services.
 
-**Docker path:** `acquis.yaml`, `.env`, compose stack.  
+**Docker path:** `acquis.yaml`, `docker-bouncer.yaml`, `.env`, compose stack (bouncer image built locally).  
 **Native path:** `/etc/crowdsec/acquis.d/evuproxy.yaml`, `/etc/evuproxy/crowdsec-bouncer.key`, bouncer yaml (see [`native-bouncer.yaml.example`](native-bouncer.yaml.example)).
 
 Non-interactive EvuProxy enable: `CROWDSEC_INSTALL_YES=1`. Example full auto Docker install:
@@ -60,7 +60,9 @@ CROWDSEC_INSTALL_YES=1 CROWDSEC_INSTALL_MODE=docker make crowdsec-install
 | [`install.sh`](install.sh) | Automated install / status / down (checks EvuProxy config) |
 | [`evuproxy-enable-crowdsec.py`](evuproxy-enable-crowdsec.py) | Helper: set `crowdsec.enabled: true` in config (used by install) |
 | [`acquis.yaml.example`](acquis.yaml.example) | Log sources (copied to `acquis.yaml` by install) |
-| [`docker-compose.example.yaml`](docker-compose.example.yaml) | Docker: CrowdSec + nft bouncer services |
+| [`docker-compose.example.yaml`](docker-compose.example.yaml) | Docker: CrowdSec + locally built nft bouncer (`Dockerfile.bouncer`) |
+| [`docker-bouncer.yaml.example`](docker-bouncer.yaml.example) | Docker bouncer config (copied to `docker-bouncer.yaml` by install) |
+| [`Dockerfile.bouncer`](Dockerfile.bouncer) | Builds `evuproxy-crowdsec-firewall-bouncer:local` from CrowdSec packages |
 | [`native-bouncer.yaml.example`](native-bouncer.yaml.example) | Native nft bouncer config template (table/set for EvuProxy) |
 | [`.env.example`](.env.example) | Docker: bouncer API key template (install writes `.env`) |
 | [`.install-mode`](.install-mode) | Legacy copy beside this directory (gitignored) |
@@ -123,10 +125,11 @@ Enable CrowdSec in config / UI and `sudo evuproxy reload`. Confirm:
 sudo nft list set inet evuproxy crowdsec_block_v4
 ```
 
-### 2. Acquisition
+### 2. Acquisition and bouncer config
 
 ```bash
 cp acquis.yaml.example acquis.yaml
+cp docker-bouncer.yaml.example docker-bouncer.yaml
 ```
 
 Includes SSH (`ssh.service`) and kernel lines matching `evuproxy-` (see [`acquis.yaml.example`](acquis.yaml.example)).
@@ -154,9 +157,10 @@ CROWDSEC_BOUNCER_KEY=paste-key-here
 CROWDSEC_LAPI_URL=http://127.0.0.1:8080
 ```
 
-### 5. Start bouncer
+### 5. Build and start bouncer
 
 ```bash
+docker compose -f docker-compose.example.yaml build crowdsec-firewall-bouncer
 docker compose -f docker-compose.example.yaml up -d crowdsec-firewall-bouncer
 ```
 

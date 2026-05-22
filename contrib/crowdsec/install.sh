@@ -272,6 +272,15 @@ ensure_local_acquis() {
 	fi
 }
 
+ensure_docker_bouncer_config() {
+	if [[ -f docker-bouncer.yaml ]]; then
+		info "using existing docker-bouncer.yaml"
+	else
+		cp docker-bouncer.yaml.example docker-bouncer.yaml
+		info "created docker-bouncer.yaml from docker-bouncer.yaml.example"
+	fi
+}
+
 write_env_key() {
 	local key="$1"
 	cat >"$ENV_FILE" <<EOF
@@ -328,11 +337,14 @@ cmd_install_docker() {
 	need_cmd docker
 	check_journal_mounts
 	ensure_local_acquis
+	ensure_docker_bouncer_config
 	info "starting CrowdSec (Docker) …"
 	compose up -d crowdsec
 	wait_docker_crowdsec
 	ensure_docker_collection
 	ensure_docker_bouncer_key
+	info "building nftables bouncer image …"
+	compose build crowdsec-firewall-bouncer
 	info "starting nftables bouncer (Docker) …"
 	compose up -d crowdsec-firewall-bouncer
 	info "CrowdSec Docker install complete."
@@ -341,9 +353,10 @@ cmd_install_docker() {
 cmd_up_docker() {
 	need_cmd docker
 	[[ -f acquis.yaml ]] || die "missing acquis.yaml — run: ./install.sh install"
+	[[ -f docker-bouncer.yaml ]] || die "missing docker-bouncer.yaml — run: ./install.sh install"
 	[[ -f "$ENV_FILE" ]] && read_env_key >/dev/null 2>&1 || die "missing .env with CROWDSEC_BOUNCER_KEY — run: ./install.sh install"
 	info "starting CrowdSec stack (Docker) …"
-	compose up -d
+	compose up -d --build
 	wait_docker_crowdsec 2>/dev/null || true
 }
 

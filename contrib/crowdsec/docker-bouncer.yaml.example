@@ -1,0 +1,26 @@
+# Docker nftables bouncer config for EvuProxy (set-only — rules come from evuproxy reload).
+# Copied to docker-bouncer.yaml by install.sh. Placeholders are expanded at container start.
+#
+# Requires CROWDSEC_BOUNCER_KEY and CROWDSEC_LAPI_URL in the container environment (.env).
+
+mode: nftables
+pid_dir: /var/run/
+update_frequency: 10s
+daemonize: false
+log_mode: stdout
+log_dir: /var/log/
+
+crowdsec_config:
+  lapi_url: ${CROWDSEC_LAPI_URL}/
+  lapi_key: ${CROWDSEC_BOUNCER_KEY}
+  insecure_skip_verify: false
+  update_frequency: 10s
+
+nftables:
+  ipv4:
+    enabled: true
+    set-only: true
+    table: evuproxy
+    set: crowdsec_block_v4
+  ipv6:
+    enabled: false
