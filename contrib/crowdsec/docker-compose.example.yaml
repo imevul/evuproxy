@@ -7,6 +7,9 @@ services:
     image: crowdsecurity/crowdsec:latest
     container_name: crowdsec
     restart: unless-stopped
+    # Same host as EvuProxy: use host networking so Hub/LAPI egress matches the host
+    # (bridge containers use FORWARD; EvuProxy drops that by default).
+    network_mode: host
     environment:
       # Hub collection on first start (SSH and common Linux scenarios).
       COLLECTIONS: "crowdsecurity/linux"
@@ -17,9 +20,6 @@ services:
       # hub upgrade on start (Hub content is bundled in the image — LAPI + local scenarios still work).
       DISABLE_ONLINE_API: "true"
       NO_HUB_UPGRADE: "true"
-    ports:
-      # Local API — bouncer on the host uses http://127.0.0.1:8080
-      - "127.0.0.1:8080:8080"
     # acquis.yaml must exist as a *file* before the first `compose up` (install.sh creates it).
     # If missing, Docker creates a directory named acquis.yaml and CrowdSec exits on startup.
     volumes:

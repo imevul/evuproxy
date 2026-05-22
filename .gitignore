@@ -6,6 +6,8 @@
 .env
 contrib/crowdsec/.env
 contrib/crowdsec/.install-mode
+contrib/crowdsec/acquis.yaml
+contrib/crowdsec/docker-bouncer.yaml
 contrib/crowdsec/vendor/
 
 # Private / local-only docs (not published in this repo)
