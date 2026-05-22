@@ -6,6 +6,7 @@
 .env
 contrib/crowdsec/.env
 contrib/crowdsec/.install-mode
+contrib/crowdsec/vendor/
 
 # Private / local-only docs (not published in this repo)
 .cursor/

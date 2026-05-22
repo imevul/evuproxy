@@ -24,6 +24,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.bouncer
+      network: host
     image: evuproxy-crowdsec-firewall-bouncer:local
     container_name: crowdsec-firewall-bouncer
     restart: unless-stopped

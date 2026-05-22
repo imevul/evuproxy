@@ -11,6 +11,7 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${DIR}/docker-compose.example.yaml"
 BOUNCER_NAME="${CROWDSEC_BOUNCER_NAME:-evuproxy-nft-bouncer}"
+BOUNCER_VERSION="${CROWDSEC_BOUNCER_VERSION:-0.0.34}"
 ENV_FILE="${DIR}/.env"
 INSTALL_MODE_FILE="${DIR}/.install-mode"
 HOST_INSTALL_MODE_FILE="/etc/evuproxy/crowdsec-install-mode"
@@ -272,6 +273,28 @@ ensure_local_acquis() {
 	fi
 }
 
+bouncer_vendor_dir() {
+	printf '%s/vendor/crowdsec-firewall-bouncer-v%s' "$DIR" "$BOUNCER_VERSION"
+}
+
+ensure_docker_bouncer_binary() {
+	local arch dest tmp
+	dest="$(bouncer_vendor_dir)"
+	if [[ -x "${dest}/crowdsec-firewall-bouncer" ]]; then
+		info "using cached bouncer binary in ${dest}"
+		return 0
+	fi
+	need_cmd curl
+	arch="$(bouncer_build_arch)"
+	info "downloading cs-firewall-bouncer v${BOUNCER_VERSION} (${arch}) …"
+	tmp="$(mktemp -d)"
+	trap 'rm -rf "$tmp"' RETURN
+	curl -fsSL "https://github.com/crowdsecurity/cs-firewall-bouncer/releases/download/v${BOUNCER_VERSION}/crowdsec-firewall-bouncer-linux-${arch}.tgz" \
+		| tar -xzf - -C "$tmp"
+	mkdir -p "$dest"
+	install -m 0755 "${tmp}/crowdsec-firewall-bouncer-v${BOUNCER_VERSION}/crowdsec-firewall-bouncer" "${dest}/"
+}
+
 ensure_docker_bouncer_config() {
 	if [[ -f docker-bouncer.yaml ]]; then
 		info "using existing docker-bouncer.yaml"
@@ -279,6 +302,19 @@ ensure_docker_bouncer_config() {
 		cp docker-bouncer.yaml.example docker-bouncer.yaml
 		info "created docker-bouncer.yaml from docker-bouncer.yaml.example"
 	fi
+}
+
+bouncer_build_arch() {
+	case "$(uname -m)" in
+	x86_64 | amd64) echo amd64 ;;
+	aarch64 | arm64) echo arm64 ;;
+	armv7l | armv6l | arm) echo armv7 ;;
+	i386 | i686) echo 386 ;;
+	ppc64le) echo ppc64le ;;
+	riscv64) echo riscv64 ;;
+	s390x) echo s390x ;;
+	*) die "unsupported machine architecture for bouncer image: $(uname -m)" ;;
+	esac
 }
 
 write_env_key() {
@@ -343,6 +379,7 @@ cmd_install_docker() {
 	wait_docker_crowdsec
 	ensure_docker_collection
 	ensure_docker_bouncer_key
+	ensure_docker_bouncer_binary
 	info "building nftables bouncer image …"
 	compose build crowdsec-firewall-bouncer
 	info "starting nftables bouncer (Docker) …"
@@ -355,6 +392,7 @@ cmd_up_docker() {
 	[[ -f acquis.yaml ]] || die "missing acquis.yaml — run: ./install.sh install"
 	[[ -f docker-bouncer.yaml ]] || die "missing docker-bouncer.yaml — run: ./install.sh install"
 	[[ -f "$ENV_FILE" ]] && read_env_key >/dev/null 2>&1 || die "missing .env with CROWDSEC_BOUNCER_KEY — run: ./install.sh install"
+	ensure_docker_bouncer_binary
 	info "starting CrowdSec stack (Docker) …"
 	compose up -d --build
 	wait_docker_crowdsec 2>/dev/null || true
