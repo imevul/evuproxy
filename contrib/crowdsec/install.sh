@@ -288,11 +288,11 @@ ensure_docker_bouncer_binary() {
 	arch="$(bouncer_build_arch)"
 	info "downloading cs-firewall-bouncer v${BOUNCER_VERSION} (${arch}) …"
 	tmp="$(mktemp -d)"
-	trap 'rm -rf "$tmp"' RETURN
 	curl -fsSL "https://github.com/crowdsecurity/cs-firewall-bouncer/releases/download/v${BOUNCER_VERSION}/crowdsec-firewall-bouncer-linux-${arch}.tgz" \
 		| tar -xzf - -C "$tmp"
 	mkdir -p "$dest"
 	install -m 0755 "${tmp}/crowdsec-firewall-bouncer-v${BOUNCER_VERSION}/crowdsec-firewall-bouncer" "${dest}/"
+	rm -rf "$tmp"
 }
 
 ensure_docker_bouncer_config() {
