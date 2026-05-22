@@ -62,7 +62,7 @@ CROWDSEC_INSTALL_YES=1 CROWDSEC_INSTALL_MODE=docker make crowdsec-install
 | [`acquis.yaml.example`](acquis.yaml.example) | Log sources (copied to `acquis.yaml` by install) |
 | [`docker-compose.example.yaml`](docker-compose.example.yaml) | Docker: CrowdSec + locally built nft bouncer (`Dockerfile.bouncer`) |
 | [`docker-bouncer.yaml.example`](docker-bouncer.yaml.example) | Docker bouncer config (copied to `docker-bouncer.yaml` by install) |
-| [`Dockerfile.bouncer`](Dockerfile.bouncer) | Builds `evuproxy-crowdsec-firewall-bouncer:local` from CrowdSec packages |
+| [`Dockerfile.bouncer`](Dockerfile.bouncer) | Builds `evuproxy-crowdsec-firewall-bouncer:local` (GitHub release binary + config) |
 | [`native-bouncer.yaml.example`](native-bouncer.yaml.example) | Native nft bouncer config template (table/set for EvuProxy) |
 | [`.env.example`](.env.example) | Docker: bouncer API key template (install writes `.env`) |
 | [`.install-mode`](.install-mode) | Legacy copy beside this directory (gitignored) |
@@ -232,6 +232,7 @@ Store the API key in `/etc/evuproxy/crowdsec-bouncer.key` when merging manually.
 | Symptom | Things to check |
 |---------|------------------|
 | Install fails: missing key | Run `install.sh bouncer-key` or delete bouncer and re-run install (see script message) |
+| Bouncer image build fails | Ensure GitHub releases are reachable from the host; re-run `docker compose -f docker-compose.example.yaml build crowdsec-firewall-bouncer`. Or use native: `CROWDSEC_INSTALL_MODE=native make crowdsec-install` |
 | Bouncer auth errors | `.env` key matches `cscli bouncers list`; LAPI at `http://127.0.0.1:8080` |
 | No decisions | Hub collection installed; logs acquired (`cscli metrics show acquisition`) |
 | Set always empty | Bouncer running with `NET_ADMIN`, `network_mode: host`; EvuProxy `crowdsec.enabled` + reload |
