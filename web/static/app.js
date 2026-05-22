@@ -5250,6 +5250,10 @@
       return;
     }
     try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+        setOnboardMsg("Clipboard is not available in this context (try HTTPS or localhost).", true);
+        return;
+      }
       await navigator.clipboard.writeText(text);
       setOnboardMsg(okMsg);
     } catch (e) {
