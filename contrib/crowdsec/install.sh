@@ -105,7 +105,7 @@ ensure_evuproxy_crowdsec() {
 	info "EvuProxy config: $cfg"
 	if config_crowdsec_enabled "$cfg"; then
 		info "crowdsec.enabled is already true"
-		if command -v nft >/dev/null 2>&1 && ! nft list set inet evuproxy crowdsec_block_v4 >/dev/null 2>&1; then
+		if command -v nft >/dev/null 2>&1 && ! nft_crowdsec_set_present; then
 			warn "nft set crowdsec_block_v4 missing — reload required"
 			if prompt_yes "Run evuproxy reload now?"; then
 				run_evuproxy_reload "$cfg"
@@ -118,7 +118,7 @@ ensure_evuproxy_crowdsec() {
 		enable_crowdsec_in_config "$cfg"
 		info "updated config (backup: ${cfg}.bak.crowdsec-install)"
 		run_evuproxy_reload "$cfg"
-		if command -v nft >/dev/null 2>&1 && ! nft list set inet evuproxy crowdsec_block_v4 >/dev/null 2>&1; then
+		if command -v nft >/dev/null 2>&1 && ! nft_crowdsec_set_present; then
 			warn "nft set still missing after reload — check evuproxy reload output"
 		fi
 		return 0
@@ -251,11 +251,16 @@ check_evuproxy_set() {
 		warn "nft not in PATH — skipping EvuProxy set check"
 		return 0
 	fi
-	if nft list set inet evuproxy crowdsec_block_v4 >/dev/null 2>&1; then
+	if nft_crowdsec_set_present; then
 		info "EvuProxy set inet evuproxy crowdsec_block_v4 is present"
 		return 0
 	fi
 	warn "nft set crowdsec_block_v4 not found in table inet evuproxy"
+}
+
+nft_crowdsec_set_present() {
+	command -v nft >/dev/null 2>&1 || return 1
+	run_root nft list set inet evuproxy crowdsec_block_v4 >/dev/null 2>&1
 }
 
 ensure_local_acquis() {
@@ -517,7 +522,7 @@ cmd_down_native() {
 print_nft_set_status() {
 	if command -v nft >/dev/null 2>&1; then
 		printf '\n--- nft set (host) ---\n'
-		nft list set inet evuproxy crowdsec_block_v4 2>/dev/null || warn "set not present — enable crowdsec in EvuProxy and reload"
+		run_root nft list set inet evuproxy crowdsec_block_v4 2>/dev/null || warn "set not present — enable crowdsec in EvuProxy and reload"
 	fi
 }
 

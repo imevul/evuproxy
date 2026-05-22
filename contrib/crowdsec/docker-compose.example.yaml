@@ -32,7 +32,8 @@ services:
     volumes:
       - crowdsec-data:/var/lib/crowdsec/data:ro
     environment:
-      BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:?Set CROWDSEC_BOUNCER_KEY in .env — see README.md}
+      # Set in .env after cscli bouncers add (install.sh does this before starting this service).
+      BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:-}
       CROWDSEC_LAPI_URL: ${CROWDSEC_LAPI_URL:-http://127.0.0.1:8080}
       NFTABLES_TABLE: inet:evuproxy
       NFTABLES_SET: crowdsec_block_v4
