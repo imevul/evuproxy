@@ -13,6 +13,10 @@ services:
       # cscli reads local_api_credentials.yaml; without this the entrypoint leaves
       # url at http://0.0.0.0:8080 (listen_uri) and cscli cannot connect as a client.
       LOCAL_API_URL: http://127.0.0.1:8080
+      # Lab hosts often block outbound HTTPS to CrowdSec; skip online registration and
+      # hub upgrade on start (Hub content is bundled in the image — LAPI + local scenarios still work).
+      DISABLE_ONLINE_API: "true"
+      NO_HUB_UPGRADE: "true"
     ports:
       # Local API — bouncer on the host uses http://127.0.0.1:8080
       - "127.0.0.1:8080:8080"
