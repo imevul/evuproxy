@@ -221,13 +221,13 @@ docker_cscli() {
 
 wait_docker_crowdsec() {
 	local i
-	for i in $(seq 1 30); do
-		if docker_cscli version >/dev/null 2>&1; then
+	for i in $(seq 1 120); do
+		if docker_cscli lapi status >/dev/null 2>&1; then
 			return 0
 		fi
 		sleep 2
 	done
-	die "CrowdSec container did not become ready (try: compose logs crowdsec)"
+	die "CrowdSec LAPI did not become ready (try: compose logs crowdsec; ensure acquis.yaml is a file — see README troubleshooting)"
 }
 
 native_cscli() {
@@ -265,6 +265,10 @@ nft_crowdsec_set_present() {
 }
 
 ensure_local_acquis() {
+	if [[ -d acquis.yaml ]]; then
+		warn "acquis.yaml is a directory — Docker creates this when compose ran before the file existed"
+		rm -rf acquis.yaml
+	fi
 	if [[ -f acquis.yaml ]]; then
 		info "using existing acquis.yaml"
 	else
@@ -389,7 +393,7 @@ cmd_install_docker() {
 
 cmd_up_docker() {
 	need_cmd docker
-	[[ -f acquis.yaml ]] || die "missing acquis.yaml — run: ./install.sh install"
+	ensure_local_acquis
 	[[ -f docker-bouncer.yaml ]] || die "missing docker-bouncer.yaml — run: ./install.sh install"
 	[[ -f "$ENV_FILE" ]] && read_env_key >/dev/null 2>&1 || die "missing .env with CROWDSEC_BOUNCER_KEY — run: ./install.sh install"
 	ensure_docker_bouncer_binary

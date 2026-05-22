@@ -143,6 +143,8 @@ cp docker-bouncer.yaml.example docker-bouncer.yaml
 
 Includes SSH (`ssh.service`) and kernel lines matching `evuproxy-` (see [`acquis.yaml.example`](acquis.yaml.example)).
 
+**Important:** create `acquis.yaml` **before** the first `compose up`. If the file is missing, Docker bind-mounts a **directory** named `acquis.yaml` and CrowdSec crashes (`evuproxy.yaml: is a directory`).
+
 ### 3. Start CrowdSec
 
 ```bash
@@ -243,6 +245,7 @@ Store the API key in `/etc/evuproxy/crowdsec-bouncer.key` when merging manually.
 | Install fails: missing key | Run `install.sh bouncer-key` or delete bouncer and re-run install (see script message) |
 | Bouncer image build fails | `install.sh` downloads the binary on the **host** first (`vendor/`); image build is offline COPY-only. If download fails, check host DNS/curl to GitHub. Docker build DNS issues (`deb.debian.org`) should no longer block install. Native fallback: `CROWDSEC_INSTALL_MODE=native make crowdsec-install` |
 | `cscli` / `0.0.0.0:8080` connection refused | Compose sets `LOCAL_API_URL=http://127.0.0.1:8080` on the `crowdsec` service; `docker compose up -d crowdsec` then `cscli lapi status` |
+| `cscli` / `127.0.0.1:8080` connection refused | LAPI not running — `docker compose logs crowdsec` (look for `is a directory` or `fatal`). Common cause: **`acquis.yaml` is a directory** because compose ran before the file existed. Fix: `docker compose down`, `rm -rf acquis.yaml`, `cp acquis.yaml.example acquis.yaml`, `docker compose up -d crowdsec`. First boot can take ~2 min (Hub upgrade). |
 | Bouncer auth errors | `.env` key matches `cscli bouncers list`; LAPI at `http://127.0.0.1:8080` |
 | No decisions | Hub collection installed; logs acquired (`cscli metrics show acquisition`) |
 | Set always empty | Bouncer running with `NET_ADMIN`, `network_mode: host`; EvuProxy `crowdsec.enabled` + reload |
