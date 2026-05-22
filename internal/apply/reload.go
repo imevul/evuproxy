@@ -146,13 +146,19 @@ func reloadWireGuard(iface, tunnelAddr, confPath string) error {
 		if err != nil {
 			return fmt.Errorf("wg-quick strip: %w", err)
 		}
-		f, err := os.CreateTemp("", "evuproxy-wg-*.conf")
+		// Temp file must live beside the WireGuard config: AppArmor profile "wg" on
+		// Ubuntu/Debian allows /etc/wireguard/* but denies reads from /tmp.
+		f, err := os.CreateTemp(filepath.Dir(confPath), ".evuproxy-wg-sync-*.conf")
 		if err != nil {
 			return err
 		}
 		tmp := f.Name()
 		defer os.Remove(tmp)
 		if _, err := f.Write(stripped); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Chmod(0o600); err != nil {
 			f.Close()
 			return err
 		}
