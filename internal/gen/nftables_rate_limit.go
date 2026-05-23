@@ -151,7 +151,9 @@ func writePolicyRateLimitScoped(b *strings.Builder, scope string, routeIndex int
 	}
 	if proto == "udp" && rl.udpSet != "" && rl.udpN > 0 {
 		burst := rateLimitBurst(rl.udpN)
-		fmt.Fprintf(b, "        %s%s%s dport %s ct state new add @%s { ip saddr limit rate %d/second burst %d packets } log prefix %q drop\n",
+		// Meter every UDP datagram — ct state new only matches the first packet of a flow;
+		// established UDP would skip this rule and hit blanket established,related accept.
+		fmt.Fprintf(b, "        %s%s%s dport %s add @%s { ip saddr limit rate %d/second burst %d packets } log prefix %q drop\n",
 			scope, exempt, proto, portExpr, rl.udpSet, rl.udpN, burst, logPrefixRateLimit)
 	}
 }

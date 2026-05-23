@@ -99,7 +99,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 |-------|------|-------------|
 | `tcp_syn_per_second` | int (optional) | Drop excess **new** TCP SYNs per **source IP** to published ports (1–10000). |
 | `max_conn_per_ip` | int (optional) | Drop when a **source IP** exceeds concurrent connection count to the port (`ct count over N` on **forward**/**input**, 1–65535). Not a sticky ban — when connections close, new ones are allowed again. |
-| `udp_per_second` | int (optional) | Drop excess **new** UDP packets per **source IP** (1–100000); can affect bursty game traffic. |
+| `udp_per_second` | int (optional) | Drop excess UDP packets per **source IP** (1–100000); can affect bursty game traffic. |
 
 Drops are logged with prefix `evuproxy-ratelimit` and appear in **Logs** when enabled (not in **Stats** nftables counters — see [Web UI — Stats page](web-ui.md#stats-page)).
 

@@ -684,6 +684,28 @@ func TestNFTables_rateLimit_maxConnBeforeEstablishedAccept(t *testing.T) {
 	}
 }
 
+func TestNFTables_rateLimit_udpBeforeEstablishedAccept(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{UDPPerSecond: 50}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "udp", Ports: []string{"14444"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwdIdx := strings.Index(s, "chain forward")
+	if fwdIdx < 0 {
+		t.Fatal("missing forward chain")
+	}
+	chunk := s[fwdIdx:]
+	udpIdx := strings.Index(chunk, "add @ratelimit_udp_v4 { ip saddr limit rate 50/second")
+	estIdx := strings.Index(chunk, "ct state established,related accept")
+	if udpIdx < 0 || estIdx < 0 || udpIdx > estIdx {
+		t.Fatalf("udp rate limit must precede blanket established accept in forward; chunk=%q", chunk)
+	}
+}
+
 func TestNFTables_rateLimit_breakGlassExempt(t *testing.T) {
 	c := baseNFTConfig()
 	c.Geo.BreakGlassCIDRs = []string{"203.0.113.5/32"}
@@ -746,6 +768,9 @@ func TestNFTables_rateLimit_routeOverrideUDP(t *testing.T) {
 	}
 	if !strings.Contains(s, "udp dport") || !strings.Contains(s, "add @ratelimit_udp_r0 { ip saddr limit rate 200/second") {
 		t.Fatalf("missing udp rate: %s", s)
+	}
+	if strings.Contains(s, "ct state new add @ratelimit_udp") {
+		t.Fatalf("udp rate must meter all packets, not ct state new only: %s", s)
 	}
 }
 

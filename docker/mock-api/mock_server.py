@@ -398,7 +398,7 @@ def _rate_limit_mock_lines(scope: str, exempt: str, proto: str, port_expr: str, 
         )
     if proto == "udp" and rl.get("udp_per_second"):
         out.append(
-            "%s%s%s dport %s ct state new ip saddr limit rate %s/second burst 20 packets log prefix \"evuproxy-ratelimit: \" drop"
+            "%s%s%s dport %s ip saddr limit rate %s/second burst 20 packets log prefix \"evuproxy-ratelimit: \" drop"
             % (scope, exempt, proto, port_expr, int(rl["udp_per_second"]))
         )
     return out
