@@ -199,6 +199,27 @@ Bans apply on published ports **after** break-glass and **before** rate limits /
 
 ---
 
+## Docker and EvuProxy forwarding
+
+The Docker install path runs containers on the **same host** as EvuProxy. That enables the Docker engine’s **`iptables` `FORWARD`** rules (`DOCKER-USER`), which are **separate** from EvuProxy’s **`inet evuproxy`** forward chain.
+
+| Setting / fix | Layer | Purpose |
+|---------------|-------|---------|
+| **`network.forward_allow_docker_bridges: true`** in EvuProxy config | EvuProxy nft | Bridge container **egress** and WAN → **Docker bridge** ingress (`172.16.0.0/12`, `192.168.0.0/16`). **Not** WAN → WireGuard peer forwards. |
+| **`network_mode: host`** for CrowdSec in compose (default here) | Compose | CrowdSec LAPI/bouncer without bridge egress; avoids needing bridge allows for Hub/API. |
+| **`iptables` `DOCKER-USER`** allows | Docker | **`public_interface` → `wireguard.interface`** (and return traffic) so **published game ports** reach peers. Required when Docker is installed and forwards time out with no `evuproxy-forward-drop` log. |
+
+Example (substitute your interface names from `/etc/evuproxy/config.yaml`):
+
+```bash
+sudo iptables -I DOCKER-USER 1 -i eth0 -o evuproxy0 -j ACCEPT
+sudo iptables -I DOCKER-USER 2 -i evuproxy0 -o eth0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+```
+
+Persist outside `evuproxy reload`. Full context: [docs/config.md § Docker on the same host](../../docs/config.md#docker-on-the-same-host).
+
+---
+
 ## Acquisition notes
 
 - **Acquisition** = which logs CrowdSec reads.  
@@ -247,7 +268,9 @@ Store the API key in `/etc/evuproxy/crowdsec-bouncer.key` when merging manually.
 | `cscli` / `0.0.0.0:8080` connection refused | Compose sets `LOCAL_API_URL=http://127.0.0.1:8080` on the `crowdsec` service; `docker compose up -d crowdsec` then `cscli lapi status` |
 | `cscli` / `127.0.0.1:8080` connection refused | LAPI not running — `docker compose logs crowdsec` (look for `is a directory` or `fatal`). **`acquis.yaml` is a directory** if compose ran before the file existed (`file acquis.yaml` must say ASCII text). **`docker_start.sh` still running** if `ps aux` shows bash/cscli hub, not `crowdsec` — wait for `Local API listening`. After compose env changes: `docker compose up -d --force-recreate crowdsec`. |
 | Hub / CAPI `i/o timeout` in logs (bridge network) | CrowdSec on **bridge** cannot reach the internet when EvuProxy **FORWARD** is drop. Compose uses **`network_mode: host`** for `crowdsec` (same as the bouncer). Optional: `network.forward_allow_docker_bridges: true` if you run other bridge containers. Test from container: `wget -qO- --timeout=5 https://version.crowdsec.net/latest` (**not** `curl` — not in the image). |
+| Published forward ports timeout after Docker install | Docker **`DOCKER-USER`** may drop **`public_interface` → WireGuard** forwards before EvuProxy sees them. Add `DOCKER-USER` allows (see § Docker and EvuProxy forwarding). **`forward_allow_docker_bridges` alone does not fix this.** Host → peer tunnel IP may still work (OUTPUT path). |
 | Bouncer auth errors | `.env` key matches `cscli bouncers list`; LAPI at `http://127.0.0.1:8080` |
+| `crowdsec-firewall-bouncer` **Restarting** / empty set | Wrong bouncer YAML (`crowdsec_config` / `set:` under `nftables` are ignored). Use `api_url`, `api_key`, and top-level `blacklists_ipv4: crowdsec_block_v4` — see [`docker-bouncer.yaml.example`](docker-bouncer.yaml.example). Then `docker compose logs crowdsec-firewall-bouncer` should show **nftables initiated**. |
 | No decisions | Hub collection installed; logs acquired (`cscli metrics show acquisition`) |
 | Set always empty | Bouncer running with `NET_ADMIN`, `network_mode: host`; EvuProxy `crowdsec.enabled` + reload |
 | Bans not on game port | IP not in break-glass; `sudo nft list ruleset \| grep crowdsec` |

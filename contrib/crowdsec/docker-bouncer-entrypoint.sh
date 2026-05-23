@@ -8,10 +8,11 @@ fi
 
 : "${CROWDSEC_LAPI_URL:=http://127.0.0.1:8080}"
 
-while IFS= read -r line || [ -n "$line" ]; do
-	line=${line//\$\{CROWDSEC_LAPI_URL\}/$CROWDSEC_LAPI_URL}
-	line=${line//\$\{CROWDSEC_BOUNCER_KEY\}/$CROWDSEC_BOUNCER_KEY}
-	printf '%s\n' "$line"
-done < /config/crowdsec-firewall-bouncer.yaml > /tmp/crowdsec-firewall-bouncer.yaml
+awk -v lapi="$CROWDSEC_LAPI_URL" -v key="$CROWDSEC_BOUNCER_KEY" '
+{
+	gsub(/\$\{CROWDSEC_LAPI_URL\}/, lapi)
+	gsub(/\$\{CROWDSEC_BOUNCER_KEY\}/, key)
+	print
+}' /config/crowdsec-firewall-bouncer.yaml > /tmp/crowdsec-firewall-bouncer.yaml
 
 exec crowdsec-firewall-bouncer -c /tmp/crowdsec-firewall-bouncer.yaml

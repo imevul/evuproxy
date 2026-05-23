@@ -478,7 +478,7 @@ native_bouncer_targets_evuproxy() {
 	[[ -f "$NATIVE_BOUNCER_CFG" ]] || return 1
 	grep -qE '^[[:space:]]*set-only:[[:space:]]*true[[:space:]]*$' "$NATIVE_BOUNCER_CFG" 2>/dev/null || return 1
 	grep -qE '^[[:space:]]*table:[[:space:]]*evuproxy[[:space:]]*$' "$NATIVE_BOUNCER_CFG" 2>/dev/null || return 1
-	grep -qE '^[[:space:]]*set:[[:space:]]*crowdsec_block_v4[[:space:]]*$' "$NATIVE_BOUNCER_CFG" 2>/dev/null || return 1
+	grep -qE '^blacklists_ipv4:[[:space:]]*crowdsec_block_v4[[:space:]]*$' "$NATIVE_BOUNCER_CFG" 2>/dev/null || return 1
 	return 0
 }
 

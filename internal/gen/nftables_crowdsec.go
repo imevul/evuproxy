@@ -11,7 +11,7 @@ const setCrowdsecBlock = "crowdsec_block_v4"
 const logPrefixCrowdsec = "evuproxy-crowdsec: "
 
 func writeCrowdsecSet(b *strings.Builder) {
-	fmt.Fprintf(b, "    set %s {\n        type ipv4_addr\n        flags interval\n        auto-merge\n    }\n\n", setCrowdsecBlock)
+	fmt.Fprintf(b, "    set %s {\n        type ipv4_addr\n        flags interval, timeout\n        auto-merge\n    }\n\n", setCrowdsecBlock)
 }
 
 func crowdsecSetName(enabled bool) string {

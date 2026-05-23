@@ -39,6 +39,31 @@ An annotated example lives at [`config/evuproxy.example.yaml`](../config/evuprox
 | `forward_allow_docker_bridges` | bool | Optional, default `false`. If `true`, adds **FORWARD** `accept` rules for typical **Docker IPv4** ranges (**`172.16.0.0/12`**, **`192.168.0.0/16`**): **egress** (container → internet via `public_interface`) and **ingress** (WAN → published container ports after DNAT; `oifname` is not the WireGuard interface). Without these, EvuProxy’s default **forward** policy (`drop`) blocks both **container egress** and **inbound** traffic to Docker. WireGuard peer tunnel IPs are usually **`10.x`** and are not covered by those ranges. |
 | `forward_extra_local_cidrs` | list of strings | Optional IPv4 CIDRs (e.g. **`10.89.0.0/24`**) for extra **FORWARD** ingress/egress (same semantics as above), e.g. when Docker uses a **`10.x`** network. Validated on load. |
 
+### Docker on the same host
+
+EvuProxy and the **Docker engine** both filter **FORWARD** traffic. They operate at **different layers** and solve **different** problems. Enabling one does not replace the other.
+
+| Layer | What it controls |
+|-------|------------------|
+| **EvuProxy** (`table inet evuproxy`, chain `forward`, policy **drop**) | Published **WAN → WireGuard peer** ports (DNAT, CrowdSec, rate limits, geo), plus optional allows for **Docker bridge CIDRs** when `forward_allow_docker_bridges` is set. |
+| **Docker** (`iptables` chain **`DOCKER-USER`**, before `DOCKER-FORWARD`) | By default, only Docker-related forwards; **other** forwarded flows (including EvuProxy’s WAN → WireGuard path) must be **explicitly allowed** in `DOCKER-USER` or Docker drops them **before** EvuProxy’s nft rules run. |
+
+**`forward_allow_docker_bridges`** adds EvuProxy **accept** rules for traffic between `public_interface` and typical **Docker bridge** ranges (`172.16.0.0/12`, `192.168.0.0/16`): container egress and WAN → container ingress. Those rules require **`oifname !=` WireGuard** — they do **not** cover **`public_interface` → WireGuard** (peer tunnel IPs are usually **`10.x`**). WireGuard forwards are handled by separate per-route accept rules in EvuProxy, but only if the packet reaches that chain.
+
+**When Docker is installed** (e.g. optional CrowdSec compose, admin UI, other containers), add **`DOCKER-USER`** allows for EvuProxy’s forward path (replace interface names with your `public_interface` and `wireguard.interface`):
+
+```bash
+# Replace eth0 / evuproxy0 with values from config.yaml
+sudo iptables -I DOCKER-USER 1 -i eth0 -o evuproxy0 -j ACCEPT
+sudo iptables -I DOCKER-USER 2 -i evuproxy0 -o eth0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+```
+
+Persist these outside EvuProxy reload (e.g. boot script or firewall unit); `evuproxy reload` does not manage `DOCKER-USER`.
+
+**Symptoms** when `DOCKER-USER` is missing: clients **timeout** on published forward ports; **`evuproxy-forward-drop`** does not appear in the kernel log (Docker dropped the packet earlier); a direct connection from the host to a **peer tunnel IP:port** may still work (that uses **OUTPUT**, not **FORWARD**). **`forward_allow_docker_bridges: true`** alone does not fix this.
+
+Hosts **without** the Docker engine, or without forwarded traffic while Docker is running, may never hit this issue.
+
 The EvuProxy API (`evuproxy serve` on `127.0.0.1:9847`) is reached via **loopback** and does not need a rule here.
 
 ---

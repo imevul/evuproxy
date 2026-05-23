@@ -9,7 +9,11 @@ wireguard:
 
 network:
   public_interface: eth0
-  # When running Docker on the same host, allow container egress and WAN→published ports (ingress):
+  # Docker on the same host — two separate knobs:
+  # - forward_allow_docker_bridges: EvuProxy FORWARD allows for bridge CIDRs (container egress / WAN→container).
+  #   Does NOT cover public_interface → WireGuard (peer 10.x forwards).
+  # - iptables DOCKER-USER: allow public_interface ↔ wireguard.interface for published forwards when the
+  #   Docker engine is installed (see docs/config.md § Docker on the same host).
   # forward_allow_docker_bridges: true
   # Optional extra IPv4 CIDRs (e.g. Docker networks on 10.x): forward_extra_local_cidrs: [ "10.89.0.0/24" ]
 

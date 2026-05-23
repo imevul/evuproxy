@@ -123,6 +123,23 @@
               Public address peers use to reach this VPN (<code>host:port</code> or <code>hostname:port</code>). Pre-filled in the peer form; port can be omitted if it matches the server listen port after you refresh server details.
             </p>
             <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+            <h3 class="settings-block-gap">
+              Public interface
+              <button
+                type="button"
+                class="btn-help-trigger btn-help-trigger--compact"
+                aria-label="Details: public interface"
+                title="Explain public interface"
+                data-help-title="Public interface"
+                data-help-template="help-public-interface"
+              >
+                ?
+              </button>
+            </h3>
+            <p class="hint">
+              Linux NIC that faces the Internet (e.g. <code>eth0</code>, <code>ens18</code>). Written to <code>config.yaml</code> for nftables and NAT — reload firewall rules after changing.
+            </p>
+            <input type="text" id="settings-public-interface" placeholder="eth0" spellcheck="false" autocomplete="off" />
             <div class="field settings-block-gap">
               <div class="toggle-switch-row">
                 <span class="toggle-switch-text" id="settings-metrics-collection-desc"
@@ -1271,6 +1288,20 @@
         <p>
           Inbound SSH/HTTP (<code class="inline">input_allows</code>) obey geo only if <strong>Apply geoblocking to inbound allow rules</strong> is on (<strong>Countries &amp; rules</strong> tab).
           Break-glass and global deny are on the <strong>Advanced</strong> tab.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-public-interface">
+      <div class="help-modal-body help-modal-rich">
+        <p>
+          <code class="inline">network.public_interface</code> is the host interface that receives traffic from the Internet. EvuProxy uses it in generated nftables (forwarding, NAT, geo, CrowdSec hooks).
+        </p>
+        <p>
+          Use the name from <code class="inline">ip link</code> on this host — predictable names like <code class="inline">ens18</code> are common on VMs; examples often use <code class="inline">eth0</code>.
+        </p>
+        <p>
+          If Docker runs on the same host, you may also need <code class="inline">DOCKER-USER</code> rules so Docker does not drop forwards between this NIC and the WireGuard interface. See <code class="inline">docs/config.md</code> (Docker on the same host).
         </p>
       </div>
     </template>

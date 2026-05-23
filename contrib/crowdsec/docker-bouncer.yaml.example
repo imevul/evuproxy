@@ -4,23 +4,25 @@
 # Requires CROWDSEC_BOUNCER_KEY and CROWDSEC_LAPI_URL in the container environment (.env).
 
 mode: nftables
-pid_dir: /var/run/
 update_frequency: 10s
 daemonize: false
 log_mode: stdout
 log_dir: /var/log/
 
-crowdsec_config:
-  lapi_url: ${CROWDSEC_LAPI_URL}/
-  lapi_key: ${CROWDSEC_BOUNCER_KEY}
-  insecure_skip_verify: false
-  update_frequency: 10s
+api_url: ${CROWDSEC_LAPI_URL}/
+api_key: ${CROWDSEC_BOUNCER_KEY}
+insecure_skip_verify: false
+
+blacklists_ipv4: crowdsec_block_v4
+disable_ipv6: true
+
+supported_decisions_types:
+  - ban
 
 nftables:
   ipv4:
     enabled: true
     set-only: true
     table: evuproxy
-    set: crowdsec_block_v4
   ipv6:
     enabled: false

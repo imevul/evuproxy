@@ -106,6 +106,8 @@
     metrics_collection_enabled: false,
   };
   let uiPrefsFetched = false;
+  /** null = not loaded this session; string = last GET /v1/config value for public_interface. */
+  let settingsPublicInterfaceLoaded = null;
 
   function invalidateUIPrefsCache() {
     uiPrefsFetched = false;
@@ -1920,6 +1922,26 @@
     if (sep) sep.value = (lastUIPrefs.wireguard_server_endpoint || "").trim();
     const spl = $("settings-metrics-collection");
     if (spl) spl.checked = !!lastUIPrefs.metrics_collection_enabled;
+    const pubIfEl = $("settings-public-interface");
+    if (pubIfEl) {
+      try {
+        const cfg = await api("/v1/config");
+        if (cfg) {
+          lastConfig = cfg;
+          settingsPublicInterfaceLoaded = String((cfg.network && cfg.network.public_interface) || "").trim();
+          pubIfEl.value = settingsPublicInterfaceLoaded;
+          pubIfEl.placeholder = "eth0";
+        }
+      } catch (e) {
+        settingsPublicInterfaceLoaded = null;
+        pubIfEl.value = "";
+        pubIfEl.placeholder = "Load failed — refresh Settings";
+        if (msg) {
+          msg.textContent = String(e.message || e);
+          msg.classList.add("err");
+        }
+      }
+    }
     syncAdvancedSettingsToggle();
     syncAdvancedTabsGating();
     syncContentWidthSelect();
@@ -2006,6 +2028,11 @@
   function intToIpv4(n) {
     n = n >>> 0;
     return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+  }
+
+  function validLinuxIfaceName(name) {
+    const s = String(name || "").trim();
+    return /^[a-zA-Z0-9._-]{1,15}$/.test(s) ? s : "";
   }
 
   function parseIPv4CIDR(cidr) {
@@ -5464,6 +5491,7 @@
   $("settings-save-prefs").addEventListener("click", async () => {
     const cidrRaw = ($("peer-subnet-cidr") && $("peer-subnet-cidr").value.trim()) || "";
     const epRaw = ($("settings-wg-endpoint") && $("settings-wg-endpoint").value.trim()) || "";
+    const pubIfRaw = ($("settings-public-interface") && $("settings-public-interface").value.trim()) || "";
     const msg = $("settings-prefs-msg");
     if (msg) {
       msg.textContent = "";
@@ -5472,6 +5500,17 @@
     if (cidrRaw && !parseIPv4CIDR(cidrRaw)) {
       if (msg) {
         msg.textContent = "Invalid IPv4 CIDR (e.g. 10.100.0.0/24).";
+        msg.classList.add("err");
+      }
+      return;
+    }
+    const pubIfValid = validLinuxIfaceName(pubIfRaw);
+    const configSaveRequested = settingsPublicInterfaceLoaded !== null || !!pubIfRaw;
+    if (configSaveRequested && !pubIfValid) {
+      if (msg) {
+        msg.textContent = pubIfRaw
+          ? "Invalid public interface name (1–15 chars: letters, digits, . _ -)."
+          : "Public interface is required.";
         msg.classList.add("err");
       }
       return;
@@ -5491,9 +5530,27 @@
         wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
         metrics_collection_enabled: !!p.metrics_collection_enabled,
       };
+      let statusParts = ["Preferences saved on server."];
+      if (configSaveRequested) {
+        let cfg = lastConfig;
+        if (!cfg) cfg = await api("/v1/config");
+        const prevPubIf = String((cfg.network && cfg.network.public_interface) || "").trim();
+        if (prevPubIf !== pubIfValid) {
+          const cfgOut = JSON.parse(JSON.stringify(cfg));
+          if (!cfgOut.network) cfgOut.network = {};
+          cfgOut.network.public_interface = pubIfValid;
+          await api("/v1/config", { method: "PUT", body: JSON.stringify(cfgOut) });
+          lastConfig = cfgOut;
+          settingsPublicInterfaceLoaded = pubIfValid;
+          statusParts.push("Public interface saved — reload to apply nftables.");
+          refreshPendingBadge();
+        }
+      } else {
+        statusParts.push("Public interface not updated (config could not be loaded).");
+      }
       if (msg) {
-        msg.textContent = "Preferences saved on server.";
-        if (!epRaw) {
+        msg.textContent = statusParts.join(" ");
+        if (statusParts.length === 1 && !epRaw) {
           msg.textContent += " Tip: add WireGuard server endpoint (host:port) for client snippets.";
         }
       }
