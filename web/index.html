@@ -907,7 +907,7 @@
             <div class="field">
               <span class="field-label">Global rate limits <span class="meta">(optional defaults for all routes)</span></span>
               <p class="hint meta">
-                Limits new WAN traffic to published ports. Per-route overrides: Routes → Advanced. UDP limits can affect bursty game traffic.
+                Per-source limits on published ports: TCP SYN rate, max concurrent connections per IP, and UDP packets per second. Per-route overrides: Routes → Advanced. UDP limits meter every datagram and can affect bursty game traffic.
               </p>
               <div class="rate-limit-grid">
                 <div class="field">

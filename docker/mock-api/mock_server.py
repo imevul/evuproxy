@@ -7,6 +7,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -338,14 +339,25 @@ def _route_protocols(proto: str | None) -> list[str]:
     p = (proto or "tcp").lower().strip()
     if p in ("both", "tcp+udp"):
         return ["tcp", "udp"]
+    parts = [x.strip() for x in re.split(r"[,+\s]+", p) if x.strip()]
+    if len(parts) > 1:
+        out: list[str] = []
+        for tok in parts:
+            if tok not in ("tcp", "udp"):
+                continue
+            if tok not in out:
+                out.append(tok)
+        if out:
+            return sorted(out)
     if p == "udp":
         return ["udp"]
     return ["tcp"]
 
 
-def _formatted_routes(cfg: dict) -> list[tuple[str, str, str]]:
-    out: list[tuple[str, str, str]] = []
-    for r in cfg.get("forwarding", {}).get("routes") or []:
+def _formatted_routes(cfg: dict) -> list[tuple[int, str, str, str]]:
+    """Return (route_index, proto, port_expr, target_ip) for each enabled route/protocol."""
+    out: list[tuple[int, str, str, str]] = []
+    for i, r in enumerate(cfg.get("forwarding", {}).get("routes") or []):
         if r.get("disabled"):
             continue
         expr = _format_port_set(r.get("ports") or [])
@@ -355,51 +367,107 @@ def _formatted_routes(cfg: dict) -> list[tuple[str, str, str]]:
         if not target:
             continue
         for pr in _route_protocols(r.get("proto")):
-            out.append((pr, expr, target))
+            out.append((i, pr, expr, target))
     return out
 
 
-def _uniq_sorted_targets(routes: list[tuple[str, str, str]]) -> list[str]:
-    s = sorted({t for _, _, t in routes})
+def _uniq_sorted_targets(routes: list[tuple[int, str, str, str]]) -> list[str]:
+    s = sorted({t for _, _, _, t in routes})
     return s
 
 
-def _effective_rate_limit(cfg: dict, route: dict | None) -> dict:
+def _rate_limit_burst(per_second: int) -> int:
+    if per_second < 5:
+        return per_second * 2
+    if per_second > 50:
+        return per_second
+    return per_second * 2
+
+
+def _rate_limit_conn_threshold(max_conn: int) -> int:
+    return max_conn - 1
+
+
+def _rate_limit_set_needs(cfg: dict) -> tuple[bool, bool, set[int], set[int]]:
     fwd = cfg.get("forwarding") or {}
-    base = dict(fwd.get("rate_limit") or {})
-    if route:
-        for k, v in (route.get("rate_limit") or {}).items():
-            if v:
-                base[k] = v
-    return base
+    g = fwd.get("rate_limit") or {}
+    global_syn = bool(g.get("tcp_syn_per_second"))
+    global_udp = bool(g.get("udp_per_second"))
+    route_syn: set[int] = set()
+    route_udp: set[int] = set()
+    for i, r in enumerate(fwd.get("routes") or []):
+        if r.get("disabled"):
+            continue
+        rl = r.get("rate_limit") or {}
+        if rl.get("tcp_syn_per_second"):
+            route_syn.add(i)
+        elif g.get("tcp_syn_per_second"):
+            global_syn = True
+        if rl.get("udp_per_second"):
+            route_udp.add(i)
+        elif g.get("udp_per_second"):
+            global_udp = True
+    return global_syn, global_udp, route_syn, route_udp
 
 
-def _rate_limit_enabled(rl: dict) -> bool:
-    return bool(
-        rl.get("tcp_syn_per_second")
-        or rl.get("max_conn_per_ip")
-        or rl.get("udp_per_second")
-    )
+def _rate_limit_binding(route_index: int, global_rl: dict, route_rl: dict) -> dict:
+    g = global_rl or {}
+    r = route_rl or {}
+    out = {"conn_n": 0, "syn_set": "", "syn_n": 0, "udp_set": "", "udp_n": 0}
+    if r.get("max_conn_per_ip"):
+        out["conn_n"] = int(r["max_conn_per_ip"])
+    elif g.get("max_conn_per_ip"):
+        out["conn_n"] = int(g["max_conn_per_ip"])
+    if r.get("tcp_syn_per_second"):
+        out["syn_set"] = "ratelimit_syn_r%d" % route_index
+        out["syn_n"] = int(r["tcp_syn_per_second"])
+    elif g.get("tcp_syn_per_second"):
+        out["syn_set"] = "ratelimit_syn_v4"
+        out["syn_n"] = int(g["tcp_syn_per_second"])
+    if r.get("udp_per_second"):
+        out["udp_set"] = "ratelimit_udp_r%d" % route_index
+        out["udp_n"] = int(r["udp_per_second"])
+    elif g.get("udp_per_second"):
+        out["udp_set"] = "ratelimit_udp_v4"
+        out["udp_n"] = int(g["udp_per_second"])
+    return out
 
 
-def _rate_limit_mock_lines(scope: str, exempt: str, proto: str, port_expr: str, rl: dict) -> list[str]:
-    if not _rate_limit_enabled(rl):
+def _rate_limit_mock_lines(
+    scope: str,
+    exempt: str,
+    route_index: int,
+    global_rl: dict,
+    route_rl: dict,
+    proto: str,
+    port_expr: str,
+) -> list[str]:
+    rl = _rate_limit_binding(route_index, global_rl, route_rl)
+    if rl["conn_n"] == 0 and not rl["syn_set"] and not rl["udp_set"]:
         return []
     out: list[str] = []
-    if rl.get("max_conn_per_ip"):
+    if rl["conn_n"] > 0:
+        thr = _rate_limit_conn_threshold(rl["conn_n"])
         out.append(
-            "%s%s%s dport %s ct count ip saddr over %s packets log prefix \"evuproxy-ratelimit: \" drop"
-            % (scope, exempt, proto, port_expr, int(rl["max_conn_per_ip"]))
+            '%s%s%s dport %s ct state established,related ct count over %d log prefix "evuproxy-ratelimit: " drop'
+            % (scope, exempt, proto, port_expr, thr)
         )
-    if proto == "tcp" and rl.get("tcp_syn_per_second"):
+        if proto == "tcp":
+            out.append(
+                '%s%s%s dport %s ct state new ct count over %d log prefix "evuproxy-ratelimit: " drop'
+                % (scope, exempt, proto, port_expr, thr)
+            )
+    if proto == "tcp" and rl["syn_set"] and rl["syn_n"] > 0:
+        burst = _rate_limit_burst(rl["syn_n"])
         out.append(
-            "%s%s%s dport %s tcp flags syn / ct state new ip saddr limit rate %s/second burst 20 packets log prefix \"evuproxy-ratelimit: \" drop"
-            % (scope, exempt, proto, port_expr, int(rl["tcp_syn_per_second"]))
+            '%s%s%s dport %s tcp flags syn ct state new add @%s { ip saddr limit rate %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
+            % (scope, exempt, proto, port_expr, rl["syn_set"], rl["syn_n"], burst)
         )
-    if proto == "udp" and rl.get("udp_per_second"):
+    if proto == "udp" and rl["udp_set"] and rl["udp_n"] > 0:
+        burst = _rate_limit_burst(rl["udp_n"])
         out.append(
-            "%s%s%s dport %s ip saddr limit rate %s/second burst 20 packets log prefix \"evuproxy-ratelimit: \" drop"
-            % (scope, exempt, proto, port_expr, int(rl["udp_per_second"]))
+            '%s%s%s dport %s add @%s { ip saddr limit rate %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
+            % (scope, exempt, proto, port_expr, rl["udp_set"], rl["udp_n"], burst)
         )
     return out
 
@@ -423,14 +491,15 @@ def _nft_from_config(cfg: dict) -> str:
     break_glass = geo.get("break_glass_cidrs") or []
     exempt = "ip saddr != @break_glass_v4 " if break_glass else ""
     routes = _formatted_routes(cfg)
-    route_by_key = {}
-    for r in cfg.get("forwarding", {}).get("routes") or []:
+    global_rl = (cfg.get("forwarding") or {}).get("rate_limit") or {}
+    route_by_key: dict[tuple[str, str, str], tuple[int, dict]] = {}
+    for i, r in enumerate(cfg.get("forwarding", {}).get("routes") or []):
         if r.get("disabled"):
             continue
         expr = _format_port_set(r.get("ports") or [])
         target = (r.get("target_ip") or "").strip()
         for pr in _route_protocols(r.get("proto")):
-            route_by_key[(pr, expr, target)] = r
+            route_by_key[(pr, expr, target)] = (i, r)
 
     lines.append("table inet evuproxy {")
     if crowdsec_on:
@@ -451,6 +520,51 @@ def _nft_from_config(cfg: dict) -> str:
                 "        type ipv4_addr",
                 "        flags interval",
                 "        auto-merge",
+                "    }",
+                "",
+            ]
+        )
+    global_syn, global_udp, route_syn, route_udp = _rate_limit_set_needs(cfg)
+    if global_syn:
+        lines.extend(
+            [
+                "    set ratelimit_syn_v4 {",
+                "        type ipv4_addr",
+                "        flags dynamic",
+                "        timeout 2s",
+                "    }",
+                "",
+            ]
+        )
+    if global_udp:
+        lines.extend(
+            [
+                "    set ratelimit_udp_v4 {",
+                "        type ipv4_addr",
+                "        flags dynamic",
+                "        timeout 2s",
+                "    }",
+                "",
+            ]
+        )
+    for ri in sorted(route_syn):
+        lines.extend(
+            [
+                "    set ratelimit_syn_r%d {" % ri,
+                "        type ipv4_addr",
+                "        flags dynamic",
+                "        timeout 2s",
+                "    }",
+                "",
+            ]
+        )
+    for ri in sorted(route_udp):
+        lines.extend(
+            [
+                "    set ratelimit_udp_r%d {" % ri,
+                "        type ipv4_addr",
+                "        flags dynamic",
+                "        timeout 2s",
                 "    }",
                 "",
             ]
@@ -491,9 +605,9 @@ def _nft_from_config(cfg: dict) -> str:
             lines.append("        %s dport %s accept" % (p, d))
     lines.append("        udp dport %d accept" % wg_port)
 
-    for pr, port_expr, target in routes:
-        route = route_by_key.get((pr, port_expr, target), {})
-        rl = _effective_rate_limit(cfg, route)
+    for route_index, pr, port_expr, target in routes:
+        _, route = route_by_key.get((pr, port_expr, target), (route_index, {}))
+        route_rl = route.get("rate_limit") or {}
         if crowdsec_on:
             if exempt:
                 lines.append(
@@ -504,7 +618,11 @@ def _nft_from_config(cfg: dict) -> str:
                 lines.append(
                     "        ip saddr @crowdsec_block_v4 %s dport %s drop" % (pr, port_expr)
                 )
-        lines.extend(_rate_limit_mock_lines("        ", exempt, pr, port_expr, rl))
+        lines.extend(
+            _rate_limit_mock_lines(
+                "        ", exempt, route_index, global_rl, route_rl, pr, port_expr
+            )
+        )
         if not geo_enabled:
             lines.append("        %s dport %s accept" % (pr, port_expr))
         elif block_listed:
@@ -529,12 +647,11 @@ def _nft_from_config(cfg: dict) -> str:
             "    chain forward {",
             "        type filter hook forward priority 0; policy drop;",
             "",
-            "        ct state established,related accept",
         ]
     )
-    for pr, port_expr, target in routes:
-        route = route_by_key.get((pr, port_expr, target), {})
-        rl = _effective_rate_limit(cfg, route)
+    for route_index, pr, port_expr, target in routes:
+        _, route = route_by_key.get((pr, port_expr, target), (route_index, {}))
+        route_rl = route.get("rate_limit") or {}
         if crowdsec_on:
             if exempt:
                 lines.append(
@@ -548,9 +665,17 @@ def _nft_from_config(cfg: dict) -> str:
                 )
         lines.extend(
             _rate_limit_mock_lines(
-                '        iifname "%s" oifname "%s" ' % (pub, wg), exempt, pr, port_expr, rl
+                '        iifname "%s" oifname "%s" ' % (pub, wg),
+                exempt,
+                route_index,
+                global_rl,
+                route_rl,
+                pr,
+                port_expr,
             )
         )
+    lines.append("        ct state established,related accept")
+    for route_index, pr, port_expr, target in routes:
         lines.append(
             '        iifname "%s" oifname "%s" ip daddr %s %s dport %s accept'
             % (pub, wg, target, pr, port_expr)
@@ -582,7 +707,7 @@ def _nft_from_config(cfg: dict) -> str:
             "        type nat hook prerouting priority -100;",
         ]
     )
-    for pr, port_expr, target in routes:
+    for route_index, pr, port_expr, target in routes:
         if not geo_enabled:
             lines.append("        %s dport %s dnat to %s" % (pr, port_expr, target))
         elif block_listed:

@@ -149,8 +149,9 @@ Includes SSH (`ssh.service`) and kernel lines matching `evuproxy-` (see [`acquis
 
 ```bash
 docker compose -f docker-compose.example.yaml up -d crowdsec
-docker compose -f docker-compose.example.yaml exec crowdsec cscli collections install crowdsecurity/linux
 ```
+
+The example compose file sets `COLLECTIONS=crowdsecurity/linux` on first start — you only need the manual `cscli collections install` step if you changed or removed that env var.
 
 ### 4. Bouncer API key
 
@@ -181,22 +182,19 @@ docker compose -f docker-compose.example.yaml up -d crowdsec-firewall-bouncer
 
 ## After `evuproxy reload`
 
-Every `evuproxy reload` **recreates** table `inet evuproxy` and **clears** `crowdsec_block_v4` until the bouncer repopulates it (usually seconds, native bouncer default poll **10s**).
+Every `evuproxy reload` **recreates** table `inet evuproxy` and **clears** `crowdsec_block_v4` until the bouncer repopulates it (usually within the bouncer poll interval — **10s** in the example Docker/native configs).
 
-**Docker bouncer:** stop it before reload so it does not hold the live table while nft replaces rules:
+**Normal case:** run `sudo evuproxy reload` as usual. The Docker bouncer can stay running; it re-syncs decisions into the new set on the next poll. Active bans may be absent for a few seconds after reload.
 
-```bash
-docker compose -f docker-compose.example.yaml stop crowdsec-firewall-bouncer
-sudo evuproxy reload --config /etc/evuproxy/config.yaml
-docker compose -f docker-compose.example.yaml start crowdsec-firewall-bouncer
-```
-
-If reload fails with **`File exists`** on `crowdsec_block_v4`, the live table was still loaded — run the stop/delete/reload sequence above, or delete the tables manually then reload:
+**If reload fails with `File exists` on `crowdsec_block_v4`:** recent EvuProxy releases retry validation after deleting the live tables automatically. If load still fails, stop the Docker bouncer (or native bouncer service), delete tables, and reload:
 
 ```bash
+docker compose -f docker-compose.example.yaml stop crowdsec-firewall-bouncer   # Docker
+# sudo systemctl stop crowdsec-firewall-bouncer                               # native
 sudo nft delete table inet evuproxy
 sudo nft delete table ip evuproxy
 sudo evuproxy reload --config /etc/evuproxy/config.yaml
+docker compose -f docker-compose.example.yaml start crowdsec-firewall-bouncer  # Docker
 ```
 
 During an incident you may restart the bouncer:
@@ -213,7 +211,9 @@ sudo systemctl restart crowdsec-firewall-bouncer
 
 ## Rule placement (EvuProxy)
 
-Bans apply on published ports **after** break-glass and **before** rate limits / geo on **INPUT** and **inet forward**. The bouncer must use **`inet:evuproxy`** / set **`crowdsec_block_v4`** only (not the `ip` prerouting table).
+CrowdSec drops apply on published ports **after** global/route deny lists and **before** per-source rate limits on **inet INPUT** and **inet forward** (break-glass CIDRs exempt). **Geo** filtering runs separately on **INPUT** and **`ip` prerouting** (DNAT), not in the **inet forward** chain — see [docs/config.md § crowdsec](../../docs/config.md#crowdsec-optional) for the full forward-path order.
+
+The bouncer must populate set **`crowdsec_block_v4`** in table **`inet evuproxy`** only (`table: evuproxy` in bouncer YAML — not the `ip` prerouting table). Drops are logged with prefix **`evuproxy-crowdsec:`** (same family as **`evuproxy-ratelimit:`** from rate limits).
 
 ---
 
@@ -292,7 +292,8 @@ Store the API key in `/etc/evuproxy/crowdsec-bouncer.key` when merging manually.
 | No decisions | Hub collection installed; logs acquired (`cscli metrics show acquisition`) |
 | Set always empty | Bouncer running with `NET_ADMIN`, `network_mode: host`; EvuProxy `crowdsec.enabled` + reload |
 | Bans not on game port | IP not in break-glass; `sudo nft list ruleset \| grep crowdsec` |
-| Reload cleared bans | Expected — wait for bouncer sync or restart bouncer |
+| Reload cleared bans | Expected — wait ~10s for bouncer sync or `restart` bouncer; brief gap is normal |
+| Rate limits work but CrowdSec test ban does not | CrowdSec only drops IPs **in the set**; rate limits are separate rules. Confirm test IP with `sudo nft list set inet evuproxy crowdsec_block_v4` and `grep crowdsec` on forward rules |
 
 ---
 
