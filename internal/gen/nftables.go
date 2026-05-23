@@ -146,7 +146,6 @@ func nftablesRoutes(c *config.Config) (string, error) {
     chain forward {
         type filter hook forward priority 0; policy drop;
 
-        ct state established,related accept
 `)
 
 	for _, cidr := range forwardAllowLocalCIDRs(c) {
@@ -159,6 +158,8 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	for _, r := range routes {
 		writePolicyForwardDrops(&b, pub, wg, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.srcDeny, crowdsecSet, breakGlass, globalDeny)
 	}
+
+	fmt.Fprintf(&b, "        ct state established,related accept\n")
 
 	for _, r := range routes {
 		if r.srcAllow != "" {

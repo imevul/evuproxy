@@ -662,6 +662,28 @@ func TestNFTables_rateLimit_forwardBeforeAccept(t *testing.T) {
 	}
 }
 
+func TestNFTables_rateLimit_maxConnBeforeEstablishedAccept(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{MaxConnPerIP: 5}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwdIdx := strings.Index(s, "chain forward")
+	if fwdIdx < 0 {
+		t.Fatal("missing forward chain")
+	}
+	chunk := s[fwdIdx:]
+	connIdx := strings.Index(chunk, "update @ratelimit_conn_v4 { ip saddr } ct count over 5")
+	estIdx := strings.Index(chunk, "ct state established,related accept")
+	if connIdx < 0 || estIdx < 0 || connIdx > estIdx {
+		t.Fatalf("max conn must precede blanket established accept in forward; chunk=%q", chunk)
+	}
+}
+
 func TestNFTables_rateLimit_breakGlassExempt(t *testing.T) {
 	c := baseNFTConfig()
 	c.Geo.BreakGlassCIDRs = []string{"203.0.113.5/32"}
