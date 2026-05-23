@@ -9,7 +9,6 @@ import (
 
 const (
 	logPrefixRateLimit = "evuproxy-ratelimit: "
-	setRateLimitConn   = "ratelimit_conn_v4"
 	setRateLimitSyn    = "ratelimit_syn_v4"
 	setRateLimitUDP    = "ratelimit_udp_v4"
 )
@@ -25,23 +24,17 @@ func rateLimitBurst(perSecond uint) uint {
 }
 
 type rateLimitSetNeeds struct {
-	globalConn bool
-	globalSyn  bool
-	globalUDP  bool
-	routeConn  map[int]bool
-	routeSyn   map[int]bool
-	routeUDP   map[int]bool
+	globalSyn bool
+	globalUDP bool
+	routeSyn  map[int]bool
+	routeUDP  map[int]bool
 }
 
 func rateLimitSetNeedsFor(c *config.Config) rateLimitSetNeeds {
 	var needs rateLimitSetNeeds
-	needs.routeConn = map[int]bool{}
 	needs.routeSyn = map[int]bool{}
 	needs.routeUDP = map[int]bool{}
 	g := c.Forwarding.RateLimit
-	if g.MaxConnPerIP > 0 {
-		needs.globalConn = true
-	}
 	if g.TCPSynPerSecond > 0 {
 		needs.globalSyn = true
 	}
@@ -51,11 +44,6 @@ func rateLimitSetNeedsFor(c *config.Config) rateLimitSetNeeds {
 	for i, r := range c.Forwarding.Routes {
 		if r.Disabled {
 			continue
-		}
-		if r.RateLimit.MaxConnPerIP > 0 {
-			needs.routeConn[i] = true
-		} else if g.MaxConnPerIP > 0 {
-			needs.globalConn = true
 		}
 		if r.RateLimit.TCPSynPerSecond > 0 {
 			needs.routeSyn[i] = true
@@ -72,17 +60,11 @@ func rateLimitSetNeedsFor(c *config.Config) rateLimitSetNeeds {
 }
 
 func writeRateLimitSets(b *strings.Builder, needs rateLimitSetNeeds) {
-	if needs.globalConn {
-		fmt.Fprintf(b, "    set %s {\n        type ipv4_addr\n        flags dynamic\n    }\n\n", setRateLimitConn)
-	}
 	if needs.globalSyn {
 		fmt.Fprintf(b, "    set %s {\n        type ipv4_addr\n        flags dynamic\n        timeout 2s\n    }\n\n", setRateLimitSyn)
 	}
 	if needs.globalUDP {
 		fmt.Fprintf(b, "    set %s {\n        type ipv4_addr\n        flags dynamic\n        timeout 2s\n    }\n\n", setRateLimitUDP)
-	}
-	for i := range needs.routeConn {
-		fmt.Fprintf(b, "    set %s {\n        type ipv4_addr\n        flags dynamic\n    }\n\n", rateLimitConnSetRoute(i))
 	}
 	for i := range needs.routeSyn {
 		fmt.Fprintf(b, "    set %s {\n        type ipv4_addr\n        flags dynamic\n        timeout 2s\n    }\n\n", rateLimitSynSetRoute(i))
@@ -93,21 +75,18 @@ func writeRateLimitSets(b *strings.Builder, needs rateLimitSetNeeds) {
 }
 
 type rateLimitBinding struct {
-	connSet string
-	connN   uint
-	synSet  string
-	synN    uint
-	udpSet  string
-	udpN    uint
+	connN  uint
+	synSet string
+	synN   uint
+	udpSet string
+	udpN   uint
 }
 
 func rateLimitBindingForRoute(routeIndex int, global, route config.RateLimit) rateLimitBinding {
 	var b rateLimitBinding
 	if route.MaxConnPerIP > 0 {
-		b.connSet = rateLimitConnSetRoute(routeIndex)
 		b.connN = route.MaxConnPerIP
 	} else if global.MaxConnPerIP > 0 {
-		b.connSet = setRateLimitConn
 		b.connN = global.MaxConnPerIP
 	}
 	if route.TCPSynPerSecond > 0 {
@@ -127,7 +106,6 @@ func rateLimitBindingForRoute(routeIndex int, global, route config.RateLimit) ra
 	return b
 }
 
-func rateLimitConnSetRoute(i int) string  { return fmt.Sprintf("ratelimit_conn_r%d", i) }
 func rateLimitSynSetRoute(i int) string   { return fmt.Sprintf("ratelimit_syn_r%d", i) }
 func rateLimitUDPSetRoute(i int) string   { return fmt.Sprintf("ratelimit_udp_r%d", i) }
 
@@ -144,15 +122,19 @@ func writePolicyForwardRateLimit(b *strings.Builder, pub, wg string, routeIndex 
 
 func writePolicyRateLimitScoped(b *strings.Builder, scope string, routeIndex int, global, route config.RateLimit, proto, portExpr, breakGlass string) {
 	rl := rateLimitBindingForRoute(routeIndex, global, route)
-	if rl.connSet == "" && rl.synSet == "" && rl.udpSet == "" {
+	if rl.connN == 0 && rl.synSet == "" && rl.udpSet == "" {
 		return
 	}
 	exempt := rateLimitExemptPrefix(breakGlass)
-	if rl.connSet != "" && rl.connN > 0 {
-		fmt.Fprintf(b, "        %s%s%s dport %s ct state established,related update @%s { ip saddr } ct count over %d\n",
-			scope, exempt, proto, portExpr, rl.connSet, rl.connN)
-		fmt.Fprintf(b, "        %s%sip saddr @%s %s dport %s log prefix %q drop\n",
-			scope, exempt, rl.connSet, proto, portExpr, logPrefixRateLimit)
+	if rl.connN > 0 {
+		// Inline ct count drop — no sticky dynamic set. The update+@set pattern permanently
+		// banned sources and re-added them on keepalives from lingering conntrack entries.
+		fmt.Fprintf(b, "        %s%s%s dport %s ct state established,related ct count over %d log prefix %q drop\n",
+			scope, exempt, proto, portExpr, rl.connN, logPrefixRateLimit)
+		if proto == "tcp" {
+			fmt.Fprintf(b, "        %s%s%s dport %s ct state new ct count over %d log prefix %q drop\n",
+				scope, exempt, proto, portExpr, rl.connN, logPrefixRateLimit)
+		}
 	}
 	if proto == "tcp" && rl.synSet != "" && rl.synN > 0 {
 		burst := rateLimitBurst(rl.synN)
