@@ -109,6 +109,13 @@ func rateLimitBindingForRoute(routeIndex int, global, route config.RateLimit) ra
 func rateLimitSynSetRoute(i int) string   { return fmt.Sprintf("ratelimit_syn_r%d", i) }
 func rateLimitUDPSetRoute(i int) string   { return fmt.Sprintf("ratelimit_udp_r%d", i) }
 
+// rateLimitConnCountThreshold maps max_conn_per_ip N to nft "ct count over X" (strictly greater than X).
+// When the Nth connection is being opened, count is N-1 — block the next one at over N-2... 
+// Block when count > (N-1), i.e. use over (N-1) for max N allowed: 4th SYN sees count 3, over 2 matches.
+func rateLimitConnCountThreshold(maxConn uint) uint {
+	return maxConn - 1
+}
+
 // writePolicyRateLimit emits per-source limits on published ports (INPUT and forward).
 func writePolicyRateLimit(b *strings.Builder, routeIndex int, global, route config.RateLimit, proto, portExpr, breakGlass string) {
 	writePolicyRateLimitScoped(b, "", routeIndex, global, route, proto, portExpr, breakGlass)
@@ -129,11 +136,12 @@ func writePolicyRateLimitScoped(b *strings.Builder, scope string, routeIndex int
 	if rl.connN > 0 {
 		// Inline ct count drop — no sticky dynamic set. The update+@set pattern permanently
 		// banned sources and re-added them on keepalives from lingering conntrack entries.
+		thr := rateLimitConnCountThreshold(rl.connN)
 		fmt.Fprintf(b, "        %s%s%s dport %s ct state established,related ct count over %d log prefix %q drop\n",
-			scope, exempt, proto, portExpr, rl.connN, logPrefixRateLimit)
+			scope, exempt, proto, portExpr, thr, logPrefixRateLimit)
 		if proto == "tcp" {
 			fmt.Fprintf(b, "        %s%s%s dport %s ct state new ct count over %d log prefix %q drop\n",
-				scope, exempt, proto, portExpr, rl.connN, logPrefixRateLimit)
+				scope, exempt, proto, portExpr, thr, logPrefixRateLimit)
 		}
 	}
 	if proto == "tcp" && rl.synSet != "" && rl.synN > 0 {

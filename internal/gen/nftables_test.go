@@ -633,7 +633,7 @@ func TestNFTables_rateLimit_tcpSynAndConn(t *testing.T) {
 	if strings.Contains(s, "set ratelimit_conn_v4") || strings.Contains(s, "update @ratelimit_conn") {
 		t.Fatalf("max conn should use inline ct count drop, not sticky conn set: %s", s)
 	}
-	if !strings.Contains(s, "ct state established,related ct count over 80 log prefix \"evuproxy-ratelimit: \" drop") {
+	if !strings.Contains(s, "ct state established,related ct count over 79 log prefix \"evuproxy-ratelimit: \" drop") {
 		t.Fatalf("missing inline max conn drop: %s", s)
 	}
 	if !strings.Contains(s, "tcp flags syn ct state new add @ratelimit_syn_v4 { ip saddr limit rate 40/second") {
@@ -677,7 +677,7 @@ func TestNFTables_rateLimit_maxConnBeforeEstablishedAccept(t *testing.T) {
 		t.Fatal("missing forward chain")
 	}
 	chunk := s[fwdIdx:]
-	connIdx := strings.Index(chunk, "ct state established,related ct count over 5 log prefix \"evuproxy-ratelimit: \" drop")
+	connIdx := strings.Index(chunk, "ct state established,related ct count over 4 log prefix \"evuproxy-ratelimit: \" drop")
 	estIdx := strings.Index(chunk, "ct state established,related accept")
 	if connIdx < 0 || estIdx < 0 || connIdx > estIdx {
 		t.Fatalf("max conn must precede blanket established accept in forward; chunk=%q", chunk)
