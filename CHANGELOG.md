@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.12.0](https://github.com/imevul/evuproxy/compare/v0.11.0...v0.12.0) (2026-05-23)
+
+
+### Features
+
+* **abuse:** rate limits, CrowdSec, and Prometheus observability ([1cd6cdd](https://github.com/imevul/evuproxy/commit/1cd6cddff192ea9602a1272ae7f296410d3236b8))
+* **crowdsec:** add install script with Docker and native paths ([a8598b8](https://github.com/imevul/evuproxy/commit/a8598b81bff752c2852d50bf0f497d31e646b41b))
+* **forwarding:** port maps, deny lists, route geo, and maintenance mode ([f081b1f](https://github.com/imevul/evuproxy/commit/f081b1f91ecf1b0ac862901a3a5beb86359b5cf3))
+* **logs:** surface CrowdSec drops in log viewer ([15ce59f](https://github.com/imevul/evuproxy/commit/15ce59f26d2169b71b374b6639e8143cec73af33))
+* **peers:** add API fallback when Web Crypto is unavailable on HTTP. ([5ac2eae](https://github.com/imevul/evuproxy/commit/5ac2eae459801ef274e5db838e90d19767f06817))
+* **ui:** gate Advanced tabs with disabled state and hints ([3739696](https://github.com/imevul/evuproxy/commit/37396963dfd1e7b86f5964ab433cc385d0203371))
+
+
+### Bug Fixes
+
+* **abuse:** harden review findings and deferred operator gaps ([156bcee](https://github.com/imevul/evuproxy/commit/156bcee6d7f5132e57e1f99fe5b34f2f42605208))
+* **crowdsec:** allow staged Docker install before bouncer key exists. ([8477092](https://github.com/imevul/evuproxy/commit/8477092e7f6492e70e5a9fdac8cf825f31c4adab))
+* **crowdsec:** build local nft bouncer image instead of missing Hub tag. ([7f5df91](https://github.com/imevul/evuproxy/commit/7f5df91598d7aa2efe11273b7ffb4ed6274d40ea))
+* **crowdsec:** fetch bouncer binary from GitHub releases in Docker build. ([ecacaf3](https://github.com/imevul/evuproxy/commit/ecacaf371a213975367fa138fd88ab90efc16fc0))
+* **crowdsec:** prefetch bouncer binary on host for offline Docker build. ([550c11e](https://github.com/imevul/evuproxy/commit/550c11e47240fa658081c0cab6e6f003ba797e7c))
+* **crowdsec:** recover from Docker-created acquis.yaml directory trap. ([d4ef63f](https://github.com/imevul/evuproxy/commit/d4ef63f8885c8f7409986fba8548ca689f1b4de9))
+* **crowdsec:** remove RETURN trap that broke install under set -u. ([2dd9f1d](https://github.com/imevul/evuproxy/commit/2dd9f1d6adea16695cef406cb88df97dee304039))
+* **crowdsec:** set LOCAL_API_URL so cscli can reach LAPI in Docker. ([ef0bc46](https://github.com/imevul/evuproxy/commit/ef0bc460535d53bf6c7e16d4f4d4b42eb7188b88))
+* **crowdsec:** start LAPI offline when CrowdSec HTTPS is blocked. ([f512781](https://github.com/imevul/evuproxy/commit/f512781efd2e4cb65be96eeb969aab8bd330821a))
+* **crowdsec:** use host network and gitignore local compose configs. ([a5cd49b](https://github.com/imevul/evuproxy/commit/a5cd49b2be1bb1a16125a8a0ef05218b560e196f))
+* **nft:** enforce max_conn_per_ip before forward established accept. ([a7bcab2](https://github.com/imevul/evuproxy/commit/a7bcab28a085cb4d83ecf88fc3456290c1c4a9da))
+* **nft:** meter all UDP packets for udp_per_second limits. ([88d3c69](https://github.com/imevul/evuproxy/commit/88d3c6907ad781857e0a8ee728d96ba2a41703e0))
+* **nft:** use ct count over N-1 for max_conn_per_ip limits. ([1474946](https://github.com/imevul/evuproxy/commit/14749463661057de1ec767ed0eb610edb0d82b8c))
+* **nft:** use inline ct count for max_conn_per_ip limits. ([90d5dc7](https://github.com/imevul/evuproxy/commit/90d5dc73ebe7d2b7668201f29ffdc097ff3954e5))
+* **reload:** retry nft validate after deleting live EvuProxy tables. ([9eb550b](https://github.com/imevul/evuproxy/commit/9eb550b36299cf117e7f0e9e279a60201716b972))
+* **reload:** stage wg syncconf temp file under /etc/wireguard. ([990ac24](https://github.com/imevul/evuproxy/commit/990ac243799f5ce7e9dda478e88acca7806e74d4))
+* **ui:** correct peer crypto fallback API paths. ([2b0782d](https://github.com/imevul/evuproxy/commit/2b0782da2f7190ab2785391bf1ad897289d4c97f))
+* **ui:** guard peer onboarding copy when clipboard is unavailable. ([d6f1dda](https://github.com/imevul/evuproxy/commit/d6f1ddad348be382bf5e60c6609836922d45f088))
+
 ## [0.11.0](https://github.com/imevul/evuproxy/compare/v0.10.0...v0.11.0) (2026-05-17)
 
 
