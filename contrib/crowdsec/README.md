@@ -181,7 +181,25 @@ docker compose -f docker-compose.example.yaml up -d crowdsec-firewall-bouncer
 
 ## After `evuproxy reload`
 
-Every `evuproxy reload` **recreates** table `inet evuproxy` and **clears** `crowdsec_block_v4` until the bouncer repopulates it (usually seconds, native bouncer default poll **10s**). During an incident you may restart the bouncer:
+Every `evuproxy reload` **recreates** table `inet evuproxy` and **clears** `crowdsec_block_v4` until the bouncer repopulates it (usually seconds, native bouncer default poll **10s**).
+
+**Docker bouncer:** stop it before reload so it does not hold the live table while nft replaces rules:
+
+```bash
+docker compose -f docker-compose.example.yaml stop crowdsec-firewall-bouncer
+sudo evuproxy reload --config /etc/evuproxy/config.yaml
+docker compose -f docker-compose.example.yaml start crowdsec-firewall-bouncer
+```
+
+If reload fails with **`File exists`** on `crowdsec_block_v4`, the live table was still loaded — run the stop/delete/reload sequence above, or delete the tables manually then reload:
+
+```bash
+sudo nft delete table inet evuproxy
+sudo nft delete table ip evuproxy
+sudo evuproxy reload --config /etc/evuproxy/config.yaml
+```
+
+During an incident you may restart the bouncer:
 
 ```bash
 docker compose -f docker-compose.example.yaml restart crowdsec-firewall-bouncer

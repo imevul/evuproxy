@@ -58,9 +58,8 @@ func reload(cfgPath string) error {
 		return fmt.Errorf("write wireguard: %w", err)
 	}
 
-	check := exec.Command("nft", "-c", "-f", nftPath)
-	if out, err := check.CombinedOutput(); err != nil {
-		return fmt.Errorf("nft validate: %w\n%s", err, TruncateForLog(string(out), 8192))
+	if err := validateNFTablesForReload(nftPath); err != nil {
+		return err
 	}
 
 	// Replace EvuProxy tables atomically. Delete may fail if the table is absent; that is normal on first install.
@@ -138,6 +137,27 @@ func tryDeleteNFTTable(family, table string) {
 	if err != nil {
 		slog.Debug("nft delete table", "family", family, "table", table, "err", err, "output", TruncateForLog(string(out), 1024))
 	}
+}
+
+// validateNFTablesForReload runs nft -c on the generated ruleset. When EvuProxy tables are
+// already loaded, check mode can fail with "File exists" because the file re-declares sets;
+// delete the live tables once and re-check (same outcome as reload, which replaces them anyway).
+func validateNFTablesForReload(nftPath string) error {
+	out, err := exec.Command("nft", "-c", "-f", nftPath).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	outStr := string(out)
+	if !strings.Contains(strings.ToLower(outStr), "file exists") {
+		return fmt.Errorf("nft validate: %w\n%s", err, TruncateForLog(outStr, 8192))
+	}
+	tryDeleteNFTTable("inet", "evuproxy")
+	tryDeleteNFTTable("ip", "evuproxy")
+	out, err = exec.Command("nft", "-c", "-f", nftPath).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("nft validate: %w\n%s", err, TruncateForLog(string(out), 8192))
+	}
+	return nil
 }
 
 func reloadWireGuard(iface, tunnelAddr, confPath string) error {
