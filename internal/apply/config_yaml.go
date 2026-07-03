@@ -1,23 +1,29 @@
 package apply
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/imevul/evuproxy/internal/config"
 	"gopkg.in/yaml.v3"
-)
 
-// ConfigYAMLBackupPath returns the path for the last distinct applied snapshot (updated on Reload).
-func ConfigYAMLBackupPath(cfgPath string) string {
-	return cfgPath + ".bak"
-}
+	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/state"
+)
 
 // SaveConfigYAML writes a validated config to path (atomic replace).
 // It does not modify config backup/history files; those update on successful Reload only.
+// A cross-process lock serializes it against reload/restore so a save cannot race
+// a concurrent apply reading the same file.
 func SaveConfigYAML(path string, c *config.Config) error {
+	c.Normalize()
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	unlock, err := acquireApplyLock(context.Background(), path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	out, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("marshal yaml: %w", err)
@@ -26,4 +32,27 @@ func SaveConfigYAML(path string, c *config.Config) error {
 		return err
 	}
 	return nil
+}
+
+// DiscardPendingConfigYAML reverts config.yaml to the last applied snapshot,
+// holding the cross-process apply lock so it cannot race a concurrent reload
+// reading the same file.
+func DiscardPendingConfigYAML(cfgPath string) error {
+	unlock, err := acquireApplyLock(context.Background(), cfgPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return state.DiscardPendingConfigYAML(cfgPath)
+}
+
+// RestorePreviousAppliedConfigYAML writes the previous applied snapshot into
+// config.yaml under the cross-process apply lock.
+func RestorePreviousAppliedConfigYAML(cfgPath string) error {
+	unlock, err := acquireApplyLock(context.Background(), cfgPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return state.RestorePreviousAppliedConfigYAML(cfgPath)
 }

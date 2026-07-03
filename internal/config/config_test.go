@@ -4,10 +4,16 @@ import (
 	"testing"
 )
 
+// Valid 44-char base64 WireGuard public keys for test fixtures.
+const (
+	testWGKeyA = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	testWGKeyB = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+)
+
 func TestValidateAllowsEmptyForwardingRoutes(t *testing.T) {
 	c := sampleBase()
 	c.Forwarding = Forwarding{Routes: nil}
-	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	c.Peers = []Peer{{Name: "a", PublicKey: testWGKeyA, TunnelIP: "10.100.0.2/32"}}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -26,8 +32,8 @@ func TestValidateRoutesMode(t *testing.T) {
 		},
 	}
 	c.Peers = []Peer{
-		{Name: "a", PublicKey: "k1", TunnelIP: "10.100.0.2/32"},
-		{Name: "b", PublicKey: "k2", TunnelIP: "10.100.0.3/32"},
+		{Name: "a", PublicKey: testWGKeyA, TunnelIP: "10.100.0.2/32"},
+		{Name: "b", PublicKey: testWGKeyB, TunnelIP: "10.100.0.3/32"},
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
@@ -42,7 +48,7 @@ func TestValidateRoutesBothProtos(t *testing.T) {
 			{Proto: "udp,tcp", Ports: []string{"8888"}, TargetIP: "10.100.0.2"},
 		},
 	}
-	c.Peers = []Peer{{Name: "a", PublicKey: "k1", TunnelIP: "10.100.0.2/32"}}
+	c.Peers = []Peer{{Name: "a", PublicKey: testWGKeyA, TunnelIP: "10.100.0.2/32"}}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +92,7 @@ func TestValidateRoutesBadTarget(t *testing.T) {
 			{Proto: "tcp", Ports: []string{"80"}, TargetIP: "10.99.0.9"},
 		},
 	}
-	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	c.Peers = []Peer{{Name: "a", PublicKey: testWGKeyA, TunnelIP: "10.100.0.2/32"}}
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected error for unknown target_ip")
 	}
@@ -99,7 +105,7 @@ func TestValidateDisabledRouteSkipped(t *testing.T) {
 			{Proto: "tcp", Ports: []string{"80"}, TargetIP: "10.99.0.9", Disabled: true},
 		},
 	}
-	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	c.Peers = []Peer{{Name: "a", PublicKey: testWGKeyA, TunnelIP: "10.100.0.2/32"}}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +134,7 @@ func TestValidateRoutesSourceAllowCIDRs(t *testing.T) {
 			},
 		},
 	}
-	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	c.Peers = []Peer{{Name: "a", PublicKey: testWGKeyA, TunnelIP: "10.100.0.2/32"}}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +147,7 @@ func TestValidateRoutesSourceAllowCIDRsRejectBad(t *testing.T) {
 			{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2", SourceAllowCIDRs: []string{"not-an-ip"}},
 		},
 	}
-	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	c.Peers = []Peer{{Name: "a", PublicKey: testWGKeyA, TunnelIP: "10.100.0.2/32"}}
 	if err := c.Validate(); err == nil {
 		t.Fatal("expected error for bad source_allow_cidrs entry")
 	}
@@ -154,7 +160,7 @@ func TestValidateRoutesSourceAllowSkippedWhenDisabled(t *testing.T) {
 			{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.99.0.9", Disabled: true, SourceAllowCIDRs: []string{"bad"}},
 		},
 	}
-	c.Peers = []Peer{{Name: "a", PublicKey: "k", TunnelIP: "10.100.0.2/32"}}
+	c.Peers = []Peer{{Name: "a", PublicKey: testWGKeyA, TunnelIP: "10.100.0.2/32"}}
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}

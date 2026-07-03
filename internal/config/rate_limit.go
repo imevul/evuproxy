@@ -23,21 +23,6 @@ func (r RateLimit) Enabled() bool {
 	return r.TCPSynPerSecond > 0 || r.MaxConnPerIP > 0 || r.UDPPerSecond > 0
 }
 
-// EffectiveRateLimit merges global defaults with per-route overrides (non-zero route fields win).
-func EffectiveRateLimit(global, route RateLimit) RateLimit {
-	out := global
-	if route.TCPSynPerSecond > 0 {
-		out.TCPSynPerSecond = route.TCPSynPerSecond
-	}
-	if route.MaxConnPerIP > 0 {
-		out.MaxConnPerIP = route.MaxConnPerIP
-	}
-	if route.UDPPerSecond > 0 {
-		out.UDPPerSecond = route.UDPPerSecond
-	}
-	return out
-}
-
 func ValidateRateLimit(path string, r RateLimit) error {
 	if !r.Enabled() {
 		return nil

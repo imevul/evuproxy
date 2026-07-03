@@ -113,16 +113,16 @@
         </div>
         <div id="settings-tab-prefs-panel" role="tabpanel" aria-labelledby="settings-tab-prefs-btn">
           <div class="card">
-            <h3>Peer tunnel subnet</h3>
+            <h3 id="peer-subnet-cidr-heading">Peer tunnel subnet</h3>
             <p class="hint">
               IPv4 CIDR used to pick the next free tunnel IP when you add a peer. Should match the WireGuard tunnel network. Server default is <code>10.100.0.0/24</code> when unset.
             </p>
-            <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" />
-            <h3 class="settings-block-gap">WireGuard server endpoint</h3>
+            <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" aria-labelledby="peer-subnet-cidr-heading" />
+            <h3 class="settings-block-gap" id="settings-wg-endpoint-heading">WireGuard server endpoint</h3>
             <p class="hint">
               Public address peers use to reach this VPN (<code>host:port</code> or <code>hostname:port</code>). Pre-filled in the peer form; port can be omitted if it matches the server listen port after you refresh server details.
             </p>
-            <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+            <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" aria-labelledby="settings-wg-endpoint-heading" />
             <h3 class="settings-block-gap">
               Public interface
               <button
@@ -139,7 +139,7 @@
             <p class="hint">
               Linux NIC that faces the Internet (e.g. <code>eth0</code>, <code>ens18</code>). Written to <code>config.yaml</code> for nftables and NAT — reload firewall rules after changing.
             </p>
-            <input type="text" id="settings-public-interface" placeholder="eth0" spellcheck="false" autocomplete="off" />
+            <input type="text" id="settings-public-interface" placeholder="eth0" spellcheck="false" autocomplete="off" aria-label="Public interface" />
             <div class="field settings-block-gap">
               <div class="toggle-switch-row">
                 <span class="toggle-switch-text" id="settings-metrics-collection-desc"
@@ -924,7 +924,6 @@
                 </div>
               </div>
             </div>
-          </div>
             <div class="field">
               <div class="toggle-switch-row">
                 <span class="toggle-switch-text" id="geo-crowdsec-desc">CrowdSec integration <span class="meta">(optional)</span></span>
@@ -940,6 +939,7 @@
                 See <code class="inline">contrib/crowdsec/</code> in the repo.
               </p>
             </div>
+          </div>
         </div>
 
         <div class="card geo-actions-card">
@@ -978,7 +978,7 @@
               <label class="visually-hidden" for="geo-modal-search">Search countries</label>
               <input type="search" id="geo-modal-search" class="geo-modal-search" placeholder="Search" autocomplete="off" />
             </div>
-            <div id="geo-modal-list" class="geo-modal-list" role="listbox" aria-multiselectable="true"></div>
+            <div id="geo-modal-list" class="geo-modal-list" role="group" aria-label="Countries"></div>
             <div class="btn-row geo-modal-actions">
               <button type="button" class="btn-quiet" id="geo-modal-cancel">Cancel</button>
               <button type="button" class="btn-primary" id="geo-modal-save">Save</button>

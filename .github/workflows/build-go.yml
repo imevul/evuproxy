@@ -1,4 +1,4 @@
-name: Build Go binary
+name: Build & test
 
 permissions:
   contents: read
@@ -6,14 +6,11 @@ permissions:
 on:
   push:
     branches: [main]
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - ".github/workflows/build-go.yml"
+  pull_request:
+    branches: [main]
 
 jobs:
-  build:
+  build-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +20,31 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then
+            echo "gofmt needed on:"; echo "$out"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: Test (race)
+        # Ubuntu runners ship nft, so the nft -c syntax-check tests execute here.
+        run: go test ./... -race -count=1
       - name: Build
         run: |
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
           go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o evuproxy ./cmd/evuproxy
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./scripts
+          # Start at error severity so introducing the check doesn't fail on
+          # pre-existing style nits; tighten to warning once scripts are clean.
+          severity: error

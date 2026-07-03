@@ -1,7 +1,33 @@
 .PHONY: all up down dev dev-fresh playwright-deps playwright-visual \
-	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs
+	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
+	check fmt vet test test-race deadcode
 
 # Run from the repository root. Requires Go 1.22+, Docker, and `docker compose` (v2).
+
+# check runs the same gates as CI: formatting, vet, and the full test suite.
+check: fmt vet test
+
+# fmt fails if any Go file is not gofmt-clean (does not modify files).
+fmt:
+	@out="$$(gofmt -l .)"; \
+	if [ -n "$$out" ]; then \
+	  echo "gofmt needed on:"; echo "$$out"; \
+	  echo "run: gofmt -w ."; \
+	  exit 1; \
+	fi
+
+vet:
+	go vet ./...
+
+test:
+	go test ./... -count=1
+
+test-race:
+	go test ./... -race -count=1
+
+# deadcode reports unreachable functions (go install golang.org/x/tools/cmd/deadcode@latest).
+deadcode:
+	deadcode ./...
 
 CROWDSEC_DIR := contrib/crowdsec
 

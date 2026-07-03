@@ -50,10 +50,10 @@ func TestLockoutWarnings_sourceAllow(t *testing.T) {
 		Geo:       config.Geo{Enabled: false},
 		Forwarding: config.Forwarding{
 			Routes: []config.ForwardRoute{{
-				Proto:             "tcp",
-				Ports:             []string{"25565"},
-				TargetIP:          "10.100.0.2",
-				SourceAllowCIDRs:  []string{"198.51.100.0/24"},
+				Proto:            "tcp",
+				Ports:            []string{"25565"},
+				TargetIP:         "10.100.0.2",
+				SourceAllowCIDRs: []string{"198.51.100.0/24"},
 			}},
 		},
 		Peers: []config.Peer{{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"}},

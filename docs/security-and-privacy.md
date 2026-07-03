@@ -20,5 +20,5 @@ Operational notes for operating EvuProxy safely. The HTTP API reference is in [L
 - After `reload`, nftables **INPUT** is restrictive; the example seed allows **TCP 22**, **80/443**, and **9080** (Docker UI) via **`input_allows`**. Remove **9080** there if you only use SSH tunnels to the UI.
 - Do not expose the API on `0.0.0.0` without TLS and strong auth.
 - Geo data is approximate; VPN users bypass country filters.
-- If geo sets are **empty** while geo is enabled, traffic may be blocked — check `journalctl` and run `evuproxy update-geo`.
-- **Reload diagnostics:** `nft delete table` before replace may fail when tables were never loaded (first install); that is expected. Enable **debug** logging to see those lines. Geo zone / loader warnings during reload are logged at **WARN**; fix by running **`evuproxy update-geo`** or fixing zone files.
+- Geo enforcement is **fail-closed on apply**: `reload` folds table replacement and geo set population into one atomic nftables transaction, and a missing/invalid zone file aborts the reload before the kernel is touched (fix zone files or run **`evuproxy update-geo`**, then reload again). Geo sets are never live-but-empty after a successful apply.
+- **Reload diagnostics:** `nft delete table` inside the generated transaction is a no-op-equivalent when tables were never loaded (first install); that is expected.

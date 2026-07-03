@@ -1,14 +1,14 @@
 package apply
 
 import (
+	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
 // GenerateWireGuardPrivateKey runs `wg genkey`.
 func GenerateWireGuardPrivateKey() (string, error) {
-	out, err := exec.Command("wg", "genkey").Output()
+	out, err := runCmdOutput(context.Background(), "wg", "genkey")
 	if err != nil {
 		return "", fmt.Errorf("wg genkey: %w", err)
 	}
@@ -30,9 +30,7 @@ func GenerateWireGuardKeypair() (privateKey, publicKey string, err error) {
 
 // WireGuardPublicKey runs `wg pubkey` with the given private key on stdin.
 func WireGuardPublicKey(privateKey string) (string, error) {
-	cmd := exec.Command("wg", "pubkey")
-	cmd.Stdin = strings.NewReader(strings.TrimSpace(privateKey) + "\n")
-	out, err := cmd.Output()
+	out, err := runCmdOutputStdin(context.Background(), strings.TrimSpace(privateKey)+"\n", "wg", "pubkey")
 	if err != nil {
 		return "", fmt.Errorf("wg pubkey: %w", err)
 	}

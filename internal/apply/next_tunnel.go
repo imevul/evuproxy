@@ -7,12 +7,13 @@ import (
 	"strings"
 
 	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 // NextFreeTunnelIP picks an unused IPv4 in the UI peer tunnel subnet (host part) for a new peer.
 // Uses /32 for the returned value. Returns an error if no address is free.
 func NextFreeTunnelIP(cfgPath string, c *config.Config) (string, error) {
-	prefs, err := LoadUIPreferences(cfgPath)
+	prefs, err := state.LoadUIPreferences(cfgPath)
 	if err != nil {
 		return "", err
 	}

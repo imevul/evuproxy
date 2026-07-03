@@ -12,6 +12,7 @@ import (
 
 	"github.com/imevul/evuproxy/internal/apply"
 	"github.com/imevul/evuproxy/internal/metrics"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 func cmdMetrics() *cobra.Command {
@@ -22,7 +23,7 @@ func cmdMetrics() *cobra.Command {
 		Short: "Run background peer ICMP metrics collection into SQLite (respects ui-preferences metrics_collection_enabled)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if dbPath == "" {
-				dbPath = apply.MetricsDBDefaultPath(cfgPath)
+				dbPath = state.MetricsDBDefaultPath(cfgPath)
 			}
 			return runMetricsLoop(cmd.Context(), cfgPath, dbPath, interval)
 		},
@@ -45,7 +46,7 @@ func runMetricsLoop(ctx context.Context, cfgPath, dbPath string, interval time.D
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{}))
 
 	tick := func() {
-		prefs, err := apply.LoadUIPreferences(cfgPath)
+		prefs, err := state.LoadUIPreferences(cfgPath)
 		if err != nil {
 			log.Error("metrics: preferences", "err", err)
 			return

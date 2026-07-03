@@ -1,8 +1,8 @@
 package apply
 
 import (
+	"context"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -61,11 +61,11 @@ func StatsFromHost(cfgPath string) (*Stats, error) {
 
 // NFTablesChainsForMetrics returns the text of the evuproxy forward and input chains (inet).
 func NFTablesChainsForMetrics() (forward, input []byte, err error) {
-	fwd, err := exec.Command("nft", "list", "chain", "inet", "evuproxy", "forward").CombinedOutput()
+	fwd, err := runCmdCombined(context.Background(), "nft", "list", "chain", "inet", "evuproxy", "forward")
 	if err != nil {
 		return fwd, nil, fmt.Errorf("nft forward chain: %w", err)
 	}
-	inp, err := exec.Command("nft", "list", "chain", "inet", "evuproxy", "input").CombinedOutput()
+	inp, err := runCmdCombined(context.Background(), "nft", "list", "chain", "inet", "evuproxy", "input")
 	if err != nil {
 		return fwd, inp, fmt.Errorf("nft input chain: %w", err)
 	}
@@ -73,7 +73,7 @@ func NFTablesChainsForMetrics() (forward, input []byte, err error) {
 }
 
 func wgDumpPeers(iface string) ([]WGPeerDump, error) {
-	out, err := exec.Command("wg", "show", iface, "dump").Output()
+	out, err := runCmdOutput(context.Background(), "wg", "show", iface, "dump")
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func wgDumpPeers(iface string) ([]WGPeerDump, error) {
 }
 
 func nftCounterLines(family, table string) []NFTCounterLine {
-	out, err := exec.Command("nft", "list", "table", family, table, "-a").CombinedOutput()
+	out, err := runCmdCombined(context.Background(), "nft", "list", "table", family, table, "-a")
 	if err != nil {
 		return nil
 	}

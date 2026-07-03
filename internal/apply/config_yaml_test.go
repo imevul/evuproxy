@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/imevul/evuproxy/internal/config"
 	"gopkg.in/yaml.v3"
+
+	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 func TestSaveConfigYAML_doesNotWriteBak(t *testing.T) {
@@ -22,7 +24,7 @@ func TestSaveConfigYAML_doesNotWriteBak(t *testing.T) {
 	if err := SaveConfigYAML(cfgPath, &c); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(ConfigYAMLBackupPath(cfgPath)); !os.IsNotExist(err) {
+	if _, err := os.Stat(state.ConfigYAMLBackupPath(cfgPath)); !os.IsNotExist(err) {
 		t.Fatal("SaveConfigYAML should not create .bak")
 	}
 	loaded, err := config.Load(cfgPath)
@@ -44,7 +46,7 @@ func TestSaveConfigYAML_firstWriteNoBak(t *testing.T) {
 	if err := SaveConfigYAML(cfgPath, &c); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(ConfigYAMLBackupPath(cfgPath)); !os.IsNotExist(err) {
+	if _, err := os.Stat(state.ConfigYAMLBackupPath(cfgPath)); !os.IsNotExist(err) {
 		t.Fatalf("expected no backup on first write")
 	}
 }

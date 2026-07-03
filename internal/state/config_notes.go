@@ -1,4 +1,4 @@
-package apply
+package state
 
 import (
 	"errors"
@@ -35,7 +35,7 @@ func LoadConfigNotes(cfgPath string) (string, error) {
 // SaveConfigNotes writes notes atomically. Text must be at most configNotesMax runes (bytes for ASCII).
 func SaveConfigNotes(cfgPath string, text string) error {
 	if len(text) > configNotesMax {
-		return fmt.Errorf("notes exceed max size %d bytes", configNotesMax)
+		return fmt.Errorf("notes exceed max size %d bytes: %w", configNotesMax, ErrNotesTooLarge)
 	}
 	dir := filepath.Dir(cfgPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

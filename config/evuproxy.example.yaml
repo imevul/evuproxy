@@ -1,5 +1,5 @@
 # Example EvuProxy config — copy to /etc/evuproxy/config.yaml and edit.
-# See README.md for field semantics.
+# See docs/config.md for field semantics.
 
 wireguard:
   interface: evuproxy0

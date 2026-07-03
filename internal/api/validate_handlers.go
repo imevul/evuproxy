@@ -22,7 +22,7 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	defer r.Body.Close()
 
-	clientIP := apply.DetectClientIP(r)
+	clientIP := DetectClientIP(r)
 	var draft *config.Config
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -62,6 +62,6 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClientIP(w http.ResponseWriter, r *http.Request) {
-	info := apply.DetectClientIP(r)
+	info := DetectClientIP(r)
 	s.jsonOK(w, info)
 }

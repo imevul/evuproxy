@@ -1,24 +1,13 @@
-package apply
+package api
 
 import (
 	"net"
 	"net/http"
 	"os"
 	"strings"
-)
 
-const (
-	ClientIPSourceDirect      = "direct"
-	ClientIPSourceXFF         = "xff"
-	ClientIPSourceUnavailable = "unavailable"
+	"github.com/imevul/evuproxy/internal/apply"
 )
-
-// ClientIPInfo describes how the API inferred the operator's IPv4 address.
-type ClientIPInfo struct {
-	IP     string `json:"detected_client_ip,omitempty"`
-	Source string `json:"ip_detection_source"`
-	Note   string `json:"ip_detection_note,omitempty"`
-}
 
 // TrustXFF reports whether X-Forwarded-For is honored (EVUPROXY_TRUST_XFF=1|true|yes).
 func TrustXFF() bool {
@@ -27,17 +16,17 @@ func TrustXFF() bool {
 }
 
 // DetectClientIP returns the best-effort IPv4 address for lockout warnings.
-func DetectClientIP(r *http.Request) ClientIPInfo {
+func DetectClientIP(r *http.Request) apply.ClientIPInfo {
 	if r == nil {
-		return ClientIPInfo{Source: ClientIPSourceUnavailable, Note: "no request context"}
+		return apply.ClientIPInfo{Source: apply.ClientIPSourceUnavailable, Note: "no request context"}
 	}
 	if TrustXFF() {
 		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
 			first := strings.TrimSpace(strings.Split(xff, ",")[0])
 			if ip := parseIPv4Literal(first); ip != "" {
-				return ClientIPInfo{
+				return apply.ClientIPInfo{
 					IP:     ip,
-					Source: ClientIPSourceXFF,
+					Source: apply.ClientIPSourceXFF,
 					Note:   "first hop from X-Forwarded-For (EVUPROXY_TRUST_XFF enabled)",
 				}
 			}
@@ -52,9 +41,9 @@ func DetectClientIP(r *http.Request) ClientIPInfo {
 		if !TrustXFF() && strings.TrimSpace(r.Header.Get("X-Forwarded-For")) != "" {
 			note = "X-Forwarded-For present but ignored; set EVUPROXY_TRUST_XFF=1 only behind a trusted reverse proxy"
 		}
-		return ClientIPInfo{IP: ip, Source: ClientIPSourceDirect, Note: note}
+		return apply.ClientIPInfo{IP: ip, Source: apply.ClientIPSourceDirect, Note: note}
 	}
-	return ClientIPInfo{Source: ClientIPSourceUnavailable, Note: "could not determine IPv4 client address"}
+	return apply.ClientIPInfo{Source: apply.ClientIPSourceUnavailable, Note: "could not determine IPv4 client address"}
 }
 
 func parseIPv4Literal(s string) string {

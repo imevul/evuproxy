@@ -67,7 +67,7 @@ func cmdReload() *cobra.Command {
 		Use:   "reload",
 		Short: "Regenerate and apply WireGuard + nftables from config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return apply.Reload(cfgPath)
+			return apply.Reload(cmd.Context(), cfgPath)
 		},
 	}
 }
@@ -77,7 +77,7 @@ func cmdUpdateGeo() *cobra.Command {
 		Use:   "update-geo",
 		Short: "Download country zones and refresh nftables geo sets",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return apply.UpdateGeo(cfgPath)
+			return apply.UpdateGeo(cmd.Context(), cfgPath)
 		},
 	}
 }
@@ -87,7 +87,7 @@ func cmdStatus() *cobra.Command {
 		Use:   "status",
 		Short: "Show WireGuard and nftables summary",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			out, err := apply.Status(cfgPath)
+			out, err := apply.Status(cmd.Context(), cfgPath)
 			if err != nil {
 				return err
 			}
@@ -102,7 +102,7 @@ func cmdServe() *cobra.Command {
 	var metricsListenInsecure bool
 	c := &cobra.Command{
 		Use:   "serve",
-		Short: "Run local HTTP API (bind127.0.0.1 by default)",
+		Short: "Run local HTTP API (binds 127.0.0.1 by default)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if ld := strings.TrimSpace(os.Getenv("EVUPROXY_LOG_DIR")); ld != "" {
 				cleanup, err := logging.SetupFileAndStderr(ld)
@@ -136,11 +136,11 @@ func cmdServe() *cobra.Command {
 				MetricsListen:         ml,
 				MetricsListenInsecure: metricsListenInsecure,
 				Token:                 tok,
-				Config:        cfgPath,
-				MetricsDB:     strings.TrimSpace(metricsDB),
-				Logger:        slog.Default(),
-				Version:       version,
-				CORSOrigins:   corsOrigins,
+				Config:                cfgPath,
+				MetricsDB:             strings.TrimSpace(metricsDB),
+				Logger:                slog.Default(),
+				Version:               version,
+				CORSOrigins:           corsOrigins,
 			}
 			geopath := strings.TrimSpace(os.Getenv("EVUPROXY_GEOLITE_MMDB"))
 			if geopath != "" {
@@ -177,7 +177,7 @@ func cmdBackup() *cobra.Command {
 			if dest == "" {
 				return fmt.Errorf("--dest required")
 			}
-			return apply.Backup(cfgPath, dest)
+			return apply.Backup(cmd.Context(), cfgPath, dest)
 		},
 	}
 	c.Flags().StringVar(&dest, "dest", "", "output .tgz path (absolute or cwd-relative; must resolve under EVUPROXY_BACKUP_DIR, default /var/backups)")
@@ -276,7 +276,7 @@ func cmdPeerAdd() *cobra.Command {
 				return err
 			}
 			if doApply {
-				return apply.Reload(cfgPath)
+				return apply.Reload(cmd.Context(), cfgPath)
 			}
 			return nil
 		},
@@ -328,7 +328,7 @@ func cmdPeerRemove() *cobra.Command {
 				return err
 			}
 			if doApply {
-				return apply.Reload(cfgPath)
+				return apply.Reload(cmd.Context(), cfgPath)
 			}
 			return nil
 		},
@@ -378,7 +378,7 @@ func cmdPeerSet() *cobra.Command {
 				return err
 			}
 			if doApply {
-				return apply.Reload(cfgPath)
+				return apply.Reload(cmd.Context(), cfgPath)
 			}
 			return nil
 		},

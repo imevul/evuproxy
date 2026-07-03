@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 const testCfgV1 = `wireguard:
@@ -60,7 +62,7 @@ func TestApplyStatePendingAfterSave(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(testCfgV1), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureApplyStateFromDisk(cfgPath); err != nil {
+	if err := state.EnsureApplyStateFromDisk(cfgPath); err != nil {
 		t.Fatal(err)
 	}
 	info1, err := PendingSummary(cfgPath)
@@ -80,7 +82,7 @@ func TestApplyStatePendingAfterSave(t *testing.T) {
 	if !info2.Pending {
 		t.Fatalf("expected pending after config change: %+v", info2)
 	}
-	if err := RecordAppliedConfigHash(cfgPath); err != nil {
+	if err := state.RecordAppliedConfigHash(cfgPath); err != nil {
 		t.Fatal(err)
 	}
 	info3, err := PendingSummary(cfgPath)

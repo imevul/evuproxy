@@ -13,6 +13,17 @@ import (
 	"github.com/imevul/evuproxy/internal/config"
 )
 
+// Sentinel errors from ProbeForwardingRoute; the API layer maps these to stable
+// client-facing messages with errors.Is instead of matching message substrings.
+var (
+	ErrRouteIndexInvalid = errors.New("invalid route_index")
+	ErrRouteDisabled     = errors.New("route is disabled")
+	ErrRouteNoPorts      = errors.New("route has no ports")
+	ErrRoutePortNotFound = errors.New("port not in route")
+	ErrRouteTargetIP     = errors.New("invalid target_ip")
+	ErrRouteInvalidProto = errors.New("invalid route proto")
+)
+
 // RouteProbeResult is returned from ProbeForwardingRoute.
 type RouteProbeResult struct {
 	Proto       string `json:"proto"`
@@ -26,22 +37,22 @@ type RouteProbeResult struct {
 // ProbeForwardingRoute dials target_ip:port using protocols from the route (TCP always tried for tcp/both; UDP for udp/both).
 func ProbeForwardingRoute(ctx context.Context, c *config.Config, routeIndex, portOverride int) ([]RouteProbeResult, error) {
 	if routeIndex < 0 || routeIndex >= len(c.Forwarding.Routes) {
-		return nil, fmt.Errorf("invalid route_index")
+		return nil, ErrRouteIndexInvalid
 	}
 	r := c.Forwarding.Routes[routeIndex]
 	if r.Disabled {
-		return nil, fmt.Errorf("route is disabled")
+		return nil, ErrRouteDisabled
 	}
 	protos, err := config.ParseRouteProtocols(r.Proto)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrRouteInvalidProto, err)
 	}
 	ports, err := config.ExpandRoutePortNumbers(r.Ports)
 	if err != nil {
 		return nil, err
 	}
 	if len(ports) == 0 {
-		return nil, fmt.Errorf("route has no ports")
+		return nil, ErrRouteNoPorts
 	}
 	port := int(ports[0])
 	if portOverride > 0 {
@@ -54,12 +65,12 @@ func ProbeForwardingRoute(ctx context.Context, c *config.Config, routeIndex, por
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("port not in route")
+			return nil, ErrRoutePortNotFound
 		}
 	}
 	ip := strings.TrimSpace(r.TargetIP)
 	if net.ParseIP(ip) == nil {
-		return nil, fmt.Errorf("invalid target_ip")
+		return nil, ErrRouteTargetIP
 	}
 
 	var out []RouteProbeResult

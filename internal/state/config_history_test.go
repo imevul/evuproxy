@@ -1,4 +1,4 @@
-package apply
+package state
 
 import (
 	"bytes"
@@ -8,6 +8,54 @@ import (
 
 	"github.com/imevul/evuproxy/internal/config"
 )
+
+const testCfgV1 = `wireguard:
+  interface: evu0
+  listen_port: 51830
+  private_key_file: /etc/k
+  address: 10.100.0.1/24
+network:
+  public_interface: eth0
+forwarding:
+  routes:
+    - proto: tcp
+      ports: ["80"]
+      target_ip: 10.100.0.2
+geo:
+  enabled: false
+  set_name: geo_v4
+  countries: []
+  zone_dir: /tmp/z
+input_allows: []
+peers:
+  - name: p1
+    public_key: aN1ZvFJyNFsFtXZjMKtQRGQB+YWY6NxcCX79QbRhP0k=
+    tunnel_ip: 10.100.0.2/32
+`
+
+const testCfgV2 = `wireguard:
+  interface: evu0
+  listen_port: 51831
+  private_key_file: /etc/k
+  address: 10.100.0.1/24
+network:
+  public_interface: eth0
+forwarding:
+  routes:
+    - proto: tcp
+      ports: ["80"]
+      target_ip: 10.100.0.2
+geo:
+  enabled: false
+  set_name: geo_v4
+  countries: []
+  zone_dir: /tmp/z
+input_allows: []
+peers:
+  - name: p1
+    public_key: aN1ZvFJyNFsFtXZjMKtQRGQB+YWY6NxcCX79QbRhP0k=
+    tunnel_ip: 10.100.0.2/32
+`
 
 func TestRecordAppliedConfigSnapshot_seedsBak(t *testing.T) {
 	dir := t.TempDir()

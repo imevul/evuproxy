@@ -146,7 +146,8 @@ function peerTunnelIPv4Options(cfg) {
     if (!ip) return;
     const o = document.createElement("option");
     o.value = ip;
-    o.textContent = ip + " (" + p.name + ")";
+    const name = String(p.name || "").trim();
+    o.textContent = name ? name + " (" + ip + ")" : ip;
     sel.appendChild(o);
   });
 }

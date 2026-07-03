@@ -1,9 +1,11 @@
-package apply
+package state
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/imevul/evuproxy/internal/atomicio"
 )
 
 const applyMetricsFile = "apply-metrics.json"
@@ -37,7 +39,7 @@ func writeApplyMetrics(cfgPath string, m ApplyMetrics) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(applyMetricsPath(cfgPath), b, 0o644)
+	return atomicio.WriteFile(applyMetricsPath(cfgPath), b, 0o644)
 }
 
 // RecordApplySuccess increments persisted successful apply counter.

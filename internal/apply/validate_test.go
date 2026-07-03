@@ -29,7 +29,7 @@ func validTestConfig(t *testing.T) *config.Config {
 	if err := os.WriteFile(keyPath, []byte("dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXk=\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := testPeerConfig(config.Peer{Name: "a", PublicKey: "x", TunnelIP: "10.100.0.2/32"})
+	c := testPeerConfig(config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"})
 	c.WireGuard.PrivateKeyFile = keyPath
 	return c
 }
@@ -93,7 +93,7 @@ forwarding:
   routes: []
 peers:
   - name: test
-    public_key: abcdef0123456789abcdef0123456789abcdef0123456789ab=
+    public_key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     tunnel_ip: 10.100.0.2/32
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
@@ -107,10 +107,11 @@ peers:
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := ValidateConfigFile(path)
+	c, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	res := ValidateConfig(c)
 	if !res.OK {
 		t.Fatalf("validate failed: %+v", res.Errors)
 	}

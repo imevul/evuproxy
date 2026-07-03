@@ -1,4 +1,4 @@
-package apply
+package state
 
 import (
 	"bytes"
@@ -6,9 +6,16 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/imevul/evuproxy/internal/config"
 	"gopkg.in/yaml.v3"
+
+	"github.com/imevul/evuproxy/internal/atomicio"
+	"github.com/imevul/evuproxy/internal/config"
 )
+
+// ConfigYAMLBackupPath returns the path for the last distinct applied snapshot (updated on Reload).
+func ConfigYAMLBackupPath(cfgPath string) string {
+	return cfgPath + ".bak"
+}
 
 func configYAMLBackupNth(cfgPath string, n int) string {
 	return cfgPath + ".bak." + strconv.Itoa(n)
@@ -19,6 +26,7 @@ func validateConfigYAMLBytes(b []byte) error {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return err
 	}
+	c.Normalize()
 	return c.Validate()
 }
 
@@ -34,7 +42,7 @@ func RecordAppliedConfigSnapshot(cfgPath string) error {
 	prevBak, err := os.ReadFile(bakPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return writeAtomic(bakPath, cur, 0o644)
+			return atomicio.WriteFile(bakPath, cur, 0o644)
 		}
 		return err
 	}
@@ -59,7 +67,7 @@ func RecordAppliedConfigSnapshot(cfgPath string) error {
 	if err := os.Rename(bakPath, configYAMLBackupNth(cfgPath, 1)); err != nil {
 		return fmt.Errorf("rotate bak -> bak.1: %w", err)
 	}
-	return writeAtomic(bakPath, cur, 0o644)
+	return atomicio.WriteFile(bakPath, cur, 0o644)
 }
 
 // DiscardPendingConfigYAML replaces config.yaml with config.yaml.bak when they differ.
@@ -82,7 +90,7 @@ func DiscardPendingConfigYAML(cfgPath string) error {
 	if err := validateConfigYAMLBytes(bak); err != nil {
 		return fmt.Errorf("backup invalid: %w", err)
 	}
-	return writeAtomic(cfgPath, bak, 0o644)
+	return atomicio.WriteFile(cfgPath, bak, 0o644)
 }
 
 // RestorePreviousAppliedConfigYAML writes the first config.yaml.bak.N (N=1..5) that differs from .bak
@@ -119,7 +127,7 @@ func RestorePreviousAppliedConfigYAML(cfgPath string) error {
 	if err := validateConfigYAMLBytes(candidate); err != nil {
 		return fmt.Errorf("history entry invalid: %w", err)
 	}
-	return writeAtomic(cfgPath, candidate, 0o644)
+	return atomicio.WriteFile(cfgPath, candidate, 0o644)
 }
 
 // RestorePreviousAppliedAvailable reports whether some .bak.N differs from .bak.

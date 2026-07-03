@@ -90,10 +90,7 @@ func buildGeoSummary(cfgPath string) (*GeoSummaryResponse, error) {
 		return out, nil
 	}
 	out.Mode = c.Geo.Mode
-	set := strings.TrimSpace(c.Geo.SetName)
-	if set == "" {
-		set = "geo_v4"
-	}
+	set := c.Geo.EffectiveSetName()
 	for _, cc := range c.Geo.Countries {
 		cc = strings.ToLower(strings.TrimSpace(cc))
 		row := GeoCountrySummary{Code: cc}

@@ -1,12 +1,13 @@
 package apply
 
 import (
+	"context"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 // Overview is a non-secret summary of the loaded config for the API/UI.
@@ -52,7 +53,7 @@ func OverviewFromConfig(path string) (*Overview, error) {
 		o.TunnelSubnet = ipNet.String()
 	}
 	o.ServerPublicKey = wgPublicKeyFromFile(c.WireGuard.PrivateKeyFile)
-	g := ReadGeoLastSuccess(path)
+	g := state.ReadGeoLastSuccess(path)
 	o.GeoLastSuccessUTC = strings.TrimSpace(g.UTC)
 	o.GeoLastSuccessSource = strings.TrimSpace(g.Source)
 	return o, nil
@@ -63,9 +64,7 @@ func wgPublicKeyFromFile(path string) string {
 	if err != nil {
 		return ""
 	}
-	cmd := exec.Command("wg", "pubkey")
-	cmd.Stdin = strings.NewReader(strings.TrimSpace(string(b)) + "\n")
-	out, err := cmd.Output()
+	out, err := runCmdOutputStdin(context.Background(), strings.TrimSpace(string(b))+"\n", "wg", "pubkey")
 	if err != nil {
 		return ""
 	}

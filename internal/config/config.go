@@ -86,6 +86,17 @@ type Geo struct {
 	BreakGlassCIDRs []string `yaml:"break_glass_cidrs,omitempty" json:"break_glass_cidrs,omitempty"`
 }
 
+// DefaultGeoSetName is the nftables geo set used when geo.set_name is not configured.
+const DefaultGeoSetName = "geo_v4"
+
+// EffectiveSetName returns the configured geo set name, or DefaultGeoSetName when unset.
+func (g Geo) EffectiveSetName() string {
+	if s := strings.TrimSpace(g.SetName); s != "" {
+		return s
+	}
+	return DefaultGeoSetName
+}
+
 type AllowRule struct {
 	Proto    string `yaml:"proto" json:"proto"`
 	DPort    string `yaml:"dport" json:"dport"` // single port, range, or brace list e.g. "{80,443}"
@@ -109,10 +120,27 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, err
 	}
+	c.Normalize()
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// Normalize applies defaults and canonical forms (lowercase geo mode, default geo
+// set name). Load calls it before Validate; call it explicitly when constructing
+// a Config from another source (e.g. JSON from the API) before persisting.
+func (c *Config) Normalize() {
+	if c.Geo.Enabled {
+		if strings.TrimSpace(c.Geo.SetName) == "" {
+			c.Geo.SetName = DefaultGeoSetName
+		}
+		mode := strings.ToLower(strings.TrimSpace(c.Geo.Mode))
+		if mode == "" {
+			mode = "allow"
+		}
+		c.Geo.Mode = mode
+	}
 }
 
 // PeerTunnelIPv4 returns the IPv4 address string for a peer tunnel_ip value, or "" if invalid.
@@ -187,8 +215,8 @@ func (c *Config) Validate() error {
 	if c.WireGuard.PrivateKeyFile == "" {
 		return fmt.Errorf("wireguard.private_key_file is required")
 	}
-	if strings.TrimSpace(c.WireGuard.Address) == "" {
-		return fmt.Errorf("wireguard.address is required")
+	if err := ValidateWireGuardAddress(c.WireGuard.Address); err != nil {
+		return err
 	}
 	if c.Network.PublicInterface == "" {
 		return fmt.Errorf("network.public_interface is required")
@@ -237,24 +265,17 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if c.Geo.Enabled {
-		if c.Geo.SetName == "" {
-			c.Geo.SetName = "geo_v4"
-		}
 		mode := strings.ToLower(strings.TrimSpace(c.Geo.Mode))
-		if mode == "" {
-			mode = "allow"
-		}
-		if mode != "allow" && mode != "block" {
+		if mode != "" && mode != "allow" && mode != "block" {
 			return fmt.Errorf("geo.mode must be allow or block")
 		}
-		c.Geo.Mode = mode
 		if len(c.Geo.Countries) == 0 {
 			return fmt.Errorf("geo.countries required when geo.enabled")
 		}
 		if c.Geo.ZoneDir == "" {
 			return fmt.Errorf("geo.zone_dir required when geo.enabled")
 		}
-		if err := validNFTSetName(c.Geo.SetName); err != nil {
+		if err := validNFTSetName(c.Geo.EffectiveSetName()); err != nil {
 			return fmt.Errorf("geo.set_name: %w", err)
 		}
 		for _, cc := range c.Geo.Countries {
@@ -271,6 +292,9 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("peer %q: name, public_key, and tunnel_ip are required", p.Name)
 		}
 		if err := validPeerName(p.Name); err != nil {
+			return fmt.Errorf("peer %q: %w", p.Name, err)
+		}
+		if err := ValidateWireGuardKey(p.PublicKey); err != nil {
 			return fmt.Errorf("peer %q: %w", p.Name, err)
 		}
 		tip := strings.TrimSpace(p.TunnelIP)

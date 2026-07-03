@@ -1,11 +1,11 @@
 package apply
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/oschwald/geoip2-golang"
 
@@ -21,13 +21,13 @@ type ValidateIssue struct {
 
 // ValidateResult is the outcome of a dry-run validate (no apply, no .bak changes).
 type ValidateResult struct {
-	OK                  bool             `json:"ok"`
-	Errors              []ValidateIssue  `json:"errors,omitempty"`
-	Warnings            []LockoutWarning `json:"warnings,omitempty"`
-	DetectedClientIP    string           `json:"detected_client_ip,omitempty"`
-	IPDetectionSource   string           `json:"ip_detection_source"`
-	IPDetectionNote     string           `json:"ip_detection_note,omitempty"`
-	ValidatedFromDraft  bool             `json:"validated_from_draft,omitempty"`
+	OK                 bool             `json:"ok"`
+	Errors             []ValidateIssue  `json:"errors,omitempty"`
+	Warnings           []LockoutWarning `json:"warnings,omitempty"`
+	DetectedClientIP   string           `json:"detected_client_ip,omitempty"`
+	IPDetectionSource  string           `json:"ip_detection_source"`
+	IPDetectionNote    string           `json:"ip_detection_note,omitempty"`
+	ValidatedFromDraft bool             `json:"validated_from_draft,omitempty"`
 }
 
 // ValidateConfig runs schema validation, artifact generation, and nft -c without applying.
@@ -38,6 +38,7 @@ func ValidateConfig(c *config.Config) *ValidateResult {
 		res.Errors = append(res.Errors, ValidateIssue{Message: "config is nil"})
 		return res
 	}
+	c.Normalize()
 	if err := c.Validate(); err != nil {
 		res.OK = false
 		res.Errors = append(res.Errors, validationIssueFromErr(err))
@@ -99,21 +100,11 @@ func checkNFTablesSyntax(nftSrc string) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	check := exec.Command("nft", "-c", "-f", path)
-	out, err := check.CombinedOutput()
+	out, err := runCmdCombined(context.Background(), "nft", "-c", "-f", path)
 	if err != nil {
 		return fmt.Errorf("nft validate: %w\n%s", err, TruncateForLog(string(out), 8192))
 	}
 	return nil
-}
-
-// ValidateConfigFile loads config from path and validates it.
-func ValidateConfigFile(cfgPath string) (*ValidateResult, error) {
-	c, err := config.Load(cfgPath)
-	if err != nil {
-		return nil, err
-	}
-	return ValidateConfig(c), nil
 }
 
 // ValidateConfigFileCLI is used by evuproxy validate; prints human-readable output to stderr on failure.

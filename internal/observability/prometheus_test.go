@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imevul/evuproxy/internal/apply"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 func TestPrometheusText_containsMetrics(t *testing.T) {
@@ -31,7 +31,7 @@ peers: []
 	if err := os.WriteFile(filepath.Join(dir, "wg.key"), []byte("dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXk=\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_ = apply.RecordApplySuccess(cfgPath)
+	_ = state.RecordApplySuccess(cfgPath)
 	out, err := PrometheusText(cfgPath)
 	if err != nil {
 		t.Fatal(err)

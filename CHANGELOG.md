@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+Security and reliability hardening pass (in progress).
+
+### Security
+
+* **wireguard:** validate `wireguard.address` and peer `public_key` before they are written to `/etc/wireguard/*.conf`, rejecting newlines/control characters. Prevents an authenticated config write from injecting a `PostUp` directive that `wg-quick` would run as root.
+* **geo:** validate each downloaded zone line as an IP/CIDR before interpolating into the nftables ruleset (defense against a compromised/MITM zone source).
+
+### Reliability
+
+* **reload:** replace nftables tables in a single atomic transaction so a failed load rolls back and never leaves the host with the INPUT policy-drop chain removed (fail-closed).
+* **crowdsec:** preserve active bans across reloads instead of flushing the set on every apply.
+* **apply:** per-command timeouts on all privileged subprocesses (`nft`, `wg`, `wg-quick`, `tar`) and a cross-process file lock serializing reload/update-geo/backup/restore/save so CLI and API operations cannot interleave.
+
+### CI
+
+* Run `gofmt`, `go vet`, `go test -race`, and ShellCheck on pull requests; add a `make check` target.
+
 ## [0.12.0](https://github.com/imevul/evuproxy/compare/v0.11.0...v0.12.0) (2026-05-23)
 
 

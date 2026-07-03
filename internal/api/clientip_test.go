@@ -1,9 +1,11 @@
-package apply
+package api
 
 import (
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/imevul/evuproxy/internal/apply"
 )
 
 func TestDetectClientIP_direct(t *testing.T) {
@@ -11,7 +13,7 @@ func TestDetectClientIP_direct(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = "203.0.113.5:12345"
 	info := DetectClientIP(r)
-	if info.IP != "203.0.113.5" || info.Source != ClientIPSourceDirect {
+	if info.IP != "203.0.113.5" || info.Source != apply.ClientIPSourceDirect {
 		t.Fatalf("got %+v", info)
 	}
 }
@@ -33,7 +35,7 @@ func TestDetectClientIP_xffTrusted(t *testing.T) {
 	r.RemoteAddr = "127.0.0.1:9847"
 	r.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.1")
 	info := DetectClientIP(r)
-	if info.IP != "203.0.113.9" || info.Source != ClientIPSourceXFF {
+	if info.IP != "203.0.113.9" || info.Source != apply.ClientIPSourceXFF {
 		t.Fatalf("got %+v", info)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,7 +23,7 @@ func TestRestoreSafe_extractsFile(t *testing.T) {
 	}
 	// Archive must live outside the tree being packed (tar reads ".").
 	arch := filepath.Join(dir, "b.tgz")
-	if err := Backup(cfg, arch); err != nil {
+	if err := Backup(context.Background(), cfg, arch); err != nil {
 		t.Fatal(err)
 	}
 	sub := filepath.Join(dir, "restore-here")

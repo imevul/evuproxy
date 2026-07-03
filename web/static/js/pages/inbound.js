@@ -36,7 +36,9 @@ function renderInboundTable(cfg) {
 
   if (!rules.length) {
     wrap.innerHTML =
-      "<p class=\"hint\">No extra INPUT rules. Add one for SSH, HTTP, or other host services (<code class=\"inline\">input_allows</code>).</p>";
+      "<div class=\"empty-state\"><span class=\"empty-state-msg\">No inbound rules yet.</span> <button type=\"button\" class=\"btn-primary\" id=\"inbound-empty-add\">Add rule</button></div>";
+    const addBtn = wrap.querySelector("#inbound-empty-add");
+    if (addBtn) addBtn.addEventListener("click", () => openInboundEditor(-1));
     return;
   }
   const rows = rules

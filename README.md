@@ -25,7 +25,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
    ./scripts/install.sh
   ```
    If **Go 1.22+** is installed, the script builds `evuproxy` into `/usr/local/bin`. Otherwise copy a prebuilt binary to that path (see **Prerequisites**). The **HTTP API** (`evuproxy-api.service`) is optional at install time (interactive prompt, or set **`EVUPROXY_INSTALL_API`** to override); see [docs/http-api.md](docs/http-api.md#install-script-and-optional-api-enable).
-2. Edit `/etc/evuproxy/config.yaml` (seeded from [config/evuproxy.example.yaml](config/evuproxy.example.yaml)): set `network.public_interface`, add **peers** (public keys, tunnel IPs), then **`forwarding.routes`** (each `target_ip` must match a peer’s tunnel address). Adjust **`input_allows`** if you do not want the default SSH / web / UI ports.
+2. Edit `/etc/evuproxy/config.yaml` (seeded from [config/evuproxy.example.yaml](config/evuproxy.example.yaml), full schema in [docs/config.md](docs/config.md)): set `network.public_interface`, add **peers** (public keys, tunnel IPs), then **`forwarding.routes`** (each `target_ip` must match a peer’s tunnel address). Adjust **`input_allows`** if you do not want the default SSH / web / UI ports.
 3. Apply:
   ```bash
    evuproxy reload --config /etc/evuproxy/config.yaml
@@ -55,7 +55,9 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 | `evuproxy update-geo`             | Refresh IPDeny country files and reload nftables geo **in both** inet and ip tables                      |
 | `evuproxy status`                 | `wg show` + `nft list table inet evuproxy`                                                               |
 | `evuproxy serve`                  | Local HTTP API on `127.0.0.1:9847` (token in `/etc/evuproxy/api.token`)                                  |
-| `evuproxy backup --dest PATH`     | Tarball of `/etc/evuproxy`                                                                               |
+| `evuproxy metrics`                | Background peer ICMP metrics collector into SQLite (respects `metrics_collection_enabled` in UI preferences) |
+| `evuproxy version`                | Print the binary version                                                                                 |
+| `evuproxy backup --dest PATH`     | Tarball of `/etc/evuproxy`; `PATH` must be under the backup allowlist dir (default `/var/backups`, override with `EVUPROXY_BACKUP_DIR`) |
 | `evuproxy restore --archive PATH` | Extract tarball into `/etc/evuproxy`, then run `reload`                                                  |
 | `evuproxy discard-pending`        | Replace `config.yaml` with `config.yaml.bak` when they differ; run `reload` to apply to the host         |
 | `evuproxy restore-previous-applied` | Replace `config.yaml` from `config.yaml.bak.N` history (see docs); run `reload` to apply              |
@@ -69,6 +71,7 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 
 ## Local HTTP API and web UI
 
+- **Config reference** (`config.yaml` schema, all keys): [docs/config.md](docs/config.md)
 - **HTTP API** (bind address, auth, CORS, endpoints, backup paths): [docs/http-api.md](docs/http-api.md)
 - **Web UI** (Docker compose, mock dev stack): [docs/web-ui.md](docs/web-ui.md)
 - **Security and privacy** (telemetry, token storage, operational notes): [docs/security-and-privacy.md](docs/security-and-privacy.md)

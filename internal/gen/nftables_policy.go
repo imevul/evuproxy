@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	setBreakGlass  = "break_glass_v4"
-	setGlobalDeny  = "global_src_deny_v4"
+	setBreakGlass = "break_glass_v4"
+	setGlobalDeny = "global_src_deny_v4"
 )
 
 func routeDenySetName(routeIndex int) string {
@@ -23,6 +23,26 @@ func routeGeoSetName(routeIndex int) string {
 type routeDNATLine struct {
 	publicDport string
 	dnatTo      string
+}
+
+// routePolicy bundles everything the policy writers need to emit rules for one
+// route+protocol pairing: the per-route matching parameters plus the global
+// scoping sets (CrowdSec, break-glass, global deny) that apply to every route.
+type routePolicy struct {
+	routeIndex int
+	proto      string
+	portExpr   string
+	target     string
+	srcAllow   string // route source-allow set name, "" = any source
+	srcDeny    string // route source-deny set name, "" = none
+	geo        routeGeoParams
+	globalRL   config.RateLimit
+	routeRL    config.RateLimit
+	dnat       []routeDNATLine
+	// Global sets shared by all routes ("" when the feature is off).
+	crowdsecSet string
+	breakGlass  string
+	globalDeny  string
 }
 
 func buildRouteDNATLines(r config.ForwardRoute) ([]routeDNATLine, error) {
@@ -73,12 +93,8 @@ func routeGeoParamsFor(c *config.Config, routeIndex int, r config.ForwardRoute) 
 	if !c.Geo.Enabled {
 		return routeGeoParams{}, nil
 	}
-	set := c.Geo.SetName
-	if set == "" {
-		set = "geo_v4"
-	}
 	block := strings.EqualFold(strings.TrimSpace(c.Geo.Mode), "block")
-	return routeGeoParams{enabled: true, blockListed: block, setName: set}, nil
+	return routeGeoParams{enabled: true, blockListed: block, setName: c.Geo.EffectiveSetName()}, nil
 }
 
 func writeBreakGlassSet(b *strings.Builder, elems []string) {
@@ -112,9 +128,14 @@ func writeRouteDenySets(b *strings.Builder, c *config.Config) error {
 	return nil
 }
 
-func writeRouteCustomGeoSets(b *strings.Builder, c *config.Config) error {
-	if !c.Geo.Enabled || c.Geo.ZoneDir == "" {
-		return nil
+// writeRouteCustomGeoSets declares the per-route custom geo sets empty; the geo
+// loader file populates them at apply time (mirroring the global geo set). This
+// keeps table rendering free of zone-file reads, so previews (GET /pending)
+// cannot fail on missing zone data, and avoids duplicating tens of thousands of
+// CIDRs inline in both tables.
+func writeRouteCustomGeoSets(b *strings.Builder, c *config.Config) {
+	if !c.Geo.Enabled {
+		return
 	}
 	for i, r := range c.Forwarding.Routes {
 		if r.Disabled {
@@ -123,57 +144,51 @@ func writeRouteCustomGeoSets(b *strings.Builder, c *config.Config) error {
 		if strings.ToLower(strings.TrimSpace(r.GeoMode)) != config.RouteGeoCustom {
 			continue
 		}
-		elems, err := ZoneCIDRsForCountries(c.Geo.ZoneDir, r.GeoCountries)
-		if err != nil {
-			return fmt.Errorf("forwarding.routes[%d] geo_countries: %w", i, err)
-		}
-		if len(elems) == 0 {
-			return fmt.Errorf("forwarding.routes[%d]: no CIDRs loaded for custom geo", i)
-		}
-		writeRouteSrcSet(b, routeGeoSetName(i), elems)
-	}
-	return nil
-}
-
-func writePolicyDnatLine(b *strings.Builder, gp routeGeoParams, proto, publicDport, dnatTo, srcAllow, srcDeny, breakGlass, globalDeny string) {
-	if publicDport == "" || dnatTo == "" {
-		return
-	}
-	if globalDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", globalDeny, proto, publicDport)
-	}
-	if srcDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", srcDeny, proto, publicDport)
-	}
-	if !gp.enabled {
-		writePolicyDnatAllow(b, proto, publicDport, dnatTo, srcAllow)
-		return
-	}
-	if gp.blockListed {
-		writePolicyGeoBlockDrop(b, gp.setName, breakGlass, proto, publicDport)
-		writePolicyDnatAllow(b, proto, publicDport, dnatTo, srcAllow)
-		return
-	}
-	writePolicyDnatAllow(b, proto, publicDport, dnatTo, srcAllow, gp.setName)
-	if breakGlass != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", breakGlass, proto, publicDport, dnatTo)
+		writeGeoSet(b, routeGeoSetName(i))
 	}
 }
 
-func writePolicyDnatAllow(b *strings.Builder, proto, publicDport, dnatTo, srcAllow string, geoSet ...string) {
-	if len(geoSet) > 0 && geoSet[0] != "" {
-		if srcAllow != "" {
-			fmt.Fprintf(b, "        ip saddr @%s ip saddr @%s %s dport %s dnat to %s\n", srcAllow, geoSet[0], proto, publicDport, dnatTo)
-			return
-		}
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", geoSet[0], proto, publicDport, dnatTo)
+func writePolicyDnatLine(b *strings.Builder, r routePolicy, line routeDNATLine) {
+	if line.publicDport == "" || line.dnatTo == "" {
 		return
 	}
-	if srcAllow != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", srcAllow, proto, publicDport, dnatTo)
+	if r.globalDeny != "" {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.globalDeny, r.proto, line.publicDport)
+	}
+	if r.srcDeny != "" {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.srcDeny, r.proto, line.publicDport)
+	}
+	dnatVerdict := "dnat to " + line.dnatTo
+	if !r.geo.enabled {
+		writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, "", dnatVerdict)
 		return
 	}
-	fmt.Fprintf(b, "        %s dport %s dnat to %s\n", proto, publicDport, dnatTo)
+	if r.geo.blockListed {
+		writePolicyGeoBlockDrop(b, r.geo.setName, r.breakGlass, r.proto, line.publicDport)
+		writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, "", dnatVerdict)
+		return
+	}
+	writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, r.geo.setName, dnatVerdict)
+	if r.breakGlass != "" {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", r.breakGlass, r.proto, line.publicDport, line.dnatTo)
+	}
+}
+
+// writePolicyAllow emits a single "<match> <proto> dport <ports> <verdict>" rule,
+// optionally scoped by a source-allow set and/or a geo set. verdict is the nft
+// terminal statement, e.g. "accept" or "dnat to 10.0.0.2:80". Shared by the INPUT
+// and NAT-prerouting policy writers so the four match permutations are defined once.
+func writePolicyAllow(b *strings.Builder, proto, portExpr, srcAllow, geoSet, verdict string) {
+	switch {
+	case geoSet != "" && srcAllow != "":
+		fmt.Fprintf(b, "        ip saddr @%s ip saddr @%s %s dport %s %s\n", srcAllow, geoSet, proto, portExpr, verdict)
+	case geoSet != "":
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %s\n", geoSet, proto, portExpr, verdict)
+	case srcAllow != "":
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %s\n", srcAllow, proto, portExpr, verdict)
+	default:
+		fmt.Fprintf(b, "        %s dport %s %s\n", proto, portExpr, verdict)
+	}
 }
 
 func writePolicyGeoBlockDrop(b *strings.Builder, geoSet, breakGlass, proto, portExpr string) {
@@ -184,49 +199,33 @@ func writePolicyGeoBlockDrop(b *strings.Builder, geoSet, breakGlass, proto, port
 	fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", geoSet, proto, portExpr)
 }
 
-func writePolicyInputPort(b *strings.Builder, gp routeGeoParams, routeIndex int, globalRL, routeRL config.RateLimit, proto, portExpr, srcAllow, srcDeny, crowdsecSet, breakGlass, globalDeny string) {
-	if portExpr == "" {
+func writePolicyInputPort(b *strings.Builder, r routePolicy) {
+	if r.portExpr == "" {
 		return
 	}
-	if globalDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", globalDeny, proto, portExpr)
+	if r.globalDeny != "" {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.globalDeny, r.proto, r.portExpr)
 	}
-	if srcDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", srcDeny, proto, portExpr)
+	if r.srcDeny != "" {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.srcDeny, r.proto, r.portExpr)
 	}
-	writePolicyCrowdsecDrop(b, crowdsecSet, breakGlass, proto, portExpr)
-	writePolicyRateLimit(b, routeIndex, globalRL, routeRL, proto, portExpr, breakGlass)
-	if !gp.enabled {
-		writePolicyInputAllow(b, proto, portExpr, srcAllow)
+	writePolicyCrowdsecDrop(b, r.crowdsecSet, r.breakGlass, r.proto, r.portExpr)
+	writePolicyRateLimit(b, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.breakGlass)
+	if !r.geo.enabled {
+		writePolicyAllow(b, r.proto, r.portExpr, r.srcAllow, "", "accept")
 		return
 	}
-	if gp.blockListed {
-		writePolicyGeoBlockDropLogged(b, gp.setName, breakGlass, proto, portExpr)
-		writePolicyInputAllow(b, proto, portExpr, srcAllow)
+	if r.geo.blockListed {
+		writePolicyGeoBlockDropLogged(b, r.geo.setName, r.breakGlass, r.proto, r.portExpr)
+		writePolicyAllow(b, r.proto, r.portExpr, r.srcAllow, "", "accept")
 		return
 	}
-	writePolicyInputAllow(b, proto, portExpr, srcAllow, gp.setName)
-	if breakGlass != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", breakGlass, proto, portExpr)
+	writePolicyAllow(b, r.proto, r.portExpr, r.srcAllow, r.geo.setName, "accept")
+	if r.breakGlass != "" {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", r.breakGlass, r.proto, r.portExpr)
 		return
 	}
-	fmt.Fprintf(b, "        %s dport %s ip saddr != @%s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", proto, portExpr, gp.setName)
-}
-
-func writePolicyInputAllow(b *strings.Builder, proto, portExpr, srcAllow string, geoSet ...string) {
-	if len(geoSet) > 0 && geoSet[0] != "" {
-		if srcAllow != "" {
-			fmt.Fprintf(b, "        ip saddr @%s ip saddr @%s %s dport %s accept\n", srcAllow, geoSet[0], proto, portExpr)
-			return
-		}
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", geoSet[0], proto, portExpr)
-		return
-	}
-	if srcAllow != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", srcAllow, proto, portExpr)
-		return
-	}
-	fmt.Fprintf(b, "        %s dport %s accept\n", proto, portExpr)
+	fmt.Fprintf(b, "        %s dport %s ip saddr != @%s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", r.proto, r.portExpr, r.geo.setName)
 }
 
 func writePolicyGeoBlockDropLogged(b *strings.Builder, geoSet, breakGlass, proto, portExpr string) {

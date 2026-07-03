@@ -7,6 +7,13 @@ import (
 	"github.com/imevul/evuproxy/internal/config"
 )
 
+// Valid 44-char base64 WireGuard public keys for test fixtures.
+const (
+	pkA   = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	pkB   = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+	pkNew = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+)
+
 func testPeerConfig(peers ...config.Peer) *config.Config {
 	return &config.Config{
 		WireGuard:  config.WireGuard{Interface: "wg0", ListenPort: 51830, PrivateKeyFile: "/k", Address: "10.100.0.1/24"},
@@ -19,8 +26,8 @@ func testPeerConfig(peers ...config.Peer) *config.Config {
 
 func TestRemovePeerByNameOrKey(t *testing.T) {
 	cfg := testPeerConfig(
-		config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"},
-		config.Peer{Name: "b", PublicKey: "pk2", TunnelIP: "10.100.0.3/32"},
+		config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"},
+		config.Peer{Name: "b", PublicKey: pkB, TunnelIP: "10.100.0.3/32"},
 	)
 	if err := RemovePeerByNameOrKey(cfg, "a", ""); err != nil {
 		t.Fatal(err)
@@ -32,19 +39,19 @@ func TestRemovePeerByNameOrKey(t *testing.T) {
 
 func TestRemovePeerByPublicKey(t *testing.T) {
 	cfg := testPeerConfig(
-		config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"},
-		config.Peer{Name: "b", PublicKey: "pk2", TunnelIP: "10.100.0.3/32"},
+		config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"},
+		config.Peer{Name: "b", PublicKey: pkB, TunnelIP: "10.100.0.3/32"},
 	)
-	if err := RemovePeerByNameOrKey(cfg, "", "pk2"); err != nil {
+	if err := RemovePeerByNameOrKey(cfg, "", pkB); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Peers) != 1 || cfg.Peers[0].PublicKey != "pk1" {
+	if len(cfg.Peers) != 1 || cfg.Peers[0].PublicKey != pkA {
 		t.Fatalf("got %+v", cfg.Peers)
 	}
 }
 
 func TestRemovePeerRequiresSelector(t *testing.T) {
-	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"})
+	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"})
 	err := RemovePeerByNameOrKey(cfg, "", "")
 	if err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("got %v", err)
@@ -53,17 +60,17 @@ func TestRemovePeerRequiresSelector(t *testing.T) {
 
 func TestRemovePeerByNameAndKeyRequiresBoth(t *testing.T) {
 	cfg := testPeerConfig(
-		config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"},
-		config.Peer{Name: "b", PublicKey: "pk2", TunnelIP: "10.100.0.3/32"},
+		config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"},
+		config.Peer{Name: "b", PublicKey: pkB, TunnelIP: "10.100.0.3/32"},
 	)
-	err := RemovePeerByNameOrKey(cfg, "a", "pk2")
+	err := RemovePeerByNameOrKey(cfg, "a", pkB)
 	if err == nil || !strings.Contains(err.Error(), "no peer matched") {
 		t.Fatalf("expected no match when name and key disagree: %v", err)
 	}
 	if len(cfg.Peers) != 2 {
 		t.Fatalf("peers must be unchanged: %+v", cfg.Peers)
 	}
-	if err := RemovePeerByNameOrKey(cfg, "a", "pk1"); err != nil {
+	if err := RemovePeerByNameOrKey(cfg, "a", pkA); err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.Peers) != 1 || cfg.Peers[0].Name != "b" {
@@ -72,7 +79,7 @@ func TestRemovePeerByNameAndKeyRequiresBoth(t *testing.T) {
 }
 
 func TestRemovePeerNoMatch(t *testing.T) {
-	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"})
+	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"})
 	err := RemovePeerByNameOrKey(cfg, "missing", "")
 	if err == nil || !strings.Contains(err.Error(), "no peer matched") {
 		t.Fatalf("got %v", err)
@@ -80,7 +87,7 @@ func TestRemovePeerNoMatch(t *testing.T) {
 }
 
 func TestUpdatePeerByName_tunnelAndDisabled(t *testing.T) {
-	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"})
+	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"})
 	disabled := true
 	if err := UpdatePeerByName(cfg, "a", PeerSetUpdates{TunnelIP: "10.100.0.9/32", Disabled: &disabled}); err != nil {
 		t.Fatal(err)
@@ -93,8 +100,8 @@ func TestUpdatePeerByName_tunnelAndDisabled(t *testing.T) {
 
 func TestUpdatePeerByName_rename(t *testing.T) {
 	cfg := testPeerConfig(
-		config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"},
-		config.Peer{Name: "b", PublicKey: "pk2", TunnelIP: "10.100.0.3/32"},
+		config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"},
+		config.Peer{Name: "b", PublicKey: pkB, TunnelIP: "10.100.0.3/32"},
 	)
 	if err := UpdatePeerByName(cfg, "a", PeerSetUpdates{NewName: "alpha"}); err != nil {
 		t.Fatal(err)
@@ -106,8 +113,8 @@ func TestUpdatePeerByName_rename(t *testing.T) {
 
 func TestUpdatePeerByName_renameConflict(t *testing.T) {
 	cfg := testPeerConfig(
-		config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"},
-		config.Peer{Name: "b", PublicKey: "pk2", TunnelIP: "10.100.0.3/32"},
+		config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"},
+		config.Peer{Name: "b", PublicKey: pkB, TunnelIP: "10.100.0.3/32"},
 	)
 	err := UpdatePeerByName(cfg, "a", PeerSetUpdates{NewName: "b"})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
@@ -116,7 +123,7 @@ func TestUpdatePeerByName_renameConflict(t *testing.T) {
 }
 
 func TestUpdatePeerByName_notFound(t *testing.T) {
-	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"})
+	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"})
 	err := UpdatePeerByName(cfg, "missing", PeerSetUpdates{TunnelIP: "10.100.0.9/32"})
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("got %v", err)
@@ -124,7 +131,7 @@ func TestUpdatePeerByName_notFound(t *testing.T) {
 }
 
 func TestUpdatePeerByName_requiresName(t *testing.T) {
-	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"})
+	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"})
 	err := UpdatePeerByName(cfg, "", PeerSetUpdates{TunnelIP: "10.100.0.9/32"})
 	if err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("got %v", err)
@@ -132,11 +139,11 @@ func TestUpdatePeerByName_requiresName(t *testing.T) {
 }
 
 func TestUpdatePeerByName_publicKey(t *testing.T) {
-	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: "pk1", TunnelIP: "10.100.0.2/32"})
-	if err := UpdatePeerByName(cfg, "a", PeerSetUpdates{PublicKey: "pk-new"}); err != nil {
+	cfg := testPeerConfig(config.Peer{Name: "a", PublicKey: pkA, TunnelIP: "10.100.0.2/32"})
+	if err := UpdatePeerByName(cfg, "a", PeerSetUpdates{PublicKey: pkNew}); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Peers[0].PublicKey != "pk-new" {
+	if cfg.Peers[0].PublicKey != pkNew {
 		t.Fatalf("got %q", cfg.Peers[0].PublicKey)
 	}
 }

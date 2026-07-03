@@ -33,6 +33,12 @@ func ZoneCIDRsForCountries(zoneDir string, countries []string) ([]string, error)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
 			}
+			// Lines are interpolated into nftables statements loaded as root;
+			// reject anything that is not a plain IP or CIDR.
+			if !validGeoLine(line) {
+				_ = f.Close()
+				return nil, fmt.Errorf("zone file %s: invalid IP/CIDR line %q", path, line)
+			}
 			if _, ok := seen[line]; ok {
 				continue
 			}

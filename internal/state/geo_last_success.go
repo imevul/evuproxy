@@ -1,10 +1,12 @@
-package apply
+package state
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/imevul/evuproxy/internal/atomicio"
 )
 
 const geoLastSuccessFile = "geo-last-success.json"
@@ -27,7 +29,7 @@ func WriteGeoLastSuccess(cfgPath, source string) error {
 		return err
 	}
 	path := filepath.Join(base, geoLastSuccessFile)
-	return writeAtomic(path, b, 0o644)
+	return atomicio.WriteFile(path, b, 0o644)
 }
 
 // ReadGeoLastSuccess reads geo-last-success.json if present; zero value if missing or invalid.

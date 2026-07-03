@@ -3,10 +3,10 @@ package apply
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -72,7 +72,12 @@ func sanitizedFSPath(p string) string {
 }
 
 // Backup creates a gzip tarball of /etc/evuproxy (parent of config file).
-func Backup(configPath, dest string) error {
+func Backup(ctx context.Context, configPath, dest string) error {
+	unlock, err := acquireApplyLock(ctx, configPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	destAbs, err := filepath.Abs(dest)
 	if err != nil {
 		return fmt.Errorf("backup: dest: %w", err)
@@ -88,8 +93,7 @@ func Backup(configPath, dest string) error {
 			return fmt.Errorf("backup: mkdir: %w", err)
 		}
 	}
-	cmd := exec.Command("tar", "-czf", destFS, "-C", root, ".")
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runCmdCombined(ctx, "tar", "-czf", destFS, "-C", root, "."); err != nil {
 		return fmt.Errorf("tar: %w: %s", err, out)
 	}
 	return nil
@@ -99,6 +103,11 @@ func Backup(configPath, dest string) error {
 // Only regular files and directories are allowed; symlinks, hard links, and absolute
 // or parent-directory paths are rejected to avoid tar path traversal.
 func Restore(configPath, archive string) error {
+	unlock, err := acquireApplyLock(context.Background(), configPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	archAbs, err := filepath.Abs(archive)
 	if err != nil {
 		return fmt.Errorf("restore: archive path: %w", err)

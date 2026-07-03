@@ -106,11 +106,11 @@ func rateLimitBindingForRoute(routeIndex int, global, route config.RateLimit) ra
 	return b
 }
 
-func rateLimitSynSetRoute(i int) string   { return fmt.Sprintf("ratelimit_syn_r%d", i) }
-func rateLimitUDPSetRoute(i int) string   { return fmt.Sprintf("ratelimit_udp_r%d", i) }
+func rateLimitSynSetRoute(i int) string { return fmt.Sprintf("ratelimit_syn_r%d", i) }
+func rateLimitUDPSetRoute(i int) string { return fmt.Sprintf("ratelimit_udp_r%d", i) }
 
 // rateLimitConnCountThreshold maps max_conn_per_ip N to nft "ct count over X" (strictly greater than X).
-// When the Nth connection is being opened, count is N-1 — block the next one at over N-2... 
+// When the Nth connection is being opened, count is N-1 — block the next one at over N-2...
 // Block when count > (N-1), i.e. use over (N-1) for max N allowed: 4th SYN sees count 3, over 2 matches.
 func rateLimitConnCountThreshold(maxConn uint) uint {
 	return maxConn - 1
@@ -167,18 +167,18 @@ func rateLimitExemptPrefix(breakGlass string) string {
 }
 
 // writePolicyForwardDrops emits global/route deny, CrowdSec, and rate limits on forward (before accept).
-func writePolicyForwardDrops(b *strings.Builder, pub, wg string, routeIndex int, global, route config.RateLimit, proto, portExpr, srcDeny, crowdsecSet, breakGlass, globalDeny string) {
-	if portExpr == "" {
+func writePolicyForwardDrops(b *strings.Builder, pub, wg string, r routePolicy) {
+	if r.portExpr == "" {
 		return
 	}
-	if globalDeny != "" {
-		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, globalDeny, proto, portExpr)
+	if r.globalDeny != "" {
+		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, r.globalDeny, r.proto, r.portExpr)
 	}
-	if srcDeny != "" {
-		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, srcDeny, proto, portExpr)
+	if r.srcDeny != "" {
+		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, r.srcDeny, r.proto, r.portExpr)
 	}
-	if crowdsecSet != "" {
-		writePolicyCrowdsecForwardDrop(b, pub, wg, crowdsecSet, breakGlass, proto, portExpr)
+	if r.crowdsecSet != "" {
+		writePolicyCrowdsecForwardDrop(b, pub, wg, r.crowdsecSet, r.breakGlass, r.proto, r.portExpr)
 	}
-	writePolicyForwardRateLimit(b, pub, wg, routeIndex, global, route, proto, portExpr, breakGlass)
+	writePolicyForwardRateLimit(b, pub, wg, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.breakGlass)
 }

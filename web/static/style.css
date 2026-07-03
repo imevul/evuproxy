@@ -552,6 +552,7 @@ input[type="password"],
 input[type="text"],
 input[type="search"],
 input[type="number"],
+input[type="datetime-local"],
 select,
 textarea {
   width: 100%;
@@ -576,6 +577,7 @@ input[type="password"]:focus-visible,
 input[type="text"]:focus-visible,
 input[type="search"]:focus-visible,
 input[type="number"]:focus-visible,
+input[type="datetime-local"]:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: 2px solid #388bfd;
@@ -1472,7 +1474,7 @@ table.data button {
 
 .logs-toolbar {
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 0.5rem 0.75rem;
 }
 
@@ -1503,6 +1505,9 @@ table.data button {
   border: 1px solid #30363d;
   border-radius: 6px;
   padding: 0.35rem 0.5rem;
+  box-sizing: border-box;
+  min-height: 2.375rem;
+  line-height: 1.25;
 }
 
 .logs-search-input {

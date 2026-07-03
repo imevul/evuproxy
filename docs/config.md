@@ -13,7 +13,8 @@ An annotated example lives at [`config/evuproxy.example.yaml`](../config/evuprox
 | `wireguard` | object | yes | Server WireGuard interface parameters. |
 | `network` | object | yes | Host networking (public-facing NIC). |
 | `forwarding` | object | yes | Port forwarding from the public side into peer tunnel IPs. |
-| `geo` | object | yes | Country allowlists for forwarded traffic (optional behavior via `enabled`). |
+| `geo` | object | yes | Country allow/block lists for forwarded traffic (optional behavior via `enabled`; see `mode`). |
+| `crowdsec` | object | no | CrowdSec nftables-bouncer integration (drop banned sources). |
 | `input_allows` | list | no | Extra `nftables` input accept rules (SSH, HTTP, etc.). |
 | `peers` | list | no | WireGuard peers; entries can be `disabled: true`. |
 
@@ -111,15 +112,7 @@ Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel path), n
 
 **Global vs per-route sets:** Fields set under **`forwarding.rate_limit`** use shared nft sets (`ratelimit_syn_v4`, `ratelimit_udp_v4`) on every route that does not override that field. A per-route **`rate_limit`** override uses route-scoped sets (`ratelimit_syn_rN`, `ratelimit_udp_rN`) so limits apply only to that route’s published ports. Example: global `tcp_syn_per_second: 10` on all routes, but route 0 overrides to `100` — route 0 uses its own meter; other routes share the global 10/s cap per source IP.
 
-### `crowdsec` (optional)
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Drops are logged with prefix **`evuproxy-crowdsec`** (visible in the admin **Logs** view; not **Stats** nftables counters — see [Web UI — Stats page](web-ui.md#stats-page)). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
-
 **nftables evaluation order (forward path):** global deny → per-route deny → CrowdSec block on **inet** forward (if enabled; break-glass exempt) → per-source rate limits (before blanket `established,related accept`) → geo on INPUT/prerouting (break-glass skips geo) → per-route allow → DNAT.
-
-CrowdSec drops apply on **inet** INPUT/forward only (not **`ip` prerouting** before DNAT). Banned sources are still DNAT’d, then dropped in forward — functionally blocked. Early drop in prerouting is deferred (v2) if needed.
 
 ### Port list syntax
 
@@ -137,11 +130,12 @@ CrowdSec drops apply on **inet** INPUT/forward only (not **`ip` prerouting** bef
 
 ## `geo`
 
-Controls whether forwarded traffic is restricted to source IPs in downloaded country **IPDeny** zones.
+Controls whether forwarded traffic is filtered by source country using downloaded **IPDeny** zones (allow the listed countries, or block them, depending on `mode`).
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `enabled` | bool | If `false`, geo sets are not required and forwarding rules accept any source (subject to normal firewalling). |
+| `mode` | string | `allow` (default) or `block`. **`allow`**: only sources in the listed countries may reach forwarded ports (everything else is dropped). **`block`**: sources in the listed countries are dropped and all other sources pass. Applies to forwarded traffic, and to `input_allows` when `apply_to_input_allows` is set. |
 | `set_name` | string | nftables set name for IPv4 sources (default `geo_v4` when `enabled`). |
 | `countries` | list of strings | Lowercase ISO country codes (e.g. `se`, `no`). Required when `enabled` is true. |
 | `zone_dir` | string | Directory where per-country zone files are stored (e.g. `/etc/evuproxy/geo-zones`). Required when `enabled` is true. |
@@ -149,6 +143,20 @@ Controls whether forwarded traffic is restricted to source IPs in downloaded cou
 | `break_glass_cidrs` | list of strings (optional) | IPv4/CIDR sources that **always pass** geo filtering on INPUT and forward paths. Use sparingly for operator escape hatches. |
 
 When `geo.enabled` is true, `evuproxy reload` / `update-geo` expect zone files under `zone_dir`; empty or missing zones can block traffic when geo is enabled.
+
+---
+
+## `crowdsec`
+
+Top-level key (a sibling of `forwarding` and `geo`, **not** nested under `forwarding`).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Drops are logged with prefix **`evuproxy-crowdsec`** (visible in the admin **Logs** view; not **Stats** nftables counters — see [Web UI — Stats page](web-ui.md#stats-page)). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
+
+CrowdSec drops apply on **inet** INPUT/forward only (not **`ip` prerouting** before DNAT). Banned sources are still DNAT’d, then dropped in forward — functionally blocked. Early drop in prerouting is deferred (v2) if needed.
+
+Ban set contents are preserved across `evuproxy reload` (elements, including timeouts, are snapshotted and re-added after the tables are replaced).
 
 ---
 

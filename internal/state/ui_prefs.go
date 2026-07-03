@@ -1,4 +1,4 @@
-package apply
+package state
 
 import (
 	"encoding/json"
@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/imevul/evuproxy/internal/atomicio"
 )
 
 // DefaultPeerTunnelSubnetCIDR is used when ui-preferences.json omits or clears peer_tunnel_subnet_cidr.
@@ -103,7 +105,7 @@ func SaveUIPreferences(cfgPath string, p *UIPreferences) error {
 	if err != nil {
 		return err
 	}
-	if err := writeAtomic(uiPrefsPath(cfgPath), b, 0o644); err != nil {
+	if err := atomicio.WriteFile(uiPrefsPath(cfgPath), b, 0o644); err != nil {
 		return err
 	}
 	return nil

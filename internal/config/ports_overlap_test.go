@@ -31,7 +31,7 @@ func TestExpandRoutePortNumbers_largeRange(t *testing.T) {
 func TestValidate_routePortOverlap(t *testing.T) {
 	c := &Config{
 		WireGuard: WireGuard{
-			Interface: "wg0",
+			Interface:      "wg0",
 			ListenPort:     51820,
 			PrivateKeyFile: "/key",
 			Address:        "10.100.0.1/24",

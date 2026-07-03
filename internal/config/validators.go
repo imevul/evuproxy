@@ -5,13 +5,71 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var (
 	reLinuxIface = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,15}$`)
 	reNFTSetName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 	rePeerName   = regexp.MustCompile(`^[a-zA-Z0-9_ .+@/-]{1,64}$`)
+	reWGKey      = regexp.MustCompile(`^[A-Za-z0-9+/]{43}=$`)
 )
+
+// hasControlChars reports whether s contains newlines, carriage returns, NUL,
+// or any other control character that would be unsafe to serialize into a
+// generated config file (e.g. /etc/wireguard/<iface>.conf).
+func hasControlChars(s string) bool {
+	for _, r := range s {
+		if r == '\n' || r == '\r' || r == '\x00' || (unicode.IsControl(r) && r != '\t') {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateWireGuardAddress checks wireguard.address: one or more IPv4/IPv6
+// addresses or CIDRs separated by commas. It rejects newlines and control
+// characters so the value cannot inject additional directives (e.g. PostUp)
+// into the generated [Interface] section that wg-quick would run as root.
+func ValidateWireGuardAddress(addr string) error {
+	if hasControlChars(addr) {
+		return fmt.Errorf("wireguard.address cannot contain newlines or control characters")
+	}
+	s := strings.TrimSpace(addr)
+	if s == "" {
+		return fmt.Errorf("wireguard.address is required")
+	}
+	parts := strings.Split(s, ",")
+	for _, raw := range parts {
+		tok := strings.TrimSpace(raw)
+		if tok == "" {
+			return fmt.Errorf("wireguard.address: empty entry")
+		}
+		if strings.Contains(tok, "/") {
+			if _, _, err := net.ParseCIDR(tok); err != nil {
+				return fmt.Errorf("wireguard.address: invalid IP/CIDR %q", tok)
+			}
+			continue
+		}
+		if net.ParseIP(tok) == nil {
+			return fmt.Errorf("wireguard.address: invalid IP %q", tok)
+		}
+	}
+	return nil
+}
+
+// ValidateWireGuardKey checks a base64-encoded WireGuard key (public or
+// preshared): 44 characters, standard base64 alphabet, trailing '='. Rejecting
+// newlines/control chars prevents injection into generated [Peer] blocks.
+func ValidateWireGuardKey(key string) error {
+	if hasControlChars(key) {
+		return fmt.Errorf("public_key cannot contain newlines or control characters")
+	}
+	if !reWGKey.MatchString(strings.TrimSpace(key)) {
+		return fmt.Errorf("invalid WireGuard key (want 44-char base64, e.g. abc...=)")
+	}
+	return nil
+}
 
 func validLinuxIface(name string) error {
 	name = strings.TrimSpace(name)

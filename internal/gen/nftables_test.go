@@ -3,6 +3,7 @@ package gen
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -822,29 +823,20 @@ func TestNFTables_rateLimit_notInPrerouting(t *testing.T) {
 	}
 }
 
-func TestNFTables_rateLimit_nftCheck(t *testing.T) {
+// nftCheck renders c and runs `nft -c` on the result, failing on syntax errors.
+// Environments where nft cannot talk netlink (containers, CI sandboxes) are
+// tolerated as long as the parse itself succeeds.
+func nftCheck(t *testing.T, c *config.Config) {
+	t.Helper()
 	if _, err := exec.LookPath("nft"); err != nil {
 		t.Skip("nft not in PATH")
-	}
-	c := baseNFTConfig()
-	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 40, MaxConnPerIP: 80, UDPPerSecond: 100}
-	c.Forwarding.Routes = []config.ForwardRoute{
-		{Proto: "tcp,udp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
 	}
 	s, err := NFTables(c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := os.CreateTemp("", "evuproxy-ratelimit-*.nft")
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := f.Name()
-	defer os.Remove(path)
-	if _, err := f.WriteString(s); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
+	path := filepath.Join(t.TempDir(), "check.nft")
+	if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command("nft", "-c", "-f", path).CombinedOutput()
@@ -856,10 +848,145 @@ func TestNFTables_rateLimit_nftCheck(t *testing.T) {
 			}
 		}
 		if len(syntax) > 0 {
-			t.Fatalf("nft -c syntax errors:\n%s", strings.Join(syntax, "\n"))
+			t.Fatalf("nft -c syntax errors:\n%s\nruleset:\n%s", strings.Join(syntax, "\n"), s)
 		}
 		if !strings.Contains(string(out), "netlink") {
 			t.Fatalf("nft -c failed: %v\n%s", err, out)
 		}
+	}
+}
+
+func TestNFTables_rateLimit_nftCheck(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 40, MaxConnPerIP: 80, UDPPerSecond: 100}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp,udp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	nftCheck(t, c)
+}
+
+// TestNFTables_configMatrix_nftCheck runs nft -c across representative feature
+// combinations so generator changes cannot silently emit invalid rulesets.
+func TestNFTables_configMatrix_nftCheck(t *testing.T) {
+	cases := []struct {
+		name string
+		mut  func(c *config.Config)
+	}{
+		{"minimal_no_routes", func(c *config.Config) {}},
+		{"basic_route", func(c *config.Config) {
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"geo_allow", func(c *config.Config) {
+			c.Geo = config.Geo{Enabled: true, Mode: "allow", SetName: "geo_v4", Countries: []string{"no"}, ZoneDir: "/z"}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp,udp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"geo_block", func(c *config.Config) {
+			c.Geo = config.Geo{Enabled: true, Mode: "block", SetName: "geo_v4", Countries: []string{"ru"}, ZoneDir: "/z"}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"geo_applied_to_input_allows", func(c *config.Config) {
+			c.Geo = config.Geo{Enabled: true, Mode: "allow", SetName: "geo_v4", Countries: []string{"no"}, ZoneDir: "/z", ApplyToInputAllows: true}
+			c.InputAllows = []config.AllowRule{{Proto: "tcp", DPort: "22"}, {Proto: "tcp", DPort: "{80,443}"}}
+		}},
+		{"geo_break_glass", func(c *config.Config) {
+			c.Geo = config.Geo{
+				Enabled: true, Mode: "block", SetName: "geo_v4", Countries: []string{"ru"}, ZoneDir: "/z",
+				BreakGlassCIDRs: []string{"203.0.113.0/24"},
+			}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"route_custom_geo", func(c *config.Config) {
+			c.Geo = config.Geo{Enabled: true, Mode: "allow", SetName: "geo_v4", Countries: []string{"no"}, ZoneDir: "/z"}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2", GeoMode: config.RouteGeoCustom, GeoCountries: []string{"se"}},
+			}
+		}},
+		{"crowdsec", func(c *config.Config) {
+			c.CrowdSec = config.CrowdSec{Enabled: true}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp,udp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"source_allow_and_deny", func(c *config.Config) {
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{
+					Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2",
+					SourceAllowCIDRs: []string{"198.51.100.0/24", "203.0.113.9"},
+					SourceDenyCIDRs:  []string{"192.0.2.0/24"},
+				},
+			}
+		}},
+		{"global_deny_cidrs", func(c *config.Config) {
+			c.Forwarding.SourceDenyCIDRs = []string{"192.0.2.0/24", "198.51.100.7"}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "udp", Ports: []string{"19132"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"port_maps_and_ranges", func(c *config.Config) {
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{
+					Proto: "tcp", Ports: []string{"8080", "9000-9010"}, TargetIP: "10.100.0.2",
+					PortMaps: []config.PortMap{{Public: "8080", Internal: "80"}},
+				},
+			}
+		}},
+		{"per_route_rate_limits", func(c *config.Config) {
+			c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 40}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp,udp", Ports: []string{"25565"}, TargetIP: "10.100.0.2",
+					RateLimit: config.RateLimit{TCPSynPerSecond: 10, UDPPerSecond: 200, MaxConnPerIP: 16}},
+				{Proto: "udp", Ports: []string{"19132"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"maintenance_mode", func(c *config.Config) {
+			c.Forwarding.MaintenanceMode = true
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"docker_bridges_and_extra_cidrs", func(c *config.Config) {
+			c.Network.ForwardAllowDockerBridges = true
+			c.Network.ForwardExtraLocalCIDRs = []string{"10.89.0.0/24"}
+			c.Network.AdminTCPPorts = []int{9080}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+			}
+		}},
+		{"everything_combined", func(c *config.Config) {
+			c.Geo = config.Geo{
+				Enabled: true, Mode: "block", SetName: "geo_v4", Countries: []string{"ru"}, ZoneDir: "/z",
+				ApplyToInputAllows: true, BreakGlassCIDRs: []string{"203.0.113.0/24"},
+			}
+			c.CrowdSec = config.CrowdSec{Enabled: true}
+			c.InputAllows = []config.AllowRule{{Proto: "tcp", DPort: "22"}}
+			c.Network.ForwardAllowDockerBridges = true
+			c.Forwarding.SourceDenyCIDRs = []string{"192.0.2.0/24"}
+			c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 40, MaxConnPerIP: 80, UDPPerSecond: 100}
+			c.Forwarding.Routes = []config.ForwardRoute{
+				{
+					Proto: "tcp,udp", Ports: []string{"25565", "9000-9010"}, TargetIP: "10.100.0.2",
+					SourceAllowCIDRs: []string{"198.51.100.0/24"},
+					SourceDenyCIDRs:  []string{"192.0.2.128/25"},
+					PortMaps:         []config.PortMap{{Public: "25565", Internal: "25566"}},
+					RateLimit:        config.RateLimit{TCPSynPerSecond: 10},
+				},
+				{Proto: "udp", Ports: []string{"19132"}, TargetIP: "10.100.0.2", GeoMode: config.RouteGeoOff},
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseNFTConfig()
+			tc.mut(c)
+			nftCheck(t, c)
+		})
 	}
 }

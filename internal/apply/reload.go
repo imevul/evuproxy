@@ -1,34 +1,53 @@
 package apply
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/imevul/evuproxy/internal/atomicio"
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/gen"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 const (
 	GeneratedDir = "generated"
 )
 
+// wireguardConfigDir is where generated WireGuard configs are written.
+// Package variable so unit tests can redirect writes away from /etc/wireguard.
+var wireguardConfigDir = "/etc/wireguard"
+
+// wgInterfaceExists reports whether the kernel interface is present. Package
+// variable so unit tests can exercise both reloadWireGuard branches.
+var wgInterfaceExists = func(iface string) bool {
+	_, err := os.Stat("/sys/class/net/" + iface)
+	return err == nil
+}
+
 // Reload writes generated artifacts and applies nftables + WireGuard.
-func Reload(cfgPath string) error {
-	err := reload(cfgPath)
+// A cross-process file lock serializes it against other mutating operations
+// (CLI vs API); privileged subprocesses run under per-command timeouts.
+func Reload(ctx context.Context, cfgPath string) error {
+	unlock, err := acquireApplyLock(ctx, cfgPath)
 	if err != nil {
-		_ = RecordApplyFailure(cfgPath)
 		return err
 	}
-	_ = RecordApplySuccess(cfgPath)
+	defer unlock()
+	err = reload(ctx, cfgPath)
+	if err != nil {
+		_ = state.RecordApplyFailure(cfgPath)
+		return err
+	}
+	_ = state.RecordApplySuccess(cfgPath)
 	return nil
 }
 
-func reload(cfgPath string) error {
+func reload(ctx context.Context, cfgPath string) error {
 	c, err := config.Load(cfgPath)
 	if err != nil {
 		return err
@@ -40,7 +59,7 @@ func reload(cfgPath string) error {
 	}
 
 	nftPath := filepath.Join(genDir, "nftables.nft")
-	wgPath := filepath.Join("/etc/wireguard", c.WireGuard.Interface+".conf")
+	wgPath := filepath.Join(wireguardConfigDir, c.WireGuard.Interface+".conf")
 
 	nftSrc, err := gen.NFTables(c)
 	if err != nil {
@@ -50,48 +69,67 @@ func reload(cfgPath string) error {
 		return fmt.Errorf("write nftables: %w", err)
 	}
 
-	wgSrc, err := gen.WireGuardConf(c)
-	if err != nil {
-		return fmt.Errorf("wireguard config: %w", err)
+	// When geo is enabled, fold the geo set population into the same nft file as
+	// the table replace so the whole apply is one kernel transaction: sets are
+	// never live-but-empty (block mode would fail open, allow mode would drop
+	// everything), and any zone/loader problem aborts before the kernel is touched.
+	applySrc := nftSrc
+	if c.Geo.Enabled {
+		if err := ensureGeoZones(ctx, c); err != nil {
+			return fmt.Errorf("geo zones: %w", err)
+		}
+		loaderSrc, err := gen.GeoLoaderNFT(c, c.Geo.ZoneDir)
+		if err != nil {
+			return fmt.Errorf("geo loader: %w", err)
+		}
+		if err := writeAtomic(filepath.Join(genDir, "geo-loader.nft"), []byte(loaderSrc), 0o644); err != nil {
+			return fmt.Errorf("write geo loader: %w", err)
+		}
+		applySrc = nftSrc + "\n" + loaderSrc
 	}
-	if err := writeAtomic(wgPath, []byte(wgSrc), 0o600); err != nil {
-		return fmt.Errorf("write wireguard: %w", err)
+	applyPath := filepath.Join(genDir, "apply.nft")
+	if err := writeAtomic(applyPath, []byte(applySrc), 0o644); err != nil {
+		return fmt.Errorf("write nftables apply file: %w", err)
 	}
 
-	if err := validateNFTablesForReload(nftPath); err != nil {
-		return err
+	// Preserve any live CrowdSec bans across the atomic table replace: the generated
+	// ruleset recreates crowdsec_block_v4 empty, so capture current elements first.
+	// Skipped when the new config disables CrowdSec (the set no longer exists).
+	var crowdsecSaved []crowdsecElem
+	if c.CrowdSec.Enabled {
+		crowdsecSaved = snapshotCrowdsecBlockSet(ctx)
 	}
 
-	// Replace EvuProxy tables atomically. Delete may fail if the table is absent; that is normal on first install.
-	tryDeleteNFTTable("inet", "evuproxy")
-	tryDeleteNFTTable("ip", "evuproxy")
+	if out, err := runCmdCombined(ctx, "nft", "-c", "-f", applyPath); err != nil {
+		return fmt.Errorf("nft validate: %w\n%s", err, TruncateForLog(string(out), 8192))
+	}
 
-	load := exec.Command("nft", "-f", nftPath)
-	if out, err := load.CombinedOutput(); err != nil {
+	// The apply file replaces the EvuProxy tables in a single nft transaction
+	// (add+delete+define per table, plus geo set elements), so a failed load rolls
+	// back atomically and the previous ruleset — including the INPUT policy-drop
+	// chain — stays live.
+	if out, err := runCmdCombined(ctx, "nft", "-f", applyPath); err != nil {
 		return fmt.Errorf("nft load: %w\n%s", err, TruncateForLog(string(out), 8192))
 	}
 
+	if len(crowdsecSaved) > 0 {
+		restoreCrowdsecBlockSet(ctx, crowdsecSaved)
+	}
+
 	if c.Geo.Enabled {
-		if err := ensureGeoZones(c); err != nil {
-			slog.Warn("geo zones", "err", err)
-		}
-		if err := applyGeoLoader(c, base); err != nil {
-			slog.Warn("geo load failed; nft geo sets may be empty — run evuproxy update-geo", "err", err)
-		} else {
-			if err := WriteGeoLastSuccess(cfgPath, "reload"); err != nil {
-				slog.Warn("geo last-success metadata", "err", err)
-			}
+		if err := state.WriteGeoLastSuccess(cfgPath, "reload"); err != nil {
+			slog.Warn("geo last-success metadata", "err", err)
 		}
 	}
 
-	if err := reloadWireGuard(c.WireGuard.Interface, strings.TrimSpace(c.WireGuard.Address), wgPath); err != nil {
+	if err := reloadWireGuard(ctx, c.WireGuard.Interface, strings.TrimSpace(c.WireGuard.Address), wgPath); err != nil {
 		return err
 	}
 
-	if err := RecordAppliedConfigHash(cfgPath); err != nil {
+	if err := state.RecordAppliedConfigHash(cfgPath); err != nil {
 		return fmt.Errorf("record apply state: %w", err)
 	}
-	if err := RecordAppliedConfigSnapshot(cfgPath); err != nil {
+	if err := state.RecordAppliedConfigSnapshot(cfgPath); err != nil {
 		return fmt.Errorf("record config snapshot: %w", err)
 	}
 	if c.CrowdSec.Enabled {
@@ -101,18 +139,19 @@ func reload(cfgPath string) error {
 	return nil
 }
 
-func ensureGeoZones(c *config.Config) error {
-	for _, cc := range c.Geo.Countries {
-		cc = strings.TrimSpace(strings.ToLower(cc))
+// ensureGeoZones downloads zone files when any required one (global countries
+// plus every custom route's geo_countries) is missing or empty.
+func ensureGeoZones(ctx context.Context, c *config.Config) error {
+	for _, cc := range gen.GeoDownloadCountries(c) {
 		p := filepath.Join(c.Geo.ZoneDir, cc+".zone")
 		if st, err := os.Stat(p); err != nil || st.Size() == 0 {
-			return gen.DownloadZones(c)
+			return gen.DownloadZones(ctx, c)
 		}
 	}
 	return nil
 }
 
-func applyGeoLoader(c *config.Config, configDir string) error {
+func applyGeoLoader(ctx context.Context, c *config.Config, configDir string) error {
 	loaderPath := filepath.Join(configDir, GeneratedDir, "geo-loader.nft")
 	s, err := gen.GeoLoaderNFT(c, c.Geo.ZoneDir)
 	if err != nil {
@@ -121,48 +160,18 @@ func applyGeoLoader(c *config.Config, configDir string) error {
 	if err := writeAtomic(loaderPath, []byte(s), 0o644); err != nil {
 		return err
 	}
-	cmd := exec.Command("nft", "-c", "-f", loaderPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runCmdCombined(ctx, "nft", "-c", "-f", loaderPath); err != nil {
 		return fmt.Errorf("nft validate geo: %w\n%s", err, TruncateForLog(string(out), 8192))
 	}
-	cmd = exec.Command("nft", "-f", loaderPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runCmdCombined(ctx, "nft", "-f", loaderPath); err != nil {
 		return fmt.Errorf("nft load geo: %w\n%s", err, TruncateForLog(string(out), 8192))
 	}
 	return nil
 }
 
-func tryDeleteNFTTable(family, table string) {
-	out, err := exec.Command("nft", "delete", "table", family, table).CombinedOutput()
-	if err != nil {
-		slog.Debug("nft delete table", "family", family, "table", table, "err", err, "output", TruncateForLog(string(out), 1024))
-	}
-}
-
-// validateNFTablesForReload runs nft -c on the generated ruleset. When EvuProxy tables are
-// already loaded, check mode can fail with "File exists" because the file re-declares sets;
-// delete the live tables once and re-check (same outcome as reload, which replaces them anyway).
-func validateNFTablesForReload(nftPath string) error {
-	out, err := exec.Command("nft", "-c", "-f", nftPath).CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	outStr := string(out)
-	if !strings.Contains(strings.ToLower(outStr), "file exists") {
-		return fmt.Errorf("nft validate: %w\n%s", err, TruncateForLog(outStr, 8192))
-	}
-	tryDeleteNFTTable("inet", "evuproxy")
-	tryDeleteNFTTable("ip", "evuproxy")
-	out, err = exec.Command("nft", "-c", "-f", nftPath).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("nft validate: %w\n%s", err, TruncateForLog(string(out), 8192))
-	}
-	return nil
-}
-
-func reloadWireGuard(iface, tunnelAddr, confPath string) error {
-	if _, err := os.Stat("/sys/class/net/" + iface); err == nil {
-		stripped, err := exec.Command("wg-quick", "strip", confPath).Output()
+func reloadWireGuard(ctx context.Context, iface, tunnelAddr, confPath string) error {
+	if wgInterfaceExists(iface) {
+		stripped, err := runCmdOutput(ctx, "wg-quick", "strip", confPath)
 		if err != nil {
 			return fmt.Errorf("wg-quick strip: %w", err)
 		}
@@ -185,29 +194,22 @@ func reloadWireGuard(iface, tunnelAddr, confPath string) error {
 		if err := f.Close(); err != nil {
 			return err
 		}
-		if out, err := exec.Command("wg", "syncconf", iface, tmp).CombinedOutput(); err != nil {
+		if out, err := runCmdCombined(ctx, "wg", "syncconf", iface, tmp); err != nil {
 			return fmt.Errorf("wg syncconf: %w\n%s", err, out)
 		}
 		// wg syncconf does not apply Address=/routing from wg-quick; without a tunnel IP,
 		// masquerade and some lookups behave oddly even when WireGuard installs peer /32 routes.
 		if tunnelAddr != "" {
-			cmd := exec.Command("ip", "-4", "addr", "replace", tunnelAddr, "dev", iface)
-			if out, err := cmd.CombinedOutput(); err != nil {
+			if out, err := runCmdCombined(ctx, "ip", "-4", "addr", "replace", tunnelAddr, "dev", iface); err != nil {
 				return fmt.Errorf("ip addr replace tunnel address on %s: %w\n%s", iface, err, out)
 			}
 		}
 		return nil
 	}
-	up := exec.Command("wg-quick", "up", confPath)
-	if out, err := up.CombinedOutput(); err != nil {
+	if out, err := runCmdCombined(ctx, "wg-quick", "up", confPath); err != nil {
 		return fmt.Errorf("wg-quick up: %w\n%s", err, out)
 	}
 	return nil
-}
-
-// WriteAtomic writes data to path using a temp file in the same directory and rename.
-func WriteAtomic(path string, data []byte, mode os.FileMode) error {
-	return writeAtomic(path, data, mode)
 }
 
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
@@ -215,17 +217,22 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 }
 
 // UpdateGeo downloads zones and loads geo sets (nftables must already define the sets).
-func UpdateGeo(cfgPath string) error {
-	err := updateGeo(cfgPath)
+func UpdateGeo(ctx context.Context, cfgPath string) error {
+	unlock, err := acquireApplyLock(ctx, cfgPath)
 	if err != nil {
-		_ = RecordApplyFailure(cfgPath)
 		return err
 	}
-	_ = RecordApplySuccess(cfgPath)
+	defer unlock()
+	err = updateGeo(ctx, cfgPath)
+	if err != nil {
+		_ = state.RecordApplyFailure(cfgPath)
+		return err
+	}
+	_ = state.RecordApplySuccess(cfgPath)
 	return nil
 }
 
-func updateGeo(cfgPath string) error {
+func updateGeo(ctx context.Context, cfgPath string) error {
 	c, err := config.Load(cfgPath)
 	if err != nil {
 		return err
@@ -233,35 +240,33 @@ func updateGeo(cfgPath string) error {
 	if !c.Geo.Enabled {
 		return fmt.Errorf("geo is disabled in config")
 	}
-	if err := gen.DownloadZones(c); err != nil {
+	if err := gen.DownloadZones(ctx, c); err != nil {
 		return err
 	}
 	base := filepath.Dir(cfgPath)
-	if err := applyGeoLoader(c, base); err != nil {
+	if err := applyGeoLoader(ctx, c, base); err != nil {
 		return err
 	}
-	if err := WriteGeoLastSuccess(cfgPath, "update-geo"); err != nil {
+	if err := state.WriteGeoLastSuccess(cfgPath, "update-geo"); err != nil {
 		slog.Warn("geo last-success metadata", "err", err)
 	}
 	return nil
 }
 
 // Status returns wg show and whether evuproxy tables exist.
-func Status(cfgPath string) (string, error) {
+func Status(ctx context.Context, cfgPath string) (string, error) {
 	c, err := config.Load(cfgPath)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
-	wg := exec.Command("wg", "show", c.WireGuard.Interface)
-	wgOut, err := wg.CombinedOutput()
+	wgOut, err := runCmdCombined(ctx, "wg", "show", c.WireGuard.Interface)
 	if err != nil {
 		fmt.Fprintf(&b, "wireguard (%s): not running or missing: %v\n", c.WireGuard.Interface, err)
 	} else {
 		b.Write(wgOut)
 	}
-	ls := exec.Command("nft", "list", "table", "inet", "evuproxy")
-	lsOut, err := ls.CombinedOutput()
+	lsOut, err := runCmdCombined(ctx, "nft", "list", "table", "inet", "evuproxy")
 	if err != nil {
 		fmt.Fprintf(&b, "\nnftables inet evuproxy: %v\n", err)
 	} else {
