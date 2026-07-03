@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/imevul/evuproxy/compare/v0.12.0...v0.13.0) (2026-07-03)
+
+
+### Features
+
+* harden apply/reload path and complete review remediation ([f07b6d2](https://github.com/imevul/evuproxy/commit/f07b6d27e53a949f6f6fec95fcddc2be87b8cda4))
+
 ## [Unreleased]
 
 Security and reliability hardening pass (in progress).
