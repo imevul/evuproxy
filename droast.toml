@@ -1,0 +1,23 @@
+# droast project defaults — intentional skips only.
+# Re-run: droast docker/Dockerfile docker/mock-api/Dockerfile contrib/crowdsec/Dockerfile.bouncer
+#
+# DF033 is not controlled by skip=. UI: docker/.dockerignore is a stub so droast
+# sees a file beside docker/Dockerfile; Compose still applies repo-root
+# .dockerignore. mock-api has a real ignore beside its Dockerfile. CrowdSec:
+#   droast --check-dockerignore=false
+# or add contrib/crowdsec/.dockerignore when that context is hardened.
+
+skip = [
+  # CrowdSec nftables bouncer requires root + NET_ADMIN (host network).
+  # UI/mock non-root hardening is deferred (separate pass).
+  "DF020",
+
+  # mock-api is a single stdlib Python script; multi-stage adds little value.
+  "DF011",
+
+  # prod UI HEALTHCHECK lives in docker-compose.yml; mock-api is local-only.
+  "DF012",
+
+  # bouncer is host-network / no published ports — EXPOSE is noise.
+  "DF022",
+]

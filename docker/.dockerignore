@@ -1,0 +1,3 @@
+# Not used by Compose: build context is the repository root, which applies
+# /.dockerignore. This file only documents that ignore policy exists for tools
+# that look beside this Dockerfile (e.g. droast DF033).

@@ -1,0 +1,11 @@
+# Context is docker/mock-api (see docker-compose.dev.yml).
+# Image only needs Dockerfile + mock_server.py.
+
+__pycache__/
+*.py[cod]
+*$py.class
+state/
+.git/
+.env
+.env.*
+*.md

@@ -1,0 +1,14 @@
+# Build context is the repo root (see docker-compose*.yml → dockerfile: docker/Dockerfile).
+# The UI image only COPY-s web/ plus docker/nginx.conf and docker/entrypoint.sh.
+
+# Exclude everything, then re-include only what the Dockerfile needs.
+# `!docker/` opens the directory so specific files can be un-ignored; `docker/**`
+# closes the rest of the tree (mock-api state, __pycache__, nginx.dev.conf, …).
+**
+!docker/
+docker/**
+!docker/Dockerfile
+!docker/nginx.conf
+!docker/entrypoint.sh
+!web/
+!web/**
