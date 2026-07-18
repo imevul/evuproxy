@@ -1,23 +1,47 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-evu-palette="indigo">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EvuProxy Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+  <script>
+  (function(){try{var r=document.documentElement;var s=localStorage.getItem('evu-color-scheme')||'system';var d=s==='dark'||(s!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';var p=localStorage.getItem('evu-palette');r.setAttribute('data-evu-palette',(p==='blue'||p==='indigo')?p:'indigo');}catch(e){}})();
+  </script>
+  <link rel="stylesheet" href="/static/evu/tokens.css" />
+  <link rel="stylesheet" href="/static/evu/base.css" />
+  <link rel="stylesheet" href="/static/evu/components.css" />
+  <link rel="stylesheet" href="/static/evu/layouts.css" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body class="app">
-  <header class="app-header">
-    <div class="brand">
-      <h1>EvuProxy</h1>
-      <p class="tagline">Admin — use only over SSH tunnel or trusted network.</p>
+<body class="app evu-shell evu-shell--sidebar">
+  <div class="evu-backdrop" id="sidebar-backdrop" hidden></div>
+  <header class="evu-app-header">
+    <div class="evu-brand">
+      <span class="evu-brand__mark" aria-hidden="true">
+        <svg class="evu-brand__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="5" cy="12" r="2.25" />
+          <circle cx="19" cy="12" r="2.25" />
+          <rect x="9.25" y="8.5" width="5.5" height="7" rx="1.5" />
+          <path d="M7.25 12h2M14.75 12h2" />
+        </svg>
+      </span>
+      <div>
+        <div class="evu-brand__name">EvuProxy</div>
+        <p class="evu-brand__tag tagline">Admin — use only over SSH tunnel or trusted network.</p>
+      </div>
     </div>
-    <div class="header-meta">
+    <div class="evu-app-header__meta">
       <label class="visually-hidden" for="global-table-search">Filter peers and routes tables</label>
       <input
         type="search"
         id="global-table-search"
-        class="header-search"
+        class="header-search evu-input"
         placeholder="Filter peers/routes (press /)"
         autocomplete="off"
         spellcheck="false"
@@ -26,43 +50,72 @@
     </div>
   </header>
 
-  <div class="app-body">
-    <aside class="sidebar" aria-label="Sections">
-      <nav class="nav">
-        <a href="#/overview" class="nav-link" data-route="overview">Overview</a>
-        <a href="#/settings" class="nav-link" data-route="settings">Settings</a>
-        <a href="#/token" class="nav-link" data-route="token">API token</a>
-        <a href="#/peers" class="nav-link" data-route="peers">Peers</a>
-        <a href="#/routes" class="nav-link" data-route="routes">Routes</a>
-        <a href="#/topology" class="nav-link" data-route="topology">Topology</a>
-        <a href="#/inbound" class="nav-link" data-route="inbound">Inbound access</a>
-        <a href="#/geoblocking" class="nav-link" data-route="geoblocking">Geoblock &amp; limits</a>
-        <a href="#/pending" class="nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span></a>
-        <a href="#/stats" class="nav-link" data-route="stats">Stats</a>
-        <a href="#/logs" class="nav-link" data-route="logs">Logs</a>
+  <div class="evu-shell__body">
+    <aside class="evu-sidebar" aria-label="Sections">
+      <nav class="evu-sidebar__nav">
+        <a href="#/overview" class="nav-link evu-nav-link" data-route="overview">Overview</a>
+        <a href="#/settings" class="nav-link evu-nav-link" data-route="settings">Settings</a>
+        <a href="#/token" class="nav-link evu-nav-link" data-route="token">API token</a>
+        <a href="#/peers" class="nav-link evu-nav-link" data-route="peers">Peers</a>
+        <a href="#/routes" class="nav-link evu-nav-link" data-route="routes">Routes</a>
+        <a href="#/topology" class="nav-link evu-nav-link" data-route="topology">Topology</a>
+        <a href="#/inbound" class="nav-link evu-nav-link" data-route="inbound">Inbound access</a>
+        <a href="#/geoblocking" class="nav-link evu-nav-link" data-route="geoblocking">Geoblock &amp; limits</a>
+        <a href="#/pending" class="nav-link evu-nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span></a>
+        <a href="#/stats" class="nav-link evu-nav-link" data-route="stats">Stats</a>
+        <a href="#/logs" class="nav-link evu-nav-link" data-route="logs">Logs</a>
       </nav>
-      <footer class="sidebar-footer">
-        <a
-          class="sidebar-footer-link"
-          href="https://github.com/imevul/evuproxy"
-          target="_blank"
-          rel="noopener noreferrer"
-          >EvuProxy on GitHub</a
-        >
-        <span class="sidebar-version" id="sidebar-version" title="Running version (from API)">—</span>
-        <p class="sidebar-update-note is-hidden" id="sidebar-update-note" role="status" aria-live="polite">
+      <footer class="evu-sidebar__footer">
+        <div class="evu-theme-menu" data-evu-theme-menu aria-label="Color scheme">
+          <button type="button" class="evu-theme-menu__btn" data-evu-scheme="light" title="Light">
+            <svg class="evu-theme-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+            </svg>
+            <span class="evu-theme-menu__label">Light</span>
+          </button>
+          <button type="button" class="evu-theme-menu__btn" data-evu-scheme="dark" title="Dark">
+            <svg class="evu-theme-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 14.5A8.5 8.5 0 0 1 9.5 3 7 7 0 1 0 21 14.5z" />
+            </svg>
+            <span class="evu-theme-menu__label">Dark</span>
+          </button>
+          <button type="button" class="evu-theme-menu__btn" data-evu-scheme="system" title="System">
+            <svg class="evu-theme-menu__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="12" rx="2" />
+              <path d="M8 20h8M12 16v4" />
+            </svg>
+            <span class="evu-theme-menu__label">System</span>
+          </button>
+        </div>
+        <div class="sidebar-footer-meta">
           <a
-            id="sidebar-update-link"
-            class="sidebar-update-link"
-            href="https://github.com/imevul/evuproxy/releases/latest"
+            class="sidebar-footer-link"
+            href="https://github.com/imevul/evuproxy"
             target="_blank"
             rel="noopener noreferrer"
-          ></a>
-        </p>
+            >EvuProxy on GitHub</a
+          >
+          <span class="sidebar-version" id="sidebar-version" title="Running version (from API)">—</span>
+          <p class="sidebar-update-note is-hidden" id="sidebar-update-note" role="status" aria-live="polite">
+            <a
+              id="sidebar-update-link"
+              class="sidebar-update-link"
+              href="https://github.com/imevul/evuproxy/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+            ></a>
+          </p>
+        </div>
       </footer>
     </aside>
 
-    <main class="content">
+    <div class="evu-main">
+      <div class="evu-main__topbar">
+        <button type="button" class="evu-shell__menu-btn" id="shell-menu-toggle" aria-label="Open navigation" aria-expanded="false">☰</button>
+        <span class="evu-brand__name">EvuProxy</span>
+      </div>
+      <main class="evu-main__inner content">
       <section id="page-overview" class="page" hidden>
         <h2 class="page-title">Overview</h2>
         <div id="overview-cards" class="card-grid overview-cards-compact"></div>
@@ -71,9 +124,9 @@
           <div class="field overview-maintenance-field">
             <div class="toggle-switch-row">
               <span class="toggle-switch-text" id="overview-maintenance-desc">Maintenance mode</span>
-              <label class="toggle-switch">
-                <input type="checkbox" id="overview-maintenance-toggle" class="toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" />
-                <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+              <label class="evu-switch toggle-switch">
+                <input type="checkbox" id="overview-maintenance-toggle" class="evu-switch__input toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" />
+                <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
               </label>
             </div>
             <p class="meta">When on, public forwards are omitted until you turn this off and reload.</p>
@@ -145,15 +198,15 @@
                 <span class="toggle-switch-text" id="settings-metrics-collection-desc"
                   >Collect peer ICMP metrics on the host (<code class="inline">evuproxy metrics</code> systemd service). Enables the Ping column on Peers; overview latency cards always load from stored metrics. Requires <code class="inline">ping</code> on the server.</span
                 >
-                <label class="toggle-switch">
+                <label class="evu-switch toggle-switch">
                   <input
                     type="checkbox"
                     id="settings-metrics-collection"
-                    class="toggle-switch-input"
+                    class="evu-switch__input toggle-switch-input"
                     autocomplete="off"
                     aria-labelledby="settings-metrics-collection-desc"
                   />
-                  <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                  <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                 </label>
               </div>
             </div>
@@ -217,15 +270,15 @@
             </p>
             <div class="toggle-switch-row">
               <span class="toggle-switch-text" id="settings-advanced-toggle-desc">Advanced mode</span>
-              <label class="toggle-switch">
+              <label class="evu-switch toggle-switch">
                 <input
                   type="checkbox"
                   id="settings-advanced-toggle"
-                  class="toggle-switch-input"
+                  class="evu-switch__input toggle-switch-input"
                   autocomplete="off"
                   aria-labelledby="settings-advanced-toggle-desc"
                 />
-                <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
               </label>
             </div>
             <div class="field settings-content-width-field">
@@ -347,15 +400,15 @@
                         ?
                       </button>
                     </span>
-                    <label class="toggle-switch">
+                    <label class="evu-switch toggle-switch">
                       <input
                         type="checkbox"
                         id="peer-f-disabled"
-                        class="toggle-switch-input"
+                        class="evu-switch__input toggle-switch-input"
                         autocomplete="off"
                         aria-labelledby="peer-f-disabled-desc"
                       />
-                      <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                      <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                     </label>
                   </div>
                 </div>
@@ -539,15 +592,15 @@
                       ?
                     </button>
                   </span>
-                  <label class="toggle-switch">
+                  <label class="evu-switch toggle-switch">
                     <input
                       type="checkbox"
                       id="route-f-disabled"
-                      class="toggle-switch-input"
+                      class="evu-switch__input toggle-switch-input"
                       autocomplete="off"
                       aria-labelledby="route-f-disabled-desc"
                     />
-                    <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                    <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                   </label>
                 </div>
               </div>
@@ -750,15 +803,15 @@
                       ?
                     </button>
                   </span>
-                  <label class="toggle-switch">
+                  <label class="evu-switch toggle-switch">
                     <input
                       type="checkbox"
                       id="inbound-f-disabled"
-                      class="toggle-switch-input"
+                      class="evu-switch__input toggle-switch-input"
                       autocomplete="off"
                       aria-labelledby="inbound-f-disabled-desc"
                     />
-                    <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                    <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                   </label>
                 </div>
               </div>
@@ -791,15 +844,15 @@
           <div class="field geo-enable-field">
             <div class="toggle-switch-row">
               <span class="toggle-switch-text" id="geo-f-enabled-desc">Enable geoblocking</span>
-              <label class="toggle-switch">
+              <label class="evu-switch toggle-switch">
                 <input
                   type="checkbox"
                   id="geo-f-enabled"
-                  class="toggle-switch-input"
+                  class="evu-switch__input toggle-switch-input"
                   autocomplete="off"
                   aria-labelledby="geo-f-enabled-desc"
                 />
-                <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
               </label>
             </div>
             <p class="meta geo-enable-hint">When off, country lists are kept in config but omitted from nftables until you turn this on and apply.</p>
@@ -836,7 +889,7 @@
           <div id="geo-tab-default-panel" role="tabpanel" aria-labelledby="geo-tab-default-btn">
             <div class="field">
               <span class="field-label">List mode</span>
-              <div class="geo-segmented" role="group" aria-label="Allow or block listed countries">
+              <div class="geo-segmented geo-mode-seg" role="group" aria-label="Allow or block listed countries">
                 <button type="button" class="geo-seg-btn" id="geo-mode-block" data-geo-mode="block" aria-pressed="false">
                   Block
                 </button>
@@ -863,15 +916,15 @@
                 <span class="toggle-switch-text" id="geo-f-apply-input-desc">
                   Apply geoblocking to inbound allow rules (<code class="inline">input_allows</code>)
                 </span>
-                <label class="toggle-switch">
+                <label class="evu-switch toggle-switch">
                   <input
                     type="checkbox"
                     id="geo-f-apply-input-allows"
-                    class="toggle-switch-input"
+                    class="evu-switch__input toggle-switch-input"
                     autocomplete="off"
                     aria-labelledby="geo-f-apply-input-desc"
                   />
-                  <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                  <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                 </label>
               </div>
               <p class="hint meta geo-field-subhint geo-inbound-rule-hint">
@@ -927,9 +980,9 @@
             <div class="field">
               <div class="toggle-switch-row">
                 <span class="toggle-switch-text" id="geo-crowdsec-desc">CrowdSec integration <span class="meta">(optional)</span></span>
-                <label class="toggle-switch">
-                  <input type="checkbox" id="geo-f-crowdsec-enabled" class="toggle-switch-input" autocomplete="off" aria-labelledby="geo-crowdsec-desc" />
-                  <span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>
+                <label class="evu-switch toggle-switch">
+                  <input type="checkbox" id="geo-f-crowdsec-enabled" class="evu-switch__input toggle-switch-input" autocomplete="off" aria-labelledby="geo-crowdsec-desc" />
+                  <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                 </label>
               </div>
               <p class="hint meta">
@@ -1251,6 +1304,7 @@
         </div>
       </div>
     </main>
+    </div>
   </div>
 
     <template id="help-peers-intro">
@@ -1361,6 +1415,7 @@
 
   <script>window.__EVUPROXY_DEV_UI__ = false;</script>
   <script src="/static/dev-boot.js"></script>
+  <script src="/static/evu/theme-autoload.js"></script>
   <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

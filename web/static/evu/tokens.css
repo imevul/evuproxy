@@ -1,0 +1,156 @@
+/**
+ * Evu Theme — design tokens
+ *
+ * HSL channels (space-separated, no hsl()) for Tailwind: hsl(var(--background)).
+ * Vanilla CSS can use the --evu-* resolved colors, or wrap channels the same way.
+ *
+ * Surfaces are shared (neutral dark grays / calm light grays).
+ * Accent chroma is selected by palette on <html>:
+ *   data-evu-palette="indigo"  (default)
+ *   data-evu-palette="blue"    (02m8-family navy/sky primary)
+ */
+
+:root {
+  /* Surfaces — light (shared across palettes) */
+  --background: 220 14% 96%;
+  --foreground: 220 16% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 16% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 16% 12%;
+  --muted: 220 12% 92%;
+  --muted-foreground: 220 10% 40%;
+  --border: 220 12% 86%;
+  --input: 220 12% 86%;
+
+  --destructive: 0 72% 48%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 152 55% 36%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 92% 42%;
+  --warning-foreground: 0 0% 100%;
+
+  --radius: 0.5rem;
+
+  /* Sidebar / chrome (neutral — not primary-tinted) */
+  --sidebar: 220 14% 97%;
+  --sidebar-foreground: 220 16% 18%;
+  --sidebar-border: 220 12% 88%;
+  --sidebar-muted: 220 12% 92%;
+
+  /* Resolved colors for vanilla CSS without hsl() wrapping */
+  --evu-background: hsl(var(--background));
+  --evu-foreground: hsl(var(--foreground));
+  --evu-card: hsl(var(--card));
+  --evu-card-foreground: hsl(var(--card-foreground));
+  --evu-muted: hsl(var(--muted));
+  --evu-muted-foreground: hsl(var(--muted-foreground));
+  --evu-border: hsl(var(--border));
+  --evu-primary: hsl(var(--primary));
+  --evu-primary-foreground: hsl(var(--primary-foreground));
+  --evu-secondary: hsl(var(--secondary));
+  --evu-secondary-foreground: hsl(var(--secondary-foreground));
+  --evu-destructive: hsl(var(--destructive));
+  --evu-destructive-foreground: hsl(var(--destructive-foreground));
+  --evu-success: hsl(var(--success));
+  --evu-warning: hsl(var(--warning));
+  --evu-ring: hsl(var(--ring));
+  --evu-sidebar: hsl(var(--sidebar));
+  --evu-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --evu-sidebar-border: hsl(var(--sidebar-border));
+  --evu-radius: var(--radius);
+
+  color-scheme: light;
+}
+
+.dark {
+  /* Surfaces — dark (shared across palettes) */
+  --background: 220 6% 8%;
+  --foreground: 220 10% 94%;
+  --card: 220 6% 11%;
+  --card-foreground: 220 10% 94%;
+  --popover: 220 6% 12%;
+  --popover-foreground: 220 10% 94%;
+  --muted: 220 6% 16%;
+  --muted-foreground: 220 8% 64%;
+  --border: 220 6% 20%;
+  --input: 220 6% 20%;
+
+  --destructive: 0 72% 58%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 152 50% 45%;
+  --success-foreground: 0 0% 100%;
+  --warning: 38 90% 52%;
+  --warning-foreground: 220 20% 10%;
+
+  --sidebar: 220 6% 9%;
+  --sidebar-foreground: 220 10% 90%;
+  --sidebar-border: 220 6% 16%;
+  --sidebar-muted: 220 6% 14%;
+
+  --evu-background: hsl(var(--background));
+  --evu-foreground: hsl(var(--foreground));
+  --evu-card: hsl(var(--card));
+  --evu-card-foreground: hsl(var(--card-foreground));
+  --evu-muted: hsl(var(--muted));
+  --evu-muted-foreground: hsl(var(--muted-foreground));
+  --evu-border: hsl(var(--border));
+  --evu-primary: hsl(var(--primary));
+  --evu-primary-foreground: hsl(var(--primary-foreground));
+  --evu-secondary: hsl(var(--secondary));
+  --evu-secondary-foreground: hsl(var(--secondary-foreground));
+  --evu-destructive: hsl(var(--destructive));
+  --evu-destructive-foreground: hsl(var(--destructive-foreground));
+  --evu-success: hsl(var(--success));
+  --evu-warning: hsl(var(--warning));
+  --evu-ring: hsl(var(--ring));
+  --evu-sidebar: hsl(var(--sidebar));
+  --evu-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --evu-sidebar-border: hsl(var(--sidebar-border));
+
+  color-scheme: dark;
+}
+
+/* —— Palette: indigo (default) —— */
+:root,
+:root[data-evu-palette="indigo"] {
+  --primary: 246 70% 52%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 217 72% 48%;
+  --secondary-foreground: 0 0% 100%;
+  --accent: 246 42% 94%;
+  --accent-foreground: 246 55% 32%;
+  --ring: 246 70% 52%;
+}
+
+.dark,
+.dark[data-evu-palette="indigo"] {
+  --primary: 246 76% 68%;
+  --primary-foreground: 246 40% 12%;
+  --secondary: 217 80% 68%;
+  --secondary-foreground: 220 20% 10%;
+  --accent: 246 28% 18%;
+  --accent-foreground: 246 70% 86%;
+  --ring: 246 76% 68%;
+}
+
+/* —— Palette: blue (02m8-family) —— */
+:root[data-evu-palette="blue"] {
+  --primary: 222 47% 31%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 217 71% 45%;
+  --secondary-foreground: 0 0% 100%;
+  --accent: 214 70% 94%;
+  --accent-foreground: 222 47% 28%;
+  --ring: 222 47% 31%;
+}
+
+.dark[data-evu-palette="blue"] {
+  --primary: 217 71% 60%;
+  --primary-foreground: 224 71% 9%;
+  --secondary: 217 80% 70%;
+  --secondary-foreground: 220 20% 10%;
+  --accent: 217 32% 18%;
+  --accent-foreground: 214 80% 86%;
+  --ring: 217 71% 60%;
+}

@@ -66,7 +66,10 @@ export async function navigate(name) {
   const contentEl = document.querySelector("main.content");
   if (contentEl) contentEl.scrollTop = 0;
   document.querySelectorAll(".nav-link").forEach((a) => {
-    a.classList.toggle("is-active", a.getAttribute("data-route") === name);
+    const on = a.getAttribute("data-route") === name;
+    a.classList.toggle("is-active", on);
+    if (on) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
   });
   const hraw = (location.hash || "").replace(/^#/, "");
   const hqi = hraw.indexOf("?");

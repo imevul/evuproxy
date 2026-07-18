@@ -51,9 +51,9 @@ export function applyPeersRoutesTableFilter() {
 export function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {
   const ch = disabled ? "" : " checked";
   return (
-    `<td class="cell-disabled-toggle"><label class="toggle-switch" aria-label="${escapeHtml(ariaLabel)}">` +
-    `<input type="checkbox" class="toggle-switch-input" ${dataAttr}="${index}"${ch} />` +
-    `<span class="toggle-switch-track" aria-hidden="true"><span class="toggle-switch-thumb"></span></span>` +
+    `<td class="cell-disabled-toggle"><label class="evu-switch toggle-switch" aria-label="${escapeHtml(ariaLabel)}">` +
+    `<input type="checkbox" class="evu-switch__input toggle-switch-input" ${dataAttr}="${index}"${ch} />` +
+    `<span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>` +
     `</label></td>`
   );
 }

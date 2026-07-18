@@ -26,6 +26,19 @@ function closeShortcutsModal() {
 }
 
 /* ——— Init wiring ——— */
+function setShellNavOpen(open) {
+  const shell = document.body;
+  const btn = $("shell-menu-toggle");
+  const backdrop = $("sidebar-backdrop");
+  if (!shell) return;
+  shell.classList.toggle("is-nav-open", !!open);
+  if (btn) {
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    btn.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+  }
+  if (backdrop) backdrop.hidden = !open;
+}
+
 document.querySelectorAll(".nav-link").forEach((a) => {
   a.addEventListener("click", (ev) => {
     if (a.classList.contains("nav-disabled")) {
@@ -33,10 +46,30 @@ document.querySelectorAll(".nav-link").forEach((a) => {
       return;
     }
     ev.preventDefault();
+    setShellNavOpen(false);
     void navigate(a.getAttribute("data-route"));
   });
 });
 window.addEventListener("hashchange", () => void onHash());
+
+const shellMenuBtn = $("shell-menu-toggle");
+if (shellMenuBtn) {
+  shellMenuBtn.addEventListener("click", () => {
+    setShellNavOpen(!document.body.classList.contains("is-nav-open"));
+  });
+}
+const shellBackdrop = $("sidebar-backdrop");
+if (shellBackdrop) {
+  shellBackdrop.addEventListener("click", () => setShellNavOpen(false));
+}
+if (typeof window !== "undefined" && window.matchMedia) {
+  const mqWide = window.matchMedia("(min-width: 768px)");
+  const onWide = () => {
+    if (mqWide.matches) setShellNavOpen(false);
+  };
+  if (mqWide.addEventListener) mqWide.addEventListener("change", onWide);
+  else if (mqWide.addListener) mqWide.addListener(onWide);
+}
 
 initTokenPage();
 initSettingsPage();
@@ -143,6 +176,11 @@ document.addEventListener("keydown", (ev) => {
   const pm = $("peer-modal");
   if (pm && !pm.classList.contains("is-hidden")) {
     closePeerEditor();
+    ev.preventDefault();
+    return;
+  }
+  if (document.body.classList.contains("is-nav-open")) {
+    setShellNavOpen(false);
     ev.preventDefault();
   }
 });

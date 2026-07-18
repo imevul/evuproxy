@@ -20,6 +20,15 @@ const OVERVIEW_LATENCY_LAST10M_WARN_MS = 500;
 const PING_SPARK_VB_WIDTH = 640;
 const PING_SPARK_VB_HEIGHT = 208;
 
+function themeColor(name, fallback) {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function stopOverviewLatencyPolling() {
   if (state.overviewLatencyPollTimer) {
     clearInterval(state.overviewLatencyPollTimer);
@@ -290,6 +299,10 @@ function buildPingSparkPlotSvg(model, rng, opts) {
     return yt + (1 - (vv - vmin) / span) * ch;
   }
 
+  const border = themeColor("--evu-border", "hsl(220 6% 20%)");
+  const seriesStroke = themeColor("--evu-secondary", "hsl(217 80% 68%)");
+  const seriesFill = themeColor("--evu-primary", "hsl(246 76% 68%)");
+
   const gridGrp = document.createElementNS(ns, "g");
   gridGrp.setAttribute("class", "overview-ping-spark-grid");
   for (let g = 1; g <= 3; g++) {
@@ -299,7 +312,7 @@ function buildPingSparkPlotSvg(model, rng, opts) {
     hl.setAttribute("x2", String(xr));
     hl.setAttribute("y1", String(gy));
     hl.setAttribute("y2", String(gy));
-    hl.setAttribute("stroke", "#21262d");
+    hl.setAttribute("stroke", border);
     hl.setAttribute("stroke-width", "1");
     hl.setAttribute("vector-effect", "non-scaling-stroke");
     gridGrp.appendChild(hl);
@@ -314,7 +327,8 @@ function buildPingSparkPlotSvg(model, rng, opts) {
 
   const fill = document.createElementNS(ns, "polygon");
   fill.setAttribute("points", poly.trim());
-  fill.setAttribute("fill", "rgba(56, 139, 253, 0.12)");
+  fill.setAttribute("fill", seriesFill);
+  fill.setAttribute("fill-opacity", "0.15");
   svg.appendChild(fill);
 
   let linePts = "";
@@ -323,7 +337,7 @@ function buildPingSparkPlotSvg(model, rng, opts) {
   }
   const pl = document.createElementNS(ns, "polyline");
   pl.setAttribute("fill", "none");
-  pl.setAttribute("stroke", "#58a6ff");
+  pl.setAttribute("stroke", seriesStroke);
   pl.setAttribute("stroke-width", "2");
   pl.setAttribute("stroke-linecap", "round");
   pl.setAttribute("stroke-linejoin", "round");
@@ -334,7 +348,7 @@ function buildPingSparkPlotSvg(model, rng, opts) {
   const axY = document.createElementNS(ns, "path");
   axY.setAttribute("d", "M " + xl + " " + yt + " V " + yb + "");
   axY.setAttribute("fill", "none");
-  axY.setAttribute("stroke", "#30363d");
+  axY.setAttribute("stroke", border);
   axY.setAttribute("stroke-width", "1");
   axY.setAttribute("vector-effect", "non-scaling-stroke");
   svg.appendChild(axY);
@@ -342,7 +356,7 @@ function buildPingSparkPlotSvg(model, rng, opts) {
   const axX = document.createElementNS(ns, "path");
   axX.setAttribute("d", "M " + xl + " " + yb + " H " + xr + "");
   axX.setAttribute("fill", "none");
-  axX.setAttribute("stroke", "#30363d");
+  axX.setAttribute("stroke", border);
   axX.setAttribute("stroke-width", "1");
   axX.setAttribute("vector-effect", "non-scaling-stroke");
   svg.appendChild(axX);
@@ -350,14 +364,14 @@ function buildPingSparkPlotSvg(model, rng, opts) {
   const tickLen = 4;
   const tyTop = document.createElementNS(ns, "path");
   tyTop.setAttribute("d", "M " + (xl - tickLen) + " " + yt + " H " + xl + "");
-  tyTop.setAttribute("stroke", "#30363d");
+  tyTop.setAttribute("stroke", border);
   tyTop.setAttribute("stroke-width", "1");
   tyTop.setAttribute("vector-effect", "non-scaling-stroke");
   svg.appendChild(tyTop);
 
   const tyBot = document.createElementNS(ns, "path");
   tyBot.setAttribute("d", "M " + (xl - tickLen) + " " + yb + " H " + xl + "");
-  tyBot.setAttribute("stroke", "#30363d");
+  tyBot.setAttribute("stroke", border);
   tyBot.setAttribute("stroke-width", "1");
   tyBot.setAttribute("vector-effect", "non-scaling-stroke");
   svg.appendChild(tyBot);
@@ -366,7 +380,7 @@ function buildPingSparkPlotSvg(model, rng, opts) {
     const yMidPx = yt + ch / 2;
     const tyMid = document.createElementNS(ns, "path");
     tyMid.setAttribute("d", "M " + (xl - tickLen) + " " + yMidPx + " H " + xl + "");
-    tyMid.setAttribute("stroke", "#30363d");
+    tyMid.setAttribute("stroke", border);
     tyMid.setAttribute("stroke-width", "1");
     tyMid.setAttribute("vector-effect", "non-scaling-stroke");
     svg.appendChild(tyMid);
