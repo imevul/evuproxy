@@ -10,12 +10,14 @@ services:
     # Same host as EvuProxy: use host networking so Hub/LAPI egress matches the host
     # (bridge containers use FORWARD; EvuProxy drops that by default).
     network_mode: host
+    entrypoint: ["/bin/bash", "/evuproxy-crowdsec-entrypoint.sh"]
     environment:
       # Hub collection on first start (SSH and common Linux scenarios).
       COLLECTIONS: "crowdsecurity/linux"
-      # cscli reads local_api_credentials.yaml; without this the entrypoint leaves
-      # url at http://0.0.0.0:8080 (listen_uri) and cscli cannot connect as a client.
-      LOCAL_API_URL: http://127.0.0.1:8080
+      # Avoid host :8080 (common with 02m8 / evunexus / other stacks). Entrypoint
+      # sets api.server.listen_uri; LOCAL_API_URL is the cscli/bouncer client URL.
+      CROWDSEC_LAPI_LISTEN: ${CROWDSEC_LAPI_LISTEN:-127.0.0.1:8082}
+      LOCAL_API_URL: ${CROWDSEC_LAPI_URL:-http://127.0.0.1:8082}
       # Lab hosts often block outbound HTTPS to CrowdSec; skip online registration and
       # hub upgrade on start (Hub content is bundled in the image — LAPI + local scenarios still work).
       DISABLE_ONLINE_API: "true"
@@ -23,6 +25,7 @@ services:
     # acquis.yaml must exist as a *file* before the first `compose up` (install.sh creates it).
     # If missing, Docker creates a directory named acquis.yaml and CrowdSec exits on startup.
     volumes:
+      - ./docker-crowdsec-entrypoint.sh:/evuproxy-crowdsec-entrypoint.sh:ro
       - ./acquis.yaml:/etc/crowdsec/acquis.d/evuproxy.yaml:ro
       - crowdsec-data:/var/lib/crowdsec/data
       - /var/log/journal:/var/log/journal:ro
@@ -54,7 +57,7 @@ services:
       - ./docker-bouncer.yaml:/config/crowdsec-firewall-bouncer.yaml:ro
     environment:
       CROWDSEC_BOUNCER_KEY: ${CROWDSEC_BOUNCER_KEY:-}
-      CROWDSEC_LAPI_URL: ${CROWDSEC_LAPI_URL:-http://127.0.0.1:8080}
+      CROWDSEC_LAPI_URL: ${CROWDSEC_LAPI_URL:-http://127.0.0.1:8082}
 
 volumes:
   crowdsec-data:

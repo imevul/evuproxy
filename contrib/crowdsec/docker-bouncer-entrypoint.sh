@@ -6,7 +6,7 @@ if [ -z "${CROWDSEC_BOUNCER_KEY:-}" ]; then
 	exit 1
 fi
 
-: "${CROWDSEC_LAPI_URL:=http://127.0.0.1:8080}"
+: "${CROWDSEC_LAPI_URL:=http://127.0.0.1:8082}"
 
 awk -v lapi="$CROWDSEC_LAPI_URL" -v key="$CROWDSEC_BOUNCER_KEY" '
 {

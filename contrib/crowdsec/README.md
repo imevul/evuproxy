@@ -61,6 +61,7 @@ CROWDSEC_INSTALL_YES=1 CROWDSEC_INSTALL_MODE=docker make crowdsec-install
 | [`evuproxy-enable-crowdsec.py`](evuproxy-enable-crowdsec.py) | Helper: set `crowdsec.enabled: true` in config (used by install) |
 | [`acquis.yaml.example`](acquis.yaml.example) | Log sources (copied to `acquis.yaml` by install) |
 | [`docker-compose.example.yaml`](docker-compose.example.yaml) | Docker: CrowdSec + locally built nft bouncer (`Dockerfile.bouncer`) |
+| [`docker-crowdsec-entrypoint.sh`](docker-crowdsec-entrypoint.sh) | Sets `api.server.listen_uri` (default `127.0.0.1:8082`) before CrowdSec starts |
 | [`docker-bouncer.yaml.example`](docker-bouncer.yaml.example) | Docker bouncer config (copied to `docker-bouncer.yaml` by install) |
 | [`Dockerfile.bouncer`](Dockerfile.bouncer) | Packages prefetched `vendor/` binary into `evuproxy-crowdsec-firewall-bouncer:local` |
 | [`native-bouncer.yaml.example`](native-bouncer.yaml.example) | Native nft bouncer config template (table/set for EvuProxy) |
@@ -97,9 +98,9 @@ docker compose -f docker-compose.example.yaml exec crowdsec \
 sudo nft list set inet evuproxy crowdsec_block_v4
 ```
 
-If `cscli` reports `dial tcp 0.0.0.0:8080: connect: connection refused`, the CrowdSec
-container was started without `LOCAL_API_URL` (older compose) or needs a restart after
-updating `docker-compose.example.yaml`:
+If `cscli` reports `dial tcp 0.0.0.0:8082: connect: connection refused` (or a stale
+`:8080` URL), the CrowdSec container was started without `LOCAL_API_URL` (older
+compose) or needs a restart after updating `docker-compose.example.yaml`:
 
 ```bash
 docker compose -f docker-compose.example.yaml up -d crowdsec
@@ -155,7 +156,9 @@ The example compose file sets `COLLECTIONS=crowdsecurity/linux` on first start �
 
 ### 4. Bouncer API key
 
-CrowdSec’s **Local API** (LAPI) listens on `127.0.0.1:8080` in the default compose file. Create a bouncer and save the **one-time** key:
+CrowdSec’s **Local API** (LAPI) listens on `127.0.0.1:8082` in the default **Docker** compose
+file (avoids clashing with other stacks that use `:8080`). Native package installs keep the
+distro default (`127.0.0.1:8080`). Create a bouncer and save the **one-time** key:
 
 ```bash
 docker compose -f docker-compose.example.yaml exec crowdsec \
@@ -166,7 +169,8 @@ Copy output into `.env`:
 
 ```env
 CROWDSEC_BOUNCER_KEY=paste-key-here
-CROWDSEC_LAPI_URL=http://127.0.0.1:8080
+CROWDSEC_LAPI_LISTEN=127.0.0.1:8082
+CROWDSEC_LAPI_URL=http://127.0.0.1:8082
 ```
 
 ### 5. Build and start bouncer
@@ -283,11 +287,11 @@ Store the API key in `/etc/evuproxy/crowdsec-bouncer.key` when merging manually.
 |---------|------------------|
 | Install fails: missing key | Run `install.sh bouncer-key` or delete bouncer and re-run install (see script message) |
 | Bouncer image build fails | `install.sh` downloads the binary on the **host** first (`vendor/`); image build is offline COPY-only. If download fails, check host DNS/curl to GitHub. Docker build DNS issues (`deb.debian.org`) should no longer block install. Native fallback: `CROWDSEC_INSTALL_MODE=native make crowdsec-install` |
-| `cscli` / `0.0.0.0:8080` connection refused | Compose sets `LOCAL_API_URL=http://127.0.0.1:8080` on the `crowdsec` service; `docker compose up -d crowdsec` then `cscli lapi status` |
-| `cscli` / `127.0.0.1:8080` connection refused | LAPI not running — `docker compose logs crowdsec` (look for `is a directory` or `fatal`). **`acquis.yaml` is a directory** if compose ran before the file existed (`file acquis.yaml` must say ASCII text). **`docker_start.sh` still running** if `ps aux` shows bash/cscli hub, not `crowdsec` — wait for `Local API listening`. After compose env changes: `docker compose up -d --force-recreate crowdsec`. |
+| `cscli` / `0.0.0.0:8082` (or stale `:8080`) connection refused | Compose sets `LOCAL_API_URL=http://127.0.0.1:8082` and patches `listen_uri` via `docker-crowdsec-entrypoint.sh`; `docker compose up -d --force-recreate crowdsec` then `cscli lapi status`. Update `.env` if it still points at `:8080`. |
+| `cscli` / `127.0.0.1:8082` connection refused | LAPI not running — `docker compose logs crowdsec` (look for `is a directory` or `fatal`). **`acquis.yaml` is a directory** if compose ran before the file existed (`file acquis.yaml` must say ASCII text). **`docker_start.sh` still running** if `ps aux` shows bash/cscli hub, not `crowdsec` — wait for `Local API listening`. After compose env changes: `docker compose up -d --force-recreate crowdsec`. |
 | Hub / CAPI `i/o timeout` in logs (bridge network) | CrowdSec on **bridge** cannot reach the internet when EvuProxy **FORWARD** is drop. Compose uses **`network_mode: host`** for `crowdsec` (same as the bouncer). Optional: `network.forward_allow_docker_bridges: true` if you run other bridge containers. Test from container: `wget -qO- --timeout=5 https://version.crowdsec.net/latest` (**not** `curl` — not in the image). |
 | Published forward ports timeout after Docker install | Docker **`DOCKER-USER`** may drop **`public_interface` → WireGuard** forwards before EvuProxy sees them. Add `DOCKER-USER` allows (see § Docker and EvuProxy forwarding). **`forward_allow_docker_bridges` alone does not fix this.** Host → peer tunnel IP may still work (OUTPUT path). |
-| Bouncer auth errors | `.env` key matches `cscli bouncers list`; LAPI at `http://127.0.0.1:8080` |
+| Bouncer auth errors | `.env` key matches `cscli bouncers list`; LAPI at `http://127.0.0.1:8082` |
 | `crowdsec-firewall-bouncer` **Restarting** / empty set | Wrong bouncer YAML (`crowdsec_config` / `set:` under `nftables` are ignored). Use `api_url`, `api_key`, and top-level `blacklists_ipv4: crowdsec_block_v4` — see [`docker-bouncer.yaml.example`](docker-bouncer.yaml.example). Then `docker compose logs crowdsec-firewall-bouncer` should show **nftables initiated**. |
 | No decisions | Hub collection installed; logs acquired (`cscli metrics show acquisition`) |
 | Set always empty | Bouncer running with `NET_ADMIN`, `network_mode: host`; EvuProxy `crowdsec.enabled` + reload |

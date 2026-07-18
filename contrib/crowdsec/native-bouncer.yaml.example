@@ -10,6 +10,7 @@ daemonize: true
 log_mode: file
 log_dir: /var/log/
 
+# Native package CrowdSec still defaults to :8080 (Docker path remints to :8082).
 api_url: http://127.0.0.1:8080/
 api_key: __BOUNCER_KEY__
 insecure_skip_verify: false
