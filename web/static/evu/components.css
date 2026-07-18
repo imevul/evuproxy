@@ -29,8 +29,10 @@
 }
 
 .evu-btn--primary {
-  background: var(--evu-primary);
+  background-color: var(--evu-primary);
   color: var(--evu-primary-foreground);
+  border-color: transparent;
+  box-shadow: 0 1px 2px hsl(var(--primary) / 0.35);
 }
 
 .evu-btn--primary:hover:not(:disabled) {
@@ -38,42 +40,80 @@
 }
 
 .evu-btn--secondary {
-  background: hsl(var(--secondary) / 0.15);
+  /* Tinted solid — not transparent — so nesting doesn't wash it out. */
+  background-color: hsl(var(--secondary) / 0.18);
   color: var(--evu-secondary);
-  border-color: hsl(var(--secondary) / 0.35);
+  border-color: hsl(var(--secondary) / 0.4);
+  box-shadow: 0 1px 2px hsl(220 10% 4% / 0.12);
 }
 
 .evu-btn--secondary:hover:not(:disabled) {
-  background: hsl(var(--secondary) / 0.25);
+  background-color: hsl(var(--secondary) / 0.28);
+  border-color: hsl(var(--secondary) / 0.55);
 }
 
+/*
+ * Outline / default secondary actions: stable elevated chip.
+ * Uses --card (not transparent, not --background) so buttons stay distinct from
+ * input wells and badges on page, card, and muted/55 groups alike.
+ */
 .evu-btn--outline {
-  background: transparent;
+  background-color: var(--evu-card);
   color: var(--evu-foreground);
-  border-color: var(--evu-border);
+  border-color: hsl(var(--foreground) / 0.18);
+  box-shadow: 0 1px 2px hsl(220 10% 4% / 0.16);
 }
 
 .evu-btn--outline:hover:not(:disabled) {
-  background: var(--evu-muted);
+  background-color: hsl(var(--muted) / 0.65);
+  border-color: hsl(var(--foreground) / 0.28);
+}
+
+.dark .evu-btn--outline {
+  border-color: hsl(var(--foreground) / 0.22);
+  box-shadow: 0 1px 2px hsl(0 0% 0% / 0.45);
+}
+
+.dark .evu-btn--outline:hover:not(:disabled) {
+  background-color: hsl(var(--muted) / 0.85);
+  border-color: hsl(var(--foreground) / 0.35);
 }
 
 .evu-btn--ghost {
-  background: transparent;
+  /* Chrome-only (menus, dismiss). Do not use for form actions on nested panels. */
+  background-color: transparent;
   color: var(--evu-muted-foreground);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .evu-btn--ghost:hover:not(:disabled) {
-  background: var(--evu-muted);
+  background-color: hsl(var(--muted) / 0.55);
   color: var(--evu-foreground);
 }
 
 .evu-btn--danger {
-  background: var(--evu-destructive);
+  background-color: var(--evu-destructive);
   color: var(--evu-destructive-foreground);
+  border-color: transparent;
+  box-shadow: 0 1px 2px hsl(var(--destructive) / 0.35);
 }
 
 .evu-btn--danger:hover:not(:disabled) {
   filter: brightness(1.08);
+}
+
+/* Destructive outline — elevated like outline, danger text/border. */
+.evu-btn--danger-outline {
+  background-color: var(--evu-card);
+  color: var(--evu-destructive);
+  border-color: hsl(var(--destructive) / 0.45);
+  box-shadow: 0 1px 2px hsl(220 10% 4% / 0.16);
+}
+
+.evu-btn--danger-outline:hover:not(:disabled) {
+  background-color: hsl(var(--destructive) / 0.12);
+  border-color: hsl(var(--destructive) / 0.65);
 }
 
 .evu-btn--sm {
@@ -191,7 +231,9 @@
   padding: 0 0.75rem;
   border-radius: calc(var(--evu-radius) - 2px);
   border: 1px solid var(--evu-border);
-  background: var(--evu-background);
+  /* Recessed page-surface wells — contrast against card / muted groups. */
+  background-color: var(--evu-background);
+  background-image: none;
   color: var(--evu-foreground);
   font: inherit;
   font-size: 0.875rem;
@@ -219,12 +261,30 @@
   outline: none;
 }
 
+.evu-input:disabled,
+.evu-textarea:disabled,
+.evu-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/*
+ * Custom chevron — native GTK/Linux arrows ignore padding.
+ * Keep background-color as the well; only layer the SVG.
+ */
 .evu-select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.5rem center;
+  -webkit-appearance: none;
+  cursor: pointer;
   padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  background-size: 1rem;
+}
+
+.dark .evu-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2399a1af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
 }
 
 .evu-form {
@@ -242,6 +302,28 @@
   .evu-form--grid {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+/* Grouped settings: muted inset stronger than /30 so groups don't flatten into the card. */
+.evu-fieldset,
+.evu-form fieldset {
+  margin: 0;
+  padding: 1rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  border: 1px solid var(--evu-border);
+  border-radius: var(--evu-radius);
+  background: hsl(var(--muted) / 0.55);
+}
+
+.evu-fieldset > legend,
+.evu-form fieldset > legend {
+  padding: 0 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--evu-foreground);
 }
 
 /* —— Card / panel —— */
@@ -623,7 +705,8 @@
 .evu-panel {
   border: 1px solid var(--evu-border);
   border-radius: var(--evu-radius);
-  background: hsl(var(--muted) / 0.35);
+  /* Same strength as fieldset groups — readable against card in light + dark. */
+  background: hsl(var(--muted) / 0.55);
   min-width: 0;
 }
 
@@ -684,7 +767,7 @@
 .evu-disclosure {
   border: 1px solid var(--evu-border);
   border-radius: var(--evu-radius);
-  background: var(--evu-background);
+  background: hsl(var(--muted) / 0.55);
 }
 
 .evu-disclosure > summary {

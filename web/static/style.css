@@ -13,7 +13,8 @@ body.app input.header-search[type="search"] {
   padding: 0 0.75rem;
   border-radius: calc(var(--evu-radius) - 2px);
   border: 1px solid var(--evu-border);
-  background: var(--evu-background);
+  background-color: var(--evu-background);
+  background-image: none;
   color: var(--evu-foreground);
   font: inherit;
   font-size: 0.85rem;
@@ -133,6 +134,7 @@ body.app .evu-sidebar__footer .evu-theme-menu {
   width: 100%;
 }
 
+/* Theme menu = chrome (ghost-like); do not use elevated outline chips */
 body.app .evu-sidebar__footer .evu-theme-menu__btn {
   flex: 1 1 0;
   min-width: 0;
@@ -146,6 +148,23 @@ body.app .evu-sidebar__footer .evu-theme-menu__btn {
   font-weight: 500;
   line-height: 1.2;
   white-space: normal;
+  background-color: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--evu-muted-foreground);
+}
+
+body.app .evu-sidebar__footer .evu-theme-menu__btn:hover {
+  background-color: hsl(var(--muted) / 0.55);
+  color: var(--evu-foreground);
+  border-color: transparent;
+}
+
+body.app .evu-sidebar__footer .evu-theme-menu__btn[aria-pressed="true"] {
+  background-color: hsl(var(--primary) / 0.18);
+  color: var(--evu-primary);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 body.app .evu-sidebar__footer .evu-theme-menu__icon {
@@ -532,6 +551,7 @@ body.app .evu-switch .evu-switch__input[type="checkbox"] {
   font-size: 0.8rem;
 }
 
+/* Form wells: recessed --background against card / muted groups (Evu form stack). */
 input[type="password"],
 input[type="text"],
 input[type="search"],
@@ -546,10 +566,12 @@ textarea {
   padding: 0 0.75rem;
   border-radius: calc(var(--evu-radius) - 2px);
   border: 1px solid var(--evu-border);
-  background: var(--evu-background);
+  background-color: var(--evu-background);
+  background-image: none;
   color: var(--evu-foreground);
   font: inherit;
   font-size: 0.875rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 textarea {
@@ -570,8 +592,9 @@ input[type="number"]:focus-visible,
 input[type="datetime-local"]:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid var(--evu-ring);
-  outline-offset: 2px;
+  border-color: var(--evu-primary);
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.22);
+  outline: none;
 }
 
 input[type="text"]::placeholder,
@@ -580,7 +603,18 @@ input[type="search"]::placeholder,
 input[type="number"]::placeholder,
 textarea::placeholder {
   color: var(--evu-muted-foreground);
-  opacity: 1;
+  opacity: 0.8;
+}
+
+input[type="password"]:disabled,
+input[type="text"]:disabled,
+input[type="search"]:disabled,
+input[type="number"]:disabled,
+input[type="datetime-local"]:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Match text fields — native `search` styling is often light / high-contrast */
@@ -593,6 +627,22 @@ input[type="search"]::-webkit-search-cancel-button,
 input[type="search"]::-webkit-search-decoration {
   -webkit-appearance: none;
   appearance: none;
+}
+
+/* Custom select chevron — keep well background-color; SVG as image layer only */
+body.app select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  background-size: 1rem;
+}
+
+html.dark body.app select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2399a1af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
 }
 
 /* Multi-select checkboxes only (TCP/UDP etc.) — never Switch inputs */
@@ -648,8 +698,9 @@ body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input
   align-items: stretch;
   max-width: 100%;
   border: 1px solid var(--evu-border);
-  border-radius: 6px;
-  background: var(--evu-background);
+  border-radius: calc(var(--evu-radius) - 2px);
+  background-color: var(--evu-background);
+  background-image: none;
   overflow: hidden;
 }
 
@@ -756,8 +807,8 @@ code.inline {
 .onboard-hint {
   margin-top: 0;
   padding: 0.5rem 0.65rem;
-  background: var(--evu-background);
-  border-radius: 6px;
+  background: hsl(var(--muted) / 0.55);
+  border-radius: calc(var(--evu-radius) - 2px);
   border: 1px solid var(--evu-border);
   color: var(--evu-muted-foreground);
   font-size: 0.8rem;
@@ -802,6 +853,11 @@ code.inline {
   margin: 0;
 }
 
+/*
+ * Default / quiet = elevated outline (Evu .evu-btn--outline).
+ * Card fill + border + light shadow so actions stay distinct on page,
+ * card, and muted/55 groups — not transparent “holes”.
+ */
 button {
   display: inline-flex;
   align-items: center;
@@ -810,9 +866,10 @@ button {
   height: 2.25rem;
   padding: 0 0.875rem;
   border-radius: calc(var(--evu-radius) - 2px);
-  border: 1px solid var(--evu-border);
-  background: transparent;
+  border: 1px solid hsl(var(--foreground) / 0.18);
+  background-color: var(--evu-card);
   color: var(--evu-foreground);
+  box-shadow: 0 1px 2px hsl(220 10% 4% / 0.16);
   cursor: pointer;
   font: inherit;
   font-size: 0.875rem;
@@ -820,11 +877,22 @@ button {
   line-height: 1;
   white-space: nowrap;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease,
-    opacity 0.15s ease, filter 0.15s ease;
+    opacity 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
 }
 
 button:hover {
-  background: var(--evu-muted);
+  background-color: hsl(var(--muted) / 0.65);
+  border-color: hsl(var(--foreground) / 0.28);
+}
+
+html.dark body.app button {
+  border-color: hsl(var(--foreground) / 0.22);
+  box-shadow: 0 1px 2px hsl(0 0% 0% / 0.45);
+}
+
+html.dark body.app button:hover {
+  background-color: hsl(var(--muted) / 0.85);
+  border-color: hsl(var(--foreground) / 0.35);
 }
 
 button:disabled {
@@ -834,42 +902,69 @@ button:disabled {
 
 .btn-primary {
   border-color: transparent;
-  background: var(--evu-primary);
+  background-color: var(--evu-primary);
   color: var(--evu-primary-foreground);
+  box-shadow: 0 1px 2px hsl(var(--primary) / 0.35);
 }
 
 .btn-primary:hover {
-  background: var(--evu-primary);
+  background-color: var(--evu-primary);
   filter: brightness(1.08);
 }
 
 .btn-quiet {
-  border-color: var(--evu-border);
-  background: transparent;
-  color: var(--evu-muted-foreground);
+  border-color: hsl(var(--foreground) / 0.18);
+  background-color: var(--evu-card);
+  color: var(--evu-foreground);
+  box-shadow: 0 1px 2px hsl(220 10% 4% / 0.16);
 }
 
 .btn-quiet:hover {
-  border-color: var(--evu-border);
-  background: var(--evu-muted);
+  background-color: hsl(var(--muted) / 0.65);
+  border-color: hsl(var(--foreground) / 0.28);
   color: var(--evu-foreground);
   filter: none;
 }
 
+html.dark body.app .btn-quiet {
+  border-color: hsl(var(--foreground) / 0.22);
+  box-shadow: 0 1px 2px hsl(0 0% 0% / 0.45);
+}
+
+html.dark body.app .btn-quiet:hover {
+  background-color: hsl(var(--muted) / 0.85);
+  border-color: hsl(var(--foreground) / 0.35);
+}
+
 .btn-danger {
   border-color: transparent;
-  background: var(--evu-destructive);
+  background-color: var(--evu-destructive);
   color: var(--evu-destructive-foreground);
+  box-shadow: 0 1px 2px hsl(var(--destructive) / 0.35);
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: var(--evu-destructive);
+  background-color: var(--evu-destructive);
   filter: brightness(1.08);
 }
 
 .btn-danger:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Optional destructive outline (Evu .evu-btn--danger-outline) */
+.btn-danger-outline {
+  background-color: var(--evu-card);
+  color: var(--evu-destructive);
+  border-color: hsl(var(--destructive) / 0.45);
+  box-shadow: 0 1px 2px hsl(220 10% 4% / 0.16);
+}
+
+.btn-danger-outline:hover:not(:disabled) {
+  background-color: hsl(var(--destructive) / 0.12);
+  border-color: hsl(var(--destructive) / 0.65);
+  filter: none;
 }
 
 .btn-row {
@@ -899,8 +994,8 @@ button:disabled {
 .code-block {
   margin: 0.75rem 0 0;
   padding: 0.75rem;
-  background: var(--evu-background);
-  border-radius: 6px;
+  background-color: var(--evu-background);
+  border-radius: calc(var(--evu-radius) - 2px);
   overflow: auto;
   max-height: 320px;
   font-size: 0.8rem;
@@ -1068,12 +1163,16 @@ table.data button {
   border: none;
   border-radius: 0;
   background: hsl(220 10% 4% / 0.55);
+  box-shadow: none;
   backdrop-filter: blur(4px);
   cursor: pointer;
 }
 
 .modal-backdrop:hover {
   background: hsl(220 10% 4% / 0.62);
+  box-shadow: none;
+  border-color: transparent;
+  filter: none;
 }
 
 .modal-panel {
@@ -1640,7 +1739,7 @@ code {
   font-weight: 500;
   border: none;
   border-radius: 0;
-  background: transparent;
+  background-color: transparent;
   color: var(--evu-muted-foreground);
   cursor: pointer;
   border-bottom: 2px solid transparent;
@@ -1653,8 +1752,16 @@ code {
 }
 
 .geo-seg-btn:hover {
-  background: transparent;
+  background-color: transparent;
+  border-color: transparent;
+  box-shadow: none;
   color: var(--evu-foreground);
+}
+
+html.dark body.app .geo-seg-btn,
+html.dark body.app .geo-seg-btn:hover {
+  box-shadow: none;
+  border-color: transparent;
 }
 
 .geo-seg-btn.is-active {
@@ -1708,7 +1815,10 @@ code {
   border-bottom: 0;
   margin-bottom: 0;
   border-right: 1px solid var(--evu-border);
+  border-radius: 0;
   color: var(--evu-muted-foreground);
+  background-color: transparent;
+  box-shadow: none;
 }
 
 .geo-segmented.geo-mode-seg .geo-seg-btn:last-child {
@@ -1716,14 +1826,16 @@ code {
 }
 
 .geo-segmented.geo-mode-seg .geo-seg-btn:hover {
-  background: var(--evu-muted);
+  background-color: var(--evu-muted);
   color: var(--evu-foreground);
+  box-shadow: none;
 }
 
 .geo-segmented.geo-mode-seg .geo-seg-btn.is-active {
-  background: hsl(var(--primary) / 0.18);
+  background-color: hsl(var(--primary) / 0.18);
   color: var(--evu-foreground);
   border-bottom-color: transparent;
+  box-shadow: none;
 }
 
 .editor-tabs-gated-hint {
@@ -1750,6 +1862,11 @@ code {
   min-height: 1.5rem;
   flex: 1;
   min-width: 0;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--evu-border);
+  border-radius: calc(var(--evu-radius) - 2px);
+  /* Recessed well on card — same stack as inputs */
+  background-color: var(--evu-background);
 }
 
 .geo-tag {
@@ -1759,7 +1876,7 @@ code {
   padding: 0.1rem 0.3rem 0.1rem 0.4rem;
   font-size: 0.78rem;
   line-height: 1.25;
-  background: var(--evu-muted);
+  background: hsl(var(--muted) / 0.55);
   border: 1px solid var(--evu-border);
   border-radius: 999px;
   max-width: 100%;
@@ -1786,7 +1903,8 @@ code {
   min-height: 0;
   padding: 0 0.1rem;
   border: none;
-  background: transparent;
+  background-color: transparent;
+  box-shadow: none;
   color: var(--evu-muted-foreground);
   cursor: pointer;
   font-size: 0.9rem;
@@ -1797,7 +1915,8 @@ code {
 }
 
 .geo-tag-remove:hover {
-  background: transparent;
+  background-color: transparent;
+  box-shadow: none;
   color: var(--evu-destructive);
   filter: none;
 }
@@ -2669,9 +2788,10 @@ button.geo-tags-edit {
   min-height: 1.85rem;
   padding: 0;
   margin: 0;
-  border: 1px solid var(--evu-border);
-  border-radius: 6px;
-  background: var(--evu-background);
+  border: 1px solid hsl(var(--foreground) / 0.18);
+  border-radius: calc(var(--evu-radius) - 2px);
+  background-color: var(--evu-card);
+  box-shadow: 0 1px 2px hsl(220 10% 4% / 0.16);
   color: var(--evu-muted-foreground);
   font-size: 1rem;
   font-weight: 600;
@@ -2681,7 +2801,8 @@ button.geo-tags-edit {
 
 .btn-help-trigger:hover {
   color: var(--evu-foreground);
-  border-color: var(--evu-border);
+  background-color: hsl(var(--muted) / 0.65);
+  border-color: hsl(var(--foreground) / 0.28);
 }
 
 .btn-help-trigger:focus-visible {
