@@ -1,0 +1,310 @@
+/**
+ * EvuProxy — Shell — header, sidebar, nav, main column, page frame.
+ */
+
+/* Beat input[type=search] { min-width:0; width:100% } and .evu-input */
+body.app input.header-search[type="search"] {
+  width: 19rem;
+  min-width: 19rem;
+  max-width: 24rem;
+  flex: 0 0 19rem;
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border-radius: calc(var(--evu-radius) - 2px);
+  border: 1px solid var(--evu-border);
+  background-color: var(--evu-background);
+  background-image: none;
+  color: var(--evu-foreground);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+body.app input.header-search[type="search"]::placeholder {
+  color: var(--evu-muted-foreground);
+}
+
+/* Bridge: legacy shell class names → Evu sidebar shell */
+body.app.evu-shell {
+  margin: 0;
+}
+
+/* Proxy mark: peer — gateway — peer (replaces theme gradient square) */
+body.app .evu-brand__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: hsl(var(--primary) / 0.14);
+  color: var(--evu-primary);
+  border: 1px solid hsl(var(--primary) / 0.35);
+}
+
+body.app .evu-brand__icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  display: block;
+}
+
+body.app .evu-app-header .evu-brand__name {
+  margin: 0;
+}
+
+body.app .evu-app-header .tagline,
+body.app .evu-app-header .evu-brand__tag {
+  margin: 0.1rem 0 0;
+}
+
+/* Sidebar nav: keep .nav-link for JS; match .evu-nav-link accents */
+body.app .evu-sidebar__nav {
+  padding: 0.5rem 0.625rem;
+}
+
+body.app .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: calc(var(--evu-radius) - 2px);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--evu-muted-foreground);
+  text-decoration: none;
+  border: 0;
+  border-left: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+body.app .nav-link:hover {
+  background: var(--evu-muted);
+  color: var(--evu-foreground);
+  text-decoration: none;
+}
+
+body.app .nav-link.is-active {
+  background: var(--evu-primary);
+  color: var(--evu-primary-foreground);
+  border-left-color: transparent;
+}
+
+body.app .nav-link.is-active:hover {
+  background: var(--evu-primary);
+  color: var(--evu-primary-foreground);
+  filter: brightness(1.05);
+}
+
+body.app .nav-link.nav-disabled,
+body.app .nav-link.nav-disabled:hover {
+  color: var(--evu-muted-foreground);
+  background: transparent;
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0.45;
+  filter: none;
+}
+
+body.app .nav-pending-dot {
+  margin-left: auto;
+}
+
+/* Main column + content width preference */
+body.app .evu-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.app .evu-main__inner.content {
+  padding: 1rem 1.25rem 2rem;
+  overflow: auto;
+  max-width: var(--evuproxy-content-max-width, 1200px);
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+/*
+ * Scroll lock while a dialog is open. The main column is its own scroll
+ * container, so locking <body> alone still lets the page behind a modal scroll
+ * under the wheel.
+ */
+body.app.is-modal-open,
+body.app.is-modal-open .evu-main__inner.content {
+  overflow: hidden;
+}
+
+body.app .evu-sidebar__footer .evu-theme-menu {
+  display: flex;
+  width: 100%;
+}
+
+/* Theme menu = chrome (ghost-like); do not use elevated outline chips */
+body.app .evu-sidebar__footer .evu-theme-menu__btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: auto;
+  min-height: 2.75rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.2rem;
+  padding: 0.4rem 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: normal;
+  background-color: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--evu-muted-foreground);
+}
+
+body.app .evu-sidebar__footer .evu-theme-menu__btn:hover {
+  background-color: hsl(var(--muted) / 0.55);
+  color: var(--evu-foreground);
+  border-color: transparent;
+}
+
+/*
+ * Selected scheme. The tint carries the "selected" signal; the label itself is
+ * plain foreground because primary-on-primary-tint only reached 3.7:1 in dark
+ * at this 11px size. Weight does the rest of the work.
+ */
+body.app .evu-sidebar__footer .evu-theme-menu__btn[aria-pressed="true"] {
+  background-color: hsl(var(--primary) / 0.18);
+  color: var(--evu-foreground);
+  font-weight: 600;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+body.app .evu-sidebar__footer .evu-theme-menu__icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+body.app .evu-sidebar__footer .evu-theme-menu__label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body.app .evu-sidebar__footer .sidebar-footer-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--evu-muted-foreground);
+  line-height: 1.45;
+}
+
+.sidebar-footer-link {
+  display: block;
+  color: var(--evuproxy-secondary-text);
+  text-decoration: none;
+}
+
+.sidebar-footer-link:hover {
+  text-decoration: underline;
+}
+
+.sidebar-version {
+  display: block;
+  font-variant-numeric: tabular-nums;
+  color: var(--evu-muted-foreground);
+}
+
+.sidebar-update-note {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.sidebar-update-link {
+  color: var(--evuproxy-warning-text);
+  text-decoration: none;
+}
+
+.sidebar-update-link:hover {
+  color: var(--evuproxy-warning-text);
+  text-decoration: underline;
+}
+
+.page[hidden] {
+  display: none !important;
+}
+
+/*
+ * Skip link: off-screen until focused, then pinned over the header. The nav has
+ * ~11 links before the content starts, so keyboard users otherwise tab through
+ * the whole sidebar on every page.
+ */
+.skip-link {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  transform: translateY(-150%);
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--evu-border);
+  border-radius: 0 0 var(--radius) 0;
+  background: var(--evu-card);
+  color: var(--evu-foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  box-shadow: var(--evuproxy-shadow-panel);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid var(--evu-ring);
+  outline-offset: 2px;
+}
+
+/* The main column is the skip target; it should never show a focus ring. */
+.evu-main__inner.content:focus {
+  outline: none;
+}
+
+.page-title {
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.nav-pending-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--evu-destructive);
+  margin-left: 0.35rem;
+  vertical-align: 0.12em;
+  box-shadow: 0 0 0 1px var(--evu-background);
+}
+
+.nav-pending-dot.is-hidden {
+  display: none;
+}
+
+/* Page title row + contextual help ("?") triggers */
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.page-title-row .page-title {
+  margin-bottom: 0;
+}

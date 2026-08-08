@@ -1,0 +1,57 @@
+/**
+ * EvuProxy — Routes — editor modal, port mapping.
+ */
+
+.route-port-map-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.route-port-map-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.route-port-map-row .meta {
+  margin: 0;
+}
+
+table.data .route-target-name {
+  display: block;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--evu-foreground);
+  margin-bottom: 0.2rem;
+  line-height: 1.25;
+}
+
+.route-editor {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.route-editor h3 {
+  margin-top: 0;
+}
+
+.route-editor .route-editor-enabled-field {
+  margin-bottom: 0.75rem;
+}
+
+.route-editor-tabs {
+  margin: 0 0 0.75rem;
+}
+
+.route-editor .route-editor-actions {
+  margin-top: 1rem;
+}
+
+.route-editor .route-editor-actions .btn-row {
+  margin-bottom: 0;
+}

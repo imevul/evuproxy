@@ -67,7 +67,10 @@ export const state = {
   /** Last /v1/metrics/peers response for CSV export on Stats page. */
   lastMetricsPeersExport: null,
 
-  pendingValidateHasLockout: false,
+  /** Signature of the lockout risks currently shown on Pending changes. */
+  pendingValidateSig: "",
+  /** Signature the operator actually acknowledged; Apply requires the two to match. */
+  pendingLockoutAckSig: "",
   confirmModalCallback: null,
 
   peersPingTimer: null,

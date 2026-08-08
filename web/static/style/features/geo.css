@@ -1,0 +1,284 @@
+/**
+ * EvuProxy — Geoblock & limits — mode control, country tags, country picker.
+ */
+
+.geo-enable-row {
+  align-items: baseline;
+  border-bottom: 1px solid var(--evu-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  padding-bottom: 0.75rem;
+}
+
+.geo-enable-hint {
+  margin: 0;
+}
+
+.geo-actions-row {
+  border-top: 1px solid var(--evu-border);
+  margin-bottom: 0;
+  padding-top: 1rem;
+}
+
+.geo-ip-check {
+  margin-top: 0.75rem;
+}
+
+.geo-ip-check-row {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 0.75rem;
+}
+
+.geo-ip-check-field {
+  flex: 1 1 14rem;
+  margin-bottom: 0;
+  min-width: 12rem;
+}
+
+.geo-ip-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.geo-ip-check-result {
+  margin-top: 0.75rem;
+}
+
+.geo-ip-check-result .meta {
+  margin: 0.25rem 0 0;
+}
+
+.geo-editor .msg:empty {
+  display: none;
+  margin: 0;
+  min-height: 0;
+}
+
+.geo-editor .msg:last-child {
+  margin-bottom: 0;
+}
+
+.msg.geo-unsaved-msg {
+  color: var(--evuproxy-warning-text);
+  margin: 0.35rem 0 0;
+}
+
+table.data .geo-zones-col-country {
+  white-space: nowrap;
+}
+
+/* Exclusive mode control (e.g. geo allow/block) — theme-menu style, not tabs */
+.geo-mode-seg {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  border: 1px solid var(--evu-border);
+  border-radius: calc(var(--evu-radius) - 2px);
+  overflow: hidden;
+  margin: 0.25rem 0 0.35rem;
+  background: var(--evu-card);
+}
+
+.geo-mode-btn {
+  height: 1.75rem;
+  padding: 0 0.65rem;
+  border: 0;
+  border-right: 1px solid var(--evu-border);
+  background-color: transparent;
+  color: var(--evu-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.geo-mode-btn:last-child {
+  border-right: none;
+}
+
+.geo-mode-btn:hover {
+  background-color: var(--evu-muted);
+  color: var(--evu-foreground);
+}
+
+.geo-mode-btn.is-active {
+  background-color: hsl(var(--primary) / 0.18);
+  color: var(--evu-foreground);
+}
+
+.geo-tags-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.geo-tags-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  min-height: 1.5rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--evu-border);
+  border-radius: calc(var(--evu-radius) - 2px);
+  /* Recessed well on card — same stack as inputs */
+  background-color: var(--evu-background);
+}
+
+.geo-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.3rem 0.1rem 0.4rem;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  background: hsl(var(--muted) / 0.55);
+  border: 1px solid var(--evu-border);
+  border-radius: 999px;
+  max-width: 100%;
+}
+
+.geo-tag-flag {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.geo-tag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 14rem;
+}
+
+.geo-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0 0.1rem;
+  border: none;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--evu-muted-foreground);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.geo-tag-remove:hover {
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--evuproxy-danger-text);
+  filter: none;
+}
+
+button.geo-tags-edit {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.geo-country-modal-panel h3 {
+  margin-top: 0;
+}
+
+.geo-modal-hint {
+  margin: 0 0 0.75rem;
+}
+
+.geo-modal-search-wrap {
+  margin-bottom: 0.65rem;
+}
+
+.geo-modal-list {
+  max-height: min(50vh, 22rem);
+  overflow: auto;
+  border: 1px solid var(--evu-border);
+  border-radius: 6px;
+  background: var(--evu-background);
+  margin-bottom: 0.75rem;
+}
+
+.geo-modal-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.65rem;
+  border-bottom: 1px solid var(--evu-border);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.geo-modal-row:last-child {
+  border-bottom: none;
+}
+
+.geo-modal-row:hover {
+  background: var(--evu-card);
+}
+
+.geo-modal-row input {
+  flex-shrink: 0;
+}
+
+.geo-modal-row-flag {
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 1.5rem;
+  text-align: center;
+}
+
+.geo-modal-row-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.geo-picker-no-match {
+  margin: 0;
+  padding: 0.75rem;
+}
+
+.geo-modal-actions {
+  margin-top: 0.75rem;
+}
+
+/*
+ * Editor and page tablists span the full panel width as equal segments, rather
+ * than the theme's default left-aligned run of tabs.
+ */
+.peer-editor-tabs,
+.onboard-method-tabs,
+.route-editor-tabs,
+.geo-page-tabs,
+.settings-page-tabs {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  gap: 0;
+}
+
+.peer-editor-tabs > .evu-tabs__tab,
+.onboard-method-tabs > .evu-tabs__tab,
+.route-editor-tabs > .evu-tabs__tab,
+.geo-page-tabs > .evu-tabs__tab,
+.settings-page-tabs > .evu-tabs__tab {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.geo-page-tabs {
+  margin: 1rem 0;
+}
+
+.geo-field-subhint.geo-inbound-rule-hint {
+  margin: 0.35rem 0 0;
+}

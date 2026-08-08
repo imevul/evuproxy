@@ -1,0 +1,541 @@
+/**
+ * EvuProxy — Shared components — cards, buttons, tables, modals, tabs, help triggers.
+ */
+
+tr.is-filter-hidden {
+  display: none;
+}
+
+/* Base and --ok come from the theme; the theme has no destructive pill variant. */
+.evu-pill--err {
+  color: var(--evuproxy-danger-text);
+  border-color: hsl(var(--destructive) / 0.28);
+  background: hsl(var(--destructive) / 0.12);
+}
+
+/*
+ * The theme's own --ok/--warn pills colour their label with the fill colour,
+ * which lands at 3.5:1 on the 12% tint in light mode. Same treatment as the
+ * other status text in the app: keep the tint, darken the label.
+ */
+.evu-pill--ok {
+  color: var(--evuproxy-success-text);
+}
+
+.data .cell-disabled-toggle {
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.card-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  margin-bottom: 1rem;
+  align-items: stretch;
+}
+
+/*
+ * Surface, border and radius come from .evu-card. The app pairs it with .card for
+ * padding and stack rhythm: the theme puts those on .evu-card__body, which would
+ * mean an extra wrapper element in every one of these panels.
+ */
+.card {
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.card h2,
+.card h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.actions-card h3 {
+  margin-top: 0;
+}
+
+.hint {
+  font-size: 0.85rem;
+  color: var(--evu-muted-foreground);
+  margin: 0 0 0.75rem;
+}
+
+.hint code {
+  color: var(--evuproxy-secondary-text);
+}
+
+/*
+ * Links inside prose must be underlined: the theme's link colour against muted
+ * hint text is barely a colour change (1.1:1), so colour alone cannot mark
+ * them. Standalone links — nav items, card actions — keep the theme's
+ * undecorated treatment because position already identifies them.
+ */
+.hint a,
+.meta a,
+p a,
+li a {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* Tighter hint, e.g. sitting directly under a label rather than above a control. */
+.hint--tight {
+  margin: 0.25rem 0 0.35rem;
+}
+
+/* Vertical rhythm utilities — one pair of rules instead of a class per page. */
+.stack-gap {
+  margin-top: 1rem;
+}
+
+/* .card h3 margin shorthand zeros margin-top; beat it for stacked section titles. */
+.card h3.stack-gap {
+  margin-top: 1rem;
+}
+
+.meta {
+  font-weight: 400;
+  color: var(--evu-muted-foreground);
+  font-size: 0.8rem;
+}
+
+.warn-label {
+  font-weight: 400;
+  color: var(--evuproxy-warning-text);
+  font-size: 0.8rem;
+}
+
+code.inline {
+  padding: 0.05em 0.25em;
+  font-size: 0.88em;
+}
+
+/*
+ * Buttons come from the theme: .evu-btn + --primary / --outline / --danger / --sm.
+ * The rule below only covers what the browser default lacks for the buttons that
+ * opt out of that system (segmented tabs, help triggers, tag chips, theme menu,
+ * modal backdrop). Kept at element specificity so every component rule wins.
+ */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  cursor: pointer;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.msg {
+  min-height: 1.25rem;
+  font-size: 0.9rem;
+  color: var(--evuproxy-success-text);
+  margin: 0.5rem 0 0;
+}
+
+.msg.err {
+  color: var(--evuproxy-danger-text);
+}
+
+.code-block {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  background-color: var(--evu-background);
+  border-radius: calc(var(--evu-radius) - 2px);
+  overflow: auto;
+  max-height: 320px;
+  font-size: 0.8rem;
+  border: 1px solid var(--evu-border);
+  white-space: pre-wrap;
+}
+
+.code-block.is-collapsed:empty {
+  display: none;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+table.data th,
+table.data td {
+  text-align: left;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--evu-border);
+  vertical-align: top;
+}
+
+table.data th {
+  color: var(--evu-muted-foreground);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+table.data .mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+/* nftables rule text is one long unbroken line; cap it so the counters stay readable */
+table.data .stats-nft-rule {
+  max-width: 24rem;
+  word-break: break-all;
+}
+
+table.data .tunnel-ip-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+}
+
+table.data .tunnel-ip-text {
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.15em;
+  text-decoration-color: var(--evu-muted-foreground);
+}
+
+/* Icon-only chip: shrink-wrap the glyph instead of the 2.25rem .evu-btn height. */
+table.data .btn-tunnel-ip-copy {
+  flex-shrink: 0;
+  height: auto;
+  padding: 0.12rem;
+  line-height: 0;
+  margin: 0;
+  border-radius: 4px;
+}
+
+table.data .btn-tunnel-ip-copy svg {
+  display: block;
+}
+
+table.data .btn-tunnel-ip-copy:focus-visible {
+  outline: 2px solid var(--evu-ring);
+  outline-offset: 2px;
+}
+
+table.data .btn-tunnel-ip-copy.is-copied {
+  border-color: var(--evu-success);
+  color: var(--evuproxy-success-text);
+}
+
+table.data .row-actions {
+  white-space: nowrap;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.modal.is-hidden {
+  display: none !important;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--evuproxy-scrim);
+  box-shadow: none;
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+}
+
+.modal-backdrop:hover {
+  background: var(--evuproxy-scrim-hover);
+}
+
+.modal-panel {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 28rem;
+  max-height: min(calc(100vh - 2rem), 90vh);
+  overflow: auto;
+  background: var(--evu-card);
+  color: var(--evu-card-foreground);
+  border: 1px solid var(--evu-border);
+  border-radius: calc(var(--evu-radius) + 2px);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--evuproxy-shadow-overlay);
+}
+
+.modal-panel-wide {
+  max-width: min(44rem, calc(100vw - 2rem));
+}
+
+/* Hints under fields in modals: full width, readable on panel background */
+.modal-panel .field > .meta {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--evu-muted-foreground);
+  line-height: 1.45;
+}
+
+/*
+ * Slim themed scrollbars for the panes that scroll inside a card. Firefox reads
+ * scrollbar-width/color; WebKit needs the pseudo-elements.
+ */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--evu-border) var(--evu-card);
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scroll-thin::-webkit-scrollbar-track,
+.scroll-thin::-webkit-scrollbar-corner {
+  background: var(--evu-card);
+  border-radius: 4px;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--evu-border);
+  border-radius: 4px;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--evu-muted-foreground);
+}
+
+.scroll-thin::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.confirm-modal-body {
+  margin: 0 0 1rem;
+  color: var(--evu-foreground);
+  line-height: 1.5;
+  font-size: 0.9rem;
+  /* The message is set as text; the lockout prompt lists one risk per line. */
+  white-space: pre-line;
+}
+
+.confirm-modal-actions {
+  margin-top: 0.25rem;
+}
+
+code {
+  font-size: 0.85em;
+  background: var(--evu-border);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+/*
+ * Section tabs — settings / editors / page modes.
+ * Underline look and active state come from .evu-tabs / .evu-tabs__tab; these
+ * modifiers add the tighter in-card rhythm and the disabled state the theme lacks.
+ */
+.section-tabs {
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.evu-tabs__tab.is-disabled,
+.evu-tabs__tab[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.evu-tabs__tab.is-disabled:hover,
+.evu-tabs__tab[aria-disabled="true"]:hover {
+  color: var(--evu-muted-foreground);
+}
+
+/* One actionable tab: the active segment reads as a section label, not a button */
+.section-tabs--single-enabled .evu-tabs__tab.is-active:not([aria-disabled="true"]) {
+  cursor: default;
+}
+
+.editor-tabs-gated-hint {
+  margin: 0.35rem 0 0.75rem;
+}
+
+.editor-tabs-gated-hint a {
+  color: var(--evuproxy-secondary-text);
+}
+
+.shortcuts-list {
+  margin: 0.5rem 0 1.25rem;
+  padding-left: 1.25rem;
+}
+
+.shortcuts-list li {
+  margin: 0.35rem 0;
+}
+
+.kbd {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  border: 1px solid var(--evu-border);
+  border-radius: 4px;
+  background: var(--evu-background);
+}
+
+.code-block--tall {
+  max-height: 14rem;
+  overflow: auto;
+  margin: 0;
+}
+
+/*
+ * Deep-link target row. The ring carries the signal; the tint stays faint so a
+ * highlighted row is not the largest primary surface on the page.
+ */
+.table-wrap tr.row-highlight {
+  outline: 2px solid var(--evu-ring);
+  outline-offset: -2px;
+  background: hsl(var(--primary) / 0.06);
+}
+
+.evu-empty p {
+  margin: 0;
+  max-width: 44ch;
+}
+
+.btn-help-trigger {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: auto;
+  min-width: 1.85rem;
+  min-height: 1.85rem;
+  padding: 0;
+  margin: 0;
+  border: 1px solid hsl(var(--foreground) / 0.18);
+  border-radius: calc(var(--evu-radius) - 2px);
+  background-color: var(--evu-card);
+  box-shadow: var(--evuproxy-shadow-sm);
+  color: var(--evu-muted-foreground);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.btn-help-trigger:hover {
+  color: var(--evu-foreground);
+  background-color: hsl(var(--muted) / 0.65);
+  border-color: hsl(var(--foreground) / 0.28);
+}
+
+.btn-help-trigger:focus-visible {
+  outline: 2px solid var(--evu-ring);
+  outline-offset: 2px;
+}
+
+.btn-help-trigger--compact {
+  min-width: 1.45rem;
+  min-height: 1.45rem;
+  font-size: 0.85rem;
+}
+
+.help-modal-rich {
+  color: var(--evu-foreground);
+}
+
+.help-modal-rich .hint,
+.help-modal-body .hint {
+  color: var(--evu-muted-foreground);
+}
+
+.help-modal-rich p:last-child {
+  margin-bottom: 0;
+}
+
+/* Prose clones sit flush otherwise (last paragraph margin stripped). Match modal rhythm ~1rem. */
+.help-modal-rich + .btn-row {
+  margin-top: 1rem;
+}
+
+.rate-limit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+/* Nested group inside a card or modal: the theme's muted panel, spaced like a .field */
+.field-group {
+  margin-bottom: 0.65rem;
+}
+
+.field-group .field-label {
+  margin-bottom: 0;
+}
+
+/* A help trigger sits beside its label, never inside it: a button nested in a
+   <label> gets concatenated into the accessible name of the control. */
+.field-label-row {
+  align-items: center;
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+}
+
+.field-label-row > label,
+.field-label-row > .field-label {
+  margin-bottom: 0;
+}
+
+.settings-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.75rem 1.25rem;
+}
+
+.settings-field-grid > .field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+/* Bottom-align the inputs so uneven hint wrapping does not stagger the row. */
+.settings-field-grid > .field > input {
+  margin-top: auto;
+}
+
+.settings-prefs-switch {
+  border-top: 1px solid var(--evu-border);
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+}

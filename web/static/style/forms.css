@@ -1,0 +1,294 @@
+/**
+ * EvuProxy — Forms — wells, switches, checkboxes, field layout.
+ *
+ * Native controls are styled by element selector on purpose: it keeps every
+ * control full width inside .field and modals, and a newly added control type
+ * is styled without remembering a class. See local_docs/DESIGN_LANGUAGE.md §12.
+ */
+
+/* Switch row layout; track/thumb via .evu-switch (see also legacy aliases) */
+.toggle-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.35rem;
+}
+
+.toggle-switch-text {
+  font-size: 0.95rem;
+  color: var(--evu-foreground);
+  font-weight: 500;
+}
+
+.toggle-switch-label-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* Legacy aliases — visual from .evu-switch (components.css) */
+.toggle-switch {
+  flex-shrink: 0;
+}
+
+/* Track must be a block box: .field label { display:block } can demote the switch
+   out of flex, and width/height do not apply to inline spans. */
+body.app .evu-switch__track,
+body.app .toggle-switch-track {
+  display: block;
+  box-sizing: border-box;
+  width: 2.5rem;
+  min-width: 2.5rem;
+  height: 1.375rem;
+  flex-shrink: 0;
+}
+
+body.app .toggle-switch .toggle-switch-input[type="checkbox"],
+body.app .evu-switch .evu-switch__input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 0;
+  height: 0;
+  min-width: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Form wells: recessed --background against card / muted groups (Evu form stack). */
+input[type="password"],
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="datetime-local"],
+select,
+textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border-radius: calc(var(--evu-radius) - 2px);
+  border: 1px solid var(--evu-border);
+  background-color: var(--evu-background);
+  background-image: none;
+  color: var(--evu-foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+textarea {
+  display: block;
+  height: auto;
+  min-height: 5rem;
+  padding: 0.625rem 0.75rem;
+  line-height: 1.45;
+  resize: vertical;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+input[type="password"]:focus-visible,
+input[type="text"]:focus-visible,
+input[type="search"]:focus-visible,
+input[type="number"]:focus-visible,
+input[type="datetime-local"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--evu-primary);
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.22);
+  outline: none;
+}
+
+input[type="text"]::placeholder,
+input[type="password"]::placeholder,
+input[type="search"]::placeholder,
+input[type="number"]::placeholder,
+textarea::placeholder {
+  color: var(--evu-muted-foreground);
+  opacity: 0.8;
+}
+
+input[type="password"]:disabled,
+input[type="text"]:disabled,
+input[type="search"]:disabled,
+input[type="number"]:disabled,
+input[type="datetime-local"]:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Match text fields — native `search` styling is often light / high-contrast */
+input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Custom select chevron — keep well background-color; SVG as image layer only */
+body.app select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  background-size: 1rem;
+}
+
+.dark body.app select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2399a1af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+}
+
+/* Multi-select checkboxes only (TCP/UDP etc.) — never Switch inputs */
+body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input) {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  min-width: 0.875rem;
+  margin: 0 0.35rem 0 0;
+  border: 1px solid var(--evu-border);
+  border-radius: 3px;
+  background: var(--evu-background);
+  cursor: pointer;
+  position: relative;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):hover {
+  border-color: var(--evu-muted-foreground);
+}
+
+body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):checked {
+  background: var(--evu-primary);
+  border-color: var(--evu-ring);
+}
+
+body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 4px;
+  height: 7px;
+  border: solid var(--evu-primary-foreground);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):focus-visible {
+  outline: 2px solid var(--evu-ring);
+  outline-offset: 2px;
+}
+
+body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.input-reveal-wrap {
+  display: flex;
+  align-items: stretch;
+  max-width: 100%;
+  border: 1px solid var(--evu-border);
+  border-radius: calc(var(--evu-radius) - 2px);
+  background-color: var(--evu-background);
+  background-image: none;
+  overflow: hidden;
+}
+
+.input-reveal-wrap .input-reveal-field {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.input-reveal-wrap .input-reveal-toggle {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.45rem 0.75rem;
+  border: none;
+  border-left: 1px solid var(--evu-border);
+  border-radius: 0;
+  background: var(--evu-card);
+  color: var(--evu-muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.input-reveal-wrap .input-reveal-toggle:hover {
+  background: var(--evu-border);
+  color: var(--evu-foreground);
+}
+
+input.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.field {
+  margin-bottom: 0.65rem;
+}
+
+/* Validation failure. Colour reinforces here — aria-invalid, the message
+   association and the focus move carry the same signal without it. */
+[aria-invalid="true"] {
+  border-color: var(--evu-destructive);
+}
+
+[aria-invalid="true"]:focus-visible {
+  outline-color: var(--evu-destructive);
+}
+
+.field label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--evu-foreground);
+  margin-bottom: 0.25rem;
+}
+
+/* Switches are controls, not field captions — keep inline-flex so track width applies */
+.field label.evu-switch,
+.field label.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  font-size: inherit;
+  color: inherit;
+  margin-bottom: 0;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--evu-foreground);
+  margin-bottom: 0.25rem;
+}
+
+.is-hidden {
+  display: none !important;
+}
+
+.rate-limit-grid > .field {
+  margin-bottom: 0;
+}

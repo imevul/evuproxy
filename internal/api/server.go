@@ -47,6 +47,7 @@ type Server struct {
 	EventLog  *eventlog.Logger
 	routeTest *slidingLimiter
 	logsRL    *slidingLimiter
+	geoCheck  *slidingLimiter
 }
 
 func tokenMatch(got, want string) bool {
@@ -97,6 +98,9 @@ func (s *Server) Routes() http.Handler {
 	if s.logsRL == nil {
 		s.logsRL = newSlidingLimiter()
 	}
+	if s.geoCheck == nil {
+		s.geoCheck = newSlidingLimiter()
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -109,6 +113,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.handleOverview))
 	mux.HandleFunc("GET /api/v1/events", s.auth(s.handleEventsGet))
 	mux.HandleFunc("GET /api/v1/geo/summary", s.auth(s.handleGeoSummary))
+	mux.HandleFunc("POST /api/v1/geo/check-ip", s.auth(s.handleGeoCheckIP))
 	mux.HandleFunc("GET /api/v1/config.yaml", s.auth(s.handleConfigYAMLGet))
 	mux.HandleFunc("GET /api/v1/config", s.auth(s.handleConfigGet))
 	mux.HandleFunc("POST /api/v1/routes/test", s.auth(s.handleRouteTest))

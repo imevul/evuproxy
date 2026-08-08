@@ -1,0 +1,447 @@
+/**
+ * EvuProxy — Overview page — dash cards, latency spark, activity panes.
+ */
+
+/* Apply and Recent activity share a row on wide screens; the dash grid above
+   uses the same narrow-then-wide split so the columns line up. */
+.overview-bottom-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 920px) {
+  .overview-bottom-grid {
+    align-items: start;
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  }
+}
+
+.overview-bottom-grid > .card {
+  margin-bottom: 0;
+}
+
+.overview-events-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.88rem;
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.overview-events-list li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--evu-border);
+}
+
+.overview-ev-ts {
+  color: var(--evu-muted-foreground);
+  font-size: 0.8rem;
+  margin-right: 0.35rem;
+}
+
+.overview-api-issue-card {
+  grid-column: 1 / -1;
+  max-width: 36rem;
+}
+
+.overview-api-issue-card a {
+  color: var(--evuproxy-secondary-text);
+}
+
+/* Overview dash cards: uniform row heights, gap-only spacing between cells */
+#overview-cards.card-grid > * {
+  margin-bottom: 0;
+  min-height: 0;
+}
+
+#overview-cards.card-grid > .card {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+#overview-cards.card-grid > .overview-api-issue-card {
+  height: auto;
+}
+
+/* Consolidated Overview dash cards: avoid stretching last inner block into empty space */
+#overview-cards.card-grid > .card.overview-dash-card:not(.overview-api-issue-card)
+  > *:last-child:not(h3) {
+  margin-top: 0;
+}
+
+#overview-cards.overview-cards-compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 920px) {
+  #overview-cards.overview-cards-compact {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  }
+
+  #overview-cards.overview-cards-compact > .overview-dash-activity {
+    grid-column: 1 / -1;
+  }
+
+  #overview-cards.overview-cards-compact > .overview-dash-host {
+    grid-column: 1;
+  }
+
+  #overview-cards.overview-cards-compact > .overview-dash-latency {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 919.98px) {
+  #overview-cards.overview-cards-compact > .overview-dash-host,
+  #overview-cards.overview-cards-compact > .overview-dash-latency {
+    grid-column: 1 / -1;
+  }
+}
+
+#overview-cards.card-grid > .card:not(.overview-api-issue-card) {
+  display: flex;
+  flex-direction: column;
+}
+
+#overview-cards.card-grid > .card:not(.overview-api-issue-card) > *:last-child:not(h3) {
+  margin-top: auto;
+}
+
+/* Overview attention, shortcuts, config upload diff */
+.overview-events-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.overview-events-toolbar h3 {
+  margin: 0;
+}
+
+/* Merged Overview activity / attention */
+.overview-activity-merge-inner {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.25rem;
+}
+
+@media (max-width: 720px) {
+  .overview-activity-merge-inner {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* `.card h3` (0,1,1) would otherwise win and render these at 1.05rem. */
+.card h3.overview-pane-title {
+  margin: 0;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--evu-muted-foreground);
+  font-weight: 600;
+}
+
+.overview-dash-host .overview-kv-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.35rem 1rem;
+  font-size: 0.87rem;
+  align-items: start;
+}
+
+.overview-dash-host .overview-kv-label {
+  color: var(--evu-muted-foreground);
+  white-space: nowrap;
+}
+
+.overview-dash-host .overview-kv-val {
+  color: var(--evu-foreground);
+  word-break: break-word;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-dash-host .overview-kv-wg-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.overview-dash-host .overview-kv-wg-iface {
+  font-weight: 600;
+}
+
+.overview-dash-host .overview-kv-wg-listen {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--evu-foreground);
+}
+
+.overview-geo-fresh,
+.overview-geo-fresh-label {
+  grid-column: 1 / -1;
+}
+
+.overview-geo-fresh-label {
+  margin-top: 0.25rem;
+}
+
+.overview-geo-fresh {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.overview-geo-fresh-tag {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--evu-border);
+  flex-shrink: 0;
+}
+
+.overview-geo-fresh-tag--ok {
+  color: var(--evuproxy-success-text);
+  border-color: var(--evu-success);
+  background: hsl(var(--success) / 0.12);
+}
+
+.overview-geo-fresh-tag--stale {
+  color: var(--evuproxy-warning-text);
+  border-color: var(--evu-warning);
+  background: hsl(var(--warning) / 0.12);
+}
+
+.overview-geo-fresh-tag--never {
+  color: var(--evu-muted-foreground);
+  border-color: var(--evu-border);
+  background: hsl(var(--muted-foreground) / 0.12);
+}
+
+.overview-geo-fresh-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+
+.overview-geo-fresh-age {
+  font-size: 0.87rem;
+  font-weight: 500;
+  color: var(--evu-foreground);
+  line-height: 1.35;
+}
+
+.overview-geo-fresh-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.6rem;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--evu-muted-foreground);
+}
+
+.overview-geo-fresh-ts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.08rem 0.4rem;
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.overview-geo-fresh-ts-date,
+.overview-geo-fresh-ts-clock {
+  white-space: nowrap;
+  line-height: 1.25;
+}
+
+.overview-dash-latency .overview-latency-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.85rem;
+  margin: 0 0 0.35rem;
+}
+
+.overview-dash-latency .overview-latency-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+
+.overview-dash-latency .overview-latency-key {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--evu-muted-foreground);
+  font-weight: 600;
+}
+
+.overview-dash-latency .overview-latency-val {
+  color: var(--evu-foreground);
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+}
+
+.overview-spark-caption {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+}
+
+/* Latency chart grows with the Overview card column (paired with Tunnel / geo). */
+#overview-cards.card-grid > .card.overview-dash-latency.overview-dash-card:not(.overview-api-issue-card) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.overview-dash-latency .overview-spark-caption {
+  flex-shrink: 0;
+}
+
+.overview-dash-latency > h3,
+.overview-dash-latency > .overview-latency-line {
+  flex-shrink: 0;
+}
+
+.overview-ping-spark-wrap {
+  margin-top: 0.5rem;
+  flex: 0 1 auto;
+  min-height: 7rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--evu-border);
+  border-radius: 8px;
+  background: var(--evu-background);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.overview-ping-spark-empty {
+  margin: 0.85rem 0;
+  font-size: 0.82rem;
+  text-align: center;
+  align-self: stretch;
+  width: 100%;
+}
+
+/* Grid: unstretched typography + SVG plot that expands to wrap width / row height */
+.overview-ping-spark-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: min-content auto auto;
+  gap: 0.35rem 0.55rem;
+  width: 100%;
+  flex: 0 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.overview-ping-spark-y-axis {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 4px 0 6px;
+  min-width: 2.75rem;
+  color: var(--evu-muted-foreground);
+}
+
+.overview-ping-spark-y-axis-single {
+  justify-content: center;
+}
+
+.overview-ping-spark-y-tick {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.overview-ping-spark-plot-wrap {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  height: clamp(5.25rem, 12vmin + 3.5rem, 11rem);
+  max-height: 11rem;
+  position: relative;
+}
+
+.overview-ping-spark-plot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.overview-ping-spark-x-axis {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 0;
+}
+
+.overview-ping-spark-x-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: baseline;
+  column-gap: 0.65rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.62rem;
+  color: var(--evu-muted-foreground);
+  line-height: 1.25;
+}
+
+.overview-ping-spark-x-start {
+  justify-self: start;
+}
+
+.overview-ping-spark-x-mid:empty {
+  display: none;
+}
+
+.overview-ping-spark-x-mid:not(:empty) {
+  justify-self: center;
+  grid-column: 2;
+}
+
+.overview-ping-spark-x-end {
+  justify-self: end;
+  grid-column: 3;
+}
+
+.overview-ping-spark-x-caption {
+  grid-column: 2;
+  grid-row: 3;
+  margin: 0;
+  padding: 0;
+  font-size: 0.56rem !important;
+  text-align: center;
+  color: var(--evu-muted-foreground) !important;
+}
+
+.overview-dash-activity .attention-list {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.overview-activity-pane > .evu-panel__body > p {
+  margin: 0;
+}

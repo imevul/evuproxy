@@ -112,6 +112,9 @@ export async function api(path, opts = {}) {
     }
     const ex = new Error(err);
     if (body.error_code) ex.errorCode = body.error_code;
+    // Some endpoints put the payload the caller needs behind a non-2xx status —
+    // /validate answers 400 with the full result, error list included.
+    ex.body = body;
     throw ex;
   }
   return body;

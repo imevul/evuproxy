@@ -1,65 +1,147 @@
 /**
- * Screenshots primary hash routes against the Docker dev UI (docker-compose.dev.yml).
- * Requires mock API reachable; TOKEN must match MOCK_API_TOKEN (default "dev").
+ * Screenshots primary hash routes and the modal surfaces against the Docker dev UI
+ * (docker-compose.dev.yml). Requires mock API reachable; TOKEN must match
+ * MOCK_API_TOKEN (default "dev").
+ *
+ * Every surface is captured in both light and dark: `<name>-light.png` / `<name>-dark.png`.
  */
-import * as fs from "fs";
-import * as path from "path";
-
 import { test } from "@playwright/test";
 
-/** Single path segment under test-results/ — stray env cannot escape tree. */
-function visualSubdirName(): string {
-  const raw = process.env.PW_VISUAL_SUBDIR?.trim();
-  const d = raw && raw.length > 0 ? raw : "visual";
-  return /^[\w.-]+$/.test(d) && d !== "." && d !== ".." ? d : "visual";
-}
+import { ROUTES, SCHEMES, capture, gotoRoute, seed } from "./helpers";
 
-const ROUTES = [
-  "overview",
-  "settings",
-  "token",
-  "peers",
-  "routes",
-  "topology",
-  "inbound",
-  "geoblocking",
-  "pending",
-  "stats",
-  "logs",
-] as const;
-
-const token = (): string =>
-  process.env.API_TOKEN?.trim() || process.env.MOCK_API_TOKEN?.trim() || "dev";
-
-test.beforeEach(async ({ page }) => {
-  const tok = token();
-  await page.addInitScript((t: string) => {
-    localStorage.setItem("evuproxy_api_token", t);
-    localStorage.setItem("evuproxy_api_base", "/api");
-  }, tok);
+test.describe("routes (full-page screenshots)", () => {
+  for (const scheme of SCHEMES) {
+    for (const route of ROUTES) {
+      test(`capture ${route} ${scheme}`, async ({ page, baseURL }) => {
+        test.skip(!baseURL, "baseURL unset");
+        await seed(page, { scheme });
+        await gotoRoute(page, baseURL!, route);
+        await capture(page, `${route}-${scheme}`);
+      });
+    }
+  }
 });
 
-function hashUrl(origin: string, route: string): string {
-  const o = origin.replace(/\/+$/, "");
-  return `${o}/#/${route}`;
-}
-
-test.describe("visual inspection (full-page screenshots)", () => {
-  for (const route of ROUTES) {
-    test(`capture ${route}`, async ({ page, baseURL }) => {
+test.describe("modals (full-page screenshots)", () => {
+  for (const scheme of SCHEMES) {
+    test(`capture peer editor tabs ${scheme}`, async ({ page, baseURL }) => {
       test.skip(!baseURL, "baseURL unset");
-      const origin = baseURL!;
-      await page.goto(hashUrl(origin, route), { waitUntil: "domcontentloaded" });
+      await seed(page, { scheme });
+      await gotoRoute(page, baseURL!, "peers");
 
-      await page.locator(`#page-${route}`).waitFor({ state: "visible", timeout: 25_000 });
+      await page.locator("#peers-add-start").click();
+      await page.locator("#peer-modal").waitFor({ state: "visible" });
+      await capture(page, `modal-peer-editor-${scheme}`);
 
-      const sub = visualSubdirName();
-      const visualDir = path.join(process.cwd(), "test-results", sub);
-      fs.mkdirSync(visualDir, { recursive: true });
-      await page.screenshot({
-        path: path.join(visualDir, `${route}.png`),
-        fullPage: true,
-      });
+      // Onboarding and install copy live behind the editor's own tabs.
+      const tabs = page.locator('#peer-modal [role="tab"]');
+      const count = await tabs.count();
+      for (let i = 1; i < count; i += 1) {
+        const tab = tabs.nth(i);
+        if ((await tab.getAttribute("aria-disabled")) === "true") continue;
+        const label = (await tab.textContent())?.trim().toLowerCase().replace(/\W+/g, "-") || `tab${i}`;
+        await tab.click();
+        await capture(page, `modal-peer-editor-${label}-${scheme}`);
+      }
+    });
+
+    test(`capture route editor advanced ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme, advanced: true });
+      await gotoRoute(page, baseURL!, "routes");
+
+      await page.locator("#routes-add").click();
+      await page.locator("#route-modal").waitFor({ state: "visible" });
+      await capture(page, `modal-route-editor-${scheme}`);
+
+      await page.locator("#route-tab-advanced-btn").click();
+      await page.locator("#route-tab-advanced-panel").waitFor({ state: "visible" });
+      await capture(page, `modal-route-editor-advanced-${scheme}`);
+    });
+
+    test(`capture geo country picker ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme });
+      await gotoRoute(page, baseURL!, "geoblocking");
+
+      await page.locator("#geo-tags-edit").click();
+      await page.locator("#geo-country-modal").waitFor({ state: "visible" });
+      await capture(page, `modal-geo-countries-${scheme}`);
+    });
+
+    test(`capture geo tabs ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme, advanced: true });
+      await gotoRoute(page, baseURL!, "geoblocking");
+
+      await page.locator("#geo-tab-advanced-btn").click();
+      await page.locator("#geo-tab-advanced-panel").waitFor({ state: "visible" });
+      await capture(page, `geoblocking-advanced-${scheme}`);
+
+      await page.locator("#geo-tab-zones-btn").click();
+      await page.locator("#geo-tab-zones-panel").waitFor({ state: "visible" });
+      await capture(page, `geoblocking-zones-${scheme}`);
+    });
+
+    test(`capture context help ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme });
+      await gotoRoute(page, baseURL!, "peers");
+
+      await page.locator("#page-peers .btn-help-trigger").first().click();
+      await page.locator("#context-help-modal").waitFor({ state: "visible" });
+      await capture(page, `modal-context-help-${scheme}`);
+    });
+
+    test(`capture confirm dialog ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme });
+      await gotoRoute(page, baseURL!, "peers");
+
+      // Peer removal is the confirm trigger that is always reachable in the mock;
+      // the Pending discard button is disabled whenever there is nothing pending.
+      await page.locator("#page-peers [data-peer-del]").first().click();
+      await page.locator("#confirm-modal").waitFor({ state: "visible" });
+      await capture(page, `modal-confirm-${scheme}`);
+    });
+
+    test(`capture shortcuts dialog ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme });
+      await gotoRoute(page, baseURL!, "overview");
+
+      await page.keyboard.press("Shift+Slash");
+      await page.locator("#shortcuts-modal").waitFor({ state: "visible" });
+      await capture(page, `modal-shortcuts-${scheme}`);
+    });
+
+    test(`capture pending lockout gate ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme });
+      // Stubbed so the warning state is captured regardless of mock config.
+      await page.route("**/api/v1/validate", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ok: true,
+            warnings: [
+              {
+                code: "lockout_risk_source_allow",
+                message:
+                  "Your address 203.0.113.50 is not in the source allowlist for route 1; applying will drop this connection.",
+              },
+            ],
+            detected_client_ip: "203.0.113.50",
+            ip_detection_source: "direct",
+          }),
+        })
+      );
+      await gotoRoute(page, baseURL!, "pending");
+
+      await page.locator("#pending-check-config").click();
+      await page.locator("#pending-lockout-ack-wrap").waitFor({ state: "visible" });
+      await capture(page, `pending-lockout-gate-${scheme}`);
     });
   }
 });

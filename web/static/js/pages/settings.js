@@ -12,7 +12,13 @@ import {
   setAdvancedSettingsEnabled,
 } from "../core/advanced.js";
 import { parseIPv4CIDR, validLinuxIfaceName } from "../core/net.js";
-import { openModal, closeModal, openConfirmModal, closeConfirmModal } from "../core/modal.js";
+import {
+  openModal,
+  closeModal,
+  openConfirmModal,
+  closeConfirmModal,
+  registerModalCloser,
+} from "../core/modal.js";
 import { refreshOverviewPage, refreshOverviewEventsList } from "./overview.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -176,6 +182,7 @@ function closeConfigUploadModal() {
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initSettingsPage() {
+  registerModalCloser($("config-upload-modal"), closeConfigUploadModal);
   const settingsTabPrefs = $("settings-tab-prefs-btn");
   const settingsTabMaint = $("settings-tab-maint-btn");
   const settingsTabAdv = $("settings-tab-adv-btn");

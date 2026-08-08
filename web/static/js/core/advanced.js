@@ -29,28 +29,30 @@ export function syncAdvancedSettingsToggle() {
 const advancedTabGatedTooltips = {
   route:
     "Enable Advanced mode in Settings to edit source allow/deny lists, port mapping, and per-route geo overrides.",
-  geo: "Enable Advanced mode in Settings to edit nftables set name, zone directory, break-glass CIDRs, and rate limits.",
+  geo: "Enable Advanced mode in Settings to edit the global denylist, nftables set name, zone directory, break-glass CIDRs, rate limits and CrowdSec.",
 };
 
 function setTabGatedState(btn, hintEl, gated, tooltipText, ariaLabelWhenGated) {
   if (!btn) return;
   const tablist = btn.closest('[role="tablist"]');
   btn.classList.toggle("is-disabled", gated);
+  // tabindex is deliberately not touched here: tabs.js owns the single tab stop
+  // per tablist and re-syncs it off the aria-disabled change below. Removing the
+  // attribute here would restore the browser default of 0 and leave the list with
+  // two tab stops, which is the thing that helper exists to prevent.
   if (gated) {
     btn.setAttribute("aria-disabled", "true");
-    btn.setAttribute("tabindex", "-1");
     btn.setAttribute("title", tooltipText);
     btn.setAttribute("aria-label", ariaLabelWhenGated);
   } else {
     btn.removeAttribute("aria-disabled");
-    btn.removeAttribute("tabindex");
     btn.removeAttribute("title");
     btn.removeAttribute("aria-label");
   }
   if (hintEl) hintEl.hidden = !gated;
   if (tablist) {
     const enabled = tablist.querySelectorAll('[role="tab"]:not([aria-disabled="true"])');
-    tablist.classList.toggle("geo-segmented--single-enabled", enabled.length === 1);
+    tablist.classList.toggle("section-tabs--single-enabled", enabled.length === 1);
   }
 }
 
@@ -71,40 +73,45 @@ export function syncAdvancedTabsGating() {
     advancedTabGatedTooltips.geo,
     "Advanced, disabled. Enable Advanced mode in Settings."
   );
+  // Only move off the tab that just became unreachable; other selections stand.
   if (!on) {
-    setRouteEditorTab("default");
-    setGeoEditorTab("default");
+    if (isTabSelected("route", "advanced")) setRouteEditorTab("default");
+    if (isTabSelected("geo", "advanced")) setGeoEditorTab("default");
+  }
+}
+
+function isTabSelected(prefix, name) {
+  const btn = $(`${prefix}-tab-${name}-btn`);
+  return !!btn && btn.getAttribute("aria-selected") === "true";
+}
+
+/**
+ * Selects one tab in a `<prefix>-tab-<name>-btn` / `-panel` group.
+ * Missing tabs are ignored so a page can add or drop one without changing this.
+ */
+function selectEditorTab(prefix, names, which) {
+  const parts = names
+    .map((name) => ({
+      name,
+      btn: $(`${prefix}-tab-${name}-btn`),
+      panel: $(`${prefix}-tab-${name}-panel`),
+    }))
+    .filter((t) => t.btn && t.panel);
+  if (!parts.some((t) => t.name === which)) return;
+  for (const t of parts) {
+    const on = t.name === which;
+    t.btn.classList.toggle("is-active", on);
+    t.btn.setAttribute("aria-selected", on ? "true" : "false");
+    t.panel.hidden = !on;
   }
 }
 
 export function setGeoEditorTab(which) {
   if (which === "advanced" && !advancedSettingsEnabled()) return;
-  const advanced = which === "advanced";
-  const defaultBtn = $("geo-tab-default-btn");
-  const advBtn = $("geo-tab-advanced-btn");
-  const defaultPanel = $("geo-tab-default-panel");
-  const advPanel = $("geo-tab-advanced-panel");
-  if (!defaultBtn || !advBtn || !defaultPanel || !advPanel) return;
-  defaultBtn.classList.toggle("is-active", !advanced);
-  advBtn.classList.toggle("is-active", advanced);
-  defaultBtn.setAttribute("aria-selected", advanced ? "false" : "true");
-  advBtn.setAttribute("aria-selected", advanced ? "true" : "false");
-  defaultPanel.hidden = advanced;
-  advPanel.hidden = !advanced;
+  selectEditorTab("geo", ["default", "advanced", "zones"], which);
 }
 
 export function setRouteEditorTab(which) {
   if (which === "advanced" && !advancedSettingsEnabled()) return;
-  const advanced = which === "advanced";
-  const defaultBtn = $("route-tab-default-btn");
-  const advBtn = $("route-tab-advanced-btn");
-  const defaultPanel = $("route-tab-default-panel");
-  const advPanel = $("route-tab-advanced-panel");
-  if (!defaultBtn || !advBtn || !defaultPanel || !advPanel) return;
-  defaultBtn.classList.toggle("is-active", !advanced);
-  advBtn.classList.toggle("is-active", advanced);
-  defaultBtn.setAttribute("aria-selected", advanced ? "false" : "true");
-  advBtn.setAttribute("aria-selected", advanced ? "true" : "false");
-  defaultPanel.hidden = advanced;
-  advPanel.hidden = !advanced;
+  selectEditorTab("route", ["default", "advanced"], which);
 }

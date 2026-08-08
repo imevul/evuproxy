@@ -30,13 +30,17 @@ async function refreshGeoZonesTable() {
         const miss = c.zone_missing ? " <span class=\"meta\">(zone file missing)</span>" : "";
         const codeRaw = String(c.code || "").trim();
         const fl = countryFlagEmoji(codeRaw);
-        const flagHtml = fl
-          ? '<span class="logs-ip-flag" title="' + escapeHtml(codeRaw.toUpperCase()) + '">' + fl + "</span> "
-          : "";
+        // aria-hidden: the name and the code follow it in the same cell.
+        const flagHtml = fl ? '<span class="logs-ip-flag" aria-hidden="true">' + fl + "</span> " : "";
+        const code = codeRaw.toUpperCase();
+        const name = geoCountryName(codeRaw);
+        // The name falls back to the code when the catalog failed to load.
+        const codeHtml = name === code ? "" : ' <span class="meta mono">' + escapeHtml(code) + "</span>";
         return (
-          "<tr><td class=\"mono geo-zones-col-country\">" +
+          "<tr><td class=\"geo-zones-col-country\">" +
           flagHtml +
-          escapeHtml(codeRaw) +
+          escapeHtml(name) +
+          codeHtml +
           "</td><td>" +
           escapeHtml(String(c.cidr_lines)) +
           "</td><td>" +
@@ -57,7 +61,7 @@ async function refreshGeoZonesTable() {
         "</p>";
     }
     wrap.innerHTML =
-      "<table class=\"data\"><thead><tr><th>Country</th><th>CIDR lines</th><th>Approx. IPv4</th><th>Note</th></tr></thead><tbody>" +
+      "<table class=\"data\"><thead><tr><th scope=\"col\">Country</th><th scope=\"col\">CIDR lines</th><th scope=\"col\">Approx. IPv4</th><th scope=\"col\">Note</th></tr></thead><tbody>" +
       rows +
       "</tbody></table>" +
       foot;
@@ -200,7 +204,7 @@ async function loadGeoCountryCatalog() {
 
 function geoCountryName(code) {
   const c = String(code || "").toLowerCase();
-  const row = state.geoCountryByCode.get(c);
+  const row = state.geoCountryByCode && state.geoCountryByCode.get(c);
   return row ? row.name : c.toUpperCase();
 }
 
@@ -363,7 +367,7 @@ function renderGeoModalList(filterRaw) {
         "</label>"
     );
   }
-  list.innerHTML = rows.length ? rows.join("") : '<p class="hint meta" style="padding:0.75rem">No matches.</p>';
+  list.innerHTML = rows.length ? rows.join("") : '<p class="hint meta geo-picker-no-match">No matches.</p>';
   list.querySelectorAll('input[type="checkbox"][data-geo-code]').forEach((inp) => {
     inp.addEventListener("change", () => {
       const code = inp.getAttribute("data-geo-code");
@@ -374,8 +378,9 @@ function renderGeoModalList(filterRaw) {
   });
 }
 
-async function saveGeoblocking() {
-  if (!state.lastConfig) return;
+/** Config that Save would write — used by Save and by the IP check preview. */
+function geoDraftFromForm() {
+  if (!state.lastConfig) return null;
   const cfg = JSON.parse(JSON.stringify(state.lastConfig));
   if (!cfg.geo) cfg.geo = {};
   const g = cfg.geo;
@@ -394,6 +399,12 @@ async function saveGeoblocking() {
   const csOn = $("geo-f-crowdsec-enabled") && $("geo-f-crowdsec-enabled").checked;
   if (csOn) cfg.crowdsec = { enabled: true };
   else delete cfg.crowdsec;
+  return cfg;
+}
+
+async function saveGeoblocking() {
+  const cfg = geoDraftFromForm();
+  if (!cfg) return;
   try {
     await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
     state.lastConfig = cfg;
@@ -406,10 +417,121 @@ async function saveGeoblocking() {
   }
 }
 
-export async function refreshGeoblockingPage() {
+function clearGeoIPCheckResult() {
+  const panel = $("geo-ip-check-result");
+  if (!panel) return;
+  panel.classList.add("is-hidden");
+  panel.classList.remove("evu-alert--success", "evu-alert--danger", "evu-alert--warning", "evu-alert--info");
+}
+
+function renderGeoIPCheckResult(res) {
+  const panel = $("geo-ip-check-result");
+  const summary = $("geo-ip-check-summary");
+  const detail = $("geo-ip-check-detail");
+  if (!panel || !summary || !detail) return;
+  panel.classList.remove("is-hidden", "evu-alert--success", "evu-alert--danger", "evu-alert--warning", "evu-alert--info");
+  const tone =
+    res.verdict === "allowed"
+      ? "evu-alert--success"
+      : res.verdict === "blocked"
+        ? "evu-alert--danger"
+        : res.verdict === "geo_off"
+          ? "evu-alert--info"
+          : "evu-alert--warning"; // invalid | uncertain
+  panel.classList.add(tone);
+  summary.textContent = res.summary || String(res.verdict || "");
+  const bits = [];
+  if (res.country_iso) bits.push("Country: " + String(res.country_iso).toUpperCase());
+  if (Array.isArray(res.matched_countries) && res.matched_countries.length) {
+    bits.push(
+      "Listed match: " +
+        res.matched_countries.map((c) => geoCountryName(c) + " (" + String(c).toUpperCase() + ")").join(", ")
+    );
+  }
+  if (res.break_glass) bits.push("Break-glass");
+  if (res.global_deny) bits.push("Global denylist");
+  if (res.checked_from_draft) bits.push("Using form rules (unsaved edits included)");
+  if (res.note) bits.push(res.note);
+  detail.textContent = bits.join(" · ");
+  detail.hidden = bits.length === 0;
+}
+
+async function runGeoIPCheck() {
+  const input = $("geo-ip-check-input");
+  const runBtn = $("geo-ip-check-run");
+  if (!input) return;
+  const ip = input.value.trim();
+  if (!ip) {
+    input.focus();
+    clearGeoIPCheckResult();
+    const panel = $("geo-ip-check-result");
+    const summary = $("geo-ip-check-summary");
+    const detail = $("geo-ip-check-detail");
+    if (panel && summary) {
+      panel.classList.remove("is-hidden");
+      panel.classList.add("evu-alert--warning");
+      summary.textContent = "Enter a valid IPv4 address.";
+      if (detail) {
+        detail.textContent = "";
+        detail.hidden = true;
+      }
+    }
+    return;
+  }
+  const cfg = geoDraftFromForm();
+  if (!cfg) {
+    setGeoMsg("Load the page first, then try again.", true);
+    return;
+  }
+  if (runBtn) runBtn.disabled = true;
+  try {
+    const res = await api("/v1/geo/check-ip", {
+      method: "POST",
+      body: JSON.stringify({ ip, config: cfg }),
+    });
+    renderGeoIPCheckResult(res);
+    setApiStatus(true);
+  } catch (e) {
+    clearGeoIPCheckResult();
+    setGeoMsg(String(e.message || e), true);
+  } finally {
+    if (runBtn) runBtn.disabled = false;
+  }
+}
+
+async function geoIPCheckUseMine() {
+  const input = $("geo-ip-check-input");
+  if (!input) return;
+  try {
+    const info = await api("/v1/client-ip");
+    if (!info.detected_client_ip) {
+      setGeoMsg("Could not detect your IPv4 address.", true);
+      return;
+    }
+    input.value = info.detected_client_ip;
+    await runGeoIPCheck();
+  } catch (e) {
+    setGeoMsg(String(e.message || e), true);
+  }
+}
+
+/**
+ * @param {{ resetTab?: boolean }} [opts] `resetTab` on route entry only — the
+ *   Refresh button is in the shared footer, so resetting there would throw the
+ *   operator off the tab whose data they just reloaded.
+ */
+export async function refreshGeoblockingPage(opts) {
   setGeoMsg("");
+  clearGeoIPCheckResult();
+  // The catalog is a static asset used only to show country names. Loading it
+  // first inside the same try meant a missing file failed the whole page and
+  // reported the API as down; names then fall back to ISO codes instead.
   try {
     await loadGeoCountryCatalog();
+  } catch (e) {
+    /* names degrade to codes */
+  }
+  try {
     state.lastConfig = await api("/v1/config");
     setApiStatus(true);
     geoFormFromConfig(state.lastConfig);
@@ -417,7 +539,7 @@ export async function refreshGeoblockingPage() {
     setApiStatus(false, String(e.message || e));
     setGeoMsg(String(e.message || e), true);
   }
-  setGeoEditorTab("default");
+  if (opts && opts.resetTab) setGeoEditorTab("default");
   syncAdvancedTabsGating();
   void refreshGeoZonesTable();
 }
@@ -428,6 +550,8 @@ async function geoUpdateLists() {
     await api("/v1/update-geo", { method: "POST" });
     setGeoMsg("Geo lists updated on host.");
     setApiStatus(true);
+    // The Zone files tab is where an operator confirms the update landed.
+    void refreshGeoZonesTable();
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
   }
@@ -438,12 +562,12 @@ export function initGeoblockingPage() {
   const geoAddIP = $("geo-add-detected-ip");
   if (geoAddIP) geoAddIP.addEventListener("click", () => void geoAddDetectedIP());
 
-  const geoTabDefault = $("geo-tab-default-btn");
-  const geoTabAdvanced = $("geo-tab-advanced-btn");
-  if (geoTabDefault) geoTabDefault.addEventListener("click", () => setGeoEditorTab("default"));
-  if (geoTabAdvanced) geoTabAdvanced.addEventListener("click", () => setGeoEditorTab("advanced"));
+  for (const name of ["default", "advanced", "zones"]) {
+    const btn = $(`geo-tab-${name}-btn`);
+    if (btn) btn.addEventListener("click", () => setGeoEditorTab(name));
+  }
   $("geo-save").addEventListener("click", saveGeoblocking);
-  $("geo-refresh").addEventListener("click", refreshGeoblockingPage);
+  $("geo-refresh").addEventListener("click", () => void refreshGeoblockingPage());
   $("geo-update-lists").addEventListener("click", geoUpdateLists);
   const geoEn = $("geo-f-enabled");
   if (geoEn) geoEn.addEventListener("change", syncGeoUnsavedIndicator);
@@ -488,5 +612,18 @@ export function initGeoblockingPage() {
   const geoModalSearch = $("geo-modal-search");
   if (geoModalSearch) {
     geoModalSearch.addEventListener("input", () => renderGeoModalList(geoModalSearch.value));
+  }
+  const geoIPCheckRun = $("geo-ip-check-run");
+  if (geoIPCheckRun) geoIPCheckRun.addEventListener("click", () => void runGeoIPCheck());
+  const geoIPCheckMine = $("geo-ip-check-mine");
+  if (geoIPCheckMine) geoIPCheckMine.addEventListener("click", () => void geoIPCheckUseMine());
+  const geoIPCheckInput = $("geo-ip-check-input");
+  if (geoIPCheckInput) {
+    geoIPCheckInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        void runGeoIPCheck();
+      }
+    });
   }
 }

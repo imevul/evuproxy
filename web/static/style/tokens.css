@@ -1,0 +1,47 @@
+/**
+ * EvuProxy — App tokens — elevation, scrim and status-text colours the Evu Theme
+ * does not ship.
+ */
+
+/*
+ * App-level elevation scale. The theme ships no shadow tokens, so these name the
+ * three depths the app actually uses instead of repeating raw hsl() literals.
+ */
+:root {
+  --evuproxy-shadow-sm: 0 1px 2px hsl(220 10% 4% / 0.16);
+  --evuproxy-shadow-panel: 0 8px 24px hsl(220 10% 4% / 0.28);
+  --evuproxy-shadow-overlay: 0 24px 64px hsl(220 10% 4% / 0.45);
+  --evuproxy-scrim: hsl(220 10% 4% / 0.55);
+  --evuproxy-scrim-hover: hsl(220 10% 4% / 0.62);
+}
+
+/*
+ * Status colours as *text*.
+ *
+ * The theme's --success / --warning / --destructive / --secondary are fill
+ * colours: each is paired with a white-ish *-foreground and is meant to sit
+ * behind text, not be it. The app also uses them as small text on light tints
+ * (status pills, inline code in hints), where they land between 2.7:1 and
+ * 4.1:1. These are the same hues pushed to the lightness that clears 4.5:1 on
+ * both the card and the tinted pill behind it; where the theme value already
+ * clears it, the token just repeats it so call sites stay uniform.
+ */
+:root {
+  --evuproxy-success-text: hsl(152 55% 30%);
+  --evuproxy-warning-text: hsl(38 92% 31%);
+  --evuproxy-danger-text: var(--evu-destructive);
+  --evuproxy-secondary-text: hsl(217 72% 43%);
+}
+
+.dark {
+  --evuproxy-shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.45);
+  --evuproxy-shadow-panel: 0 8px 24px hsl(0 0% 0% / 0.5);
+  --evuproxy-shadow-overlay: 0 24px 64px hsl(0 0% 0% / 0.6);
+
+  /* Dark tints are dark, so the theme fills already read as text — except
+     destructive, which needed a nudge lighter to clear 4.5:1 on the card. */
+  --evuproxy-success-text: var(--evu-success);
+  --evuproxy-warning-text: var(--evu-warning);
+  --evuproxy-danger-text: hsl(0 72% 60%);
+  --evuproxy-secondary-text: var(--evu-secondary);
+}

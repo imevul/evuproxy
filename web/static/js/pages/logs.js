@@ -1,12 +1,19 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
+import { openConfirmModal } from "../core/modal.js";
+import { refreshPendingBadge } from "./pending.js";
 
 /* ——— Logs ——— */
 const LOG_PREFIX_GEO = "evuproxy-geo-block";
 const LOG_PREFIX_RATELIMIT = "evuproxy-ratelimit";
 const LOG_PREFIX_FWD = "evuproxy-forward-drop";
 const LOG_PREFIX_CROWDSEC = "evuproxy-crowdsec";
+
+/** Shield+ icon for "add this source to break-glass". */
+const LOGS_BREAKGLASS_ICON =
+  '<svg class="logs-breakglass-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 9v6M9 12h6"/></svg>';
 
 /** journalctl: "TIME HOST kernel: …"; dmesg / fallback: prefix may appear without the " kernel: " marker. */
 function parseFirewallLogLine(raw) {
@@ -162,18 +169,42 @@ function countryCodeToFlagEmoji(cc) {
   return String.fromCodePoint(base + (c1 - 65), base + (c2 - 65));
 }
 
-function logsIpCell(ip, cc) {
-  const ipPart = ip === "" ? "—" : escapeHtml(ip);
+function breakGlassCIDRsFromConfig() {
+  const g = (state.lastConfig && state.lastConfig.geo) || {};
+  return Array.isArray(g.break_glass_cidrs) ? g.break_glass_cidrs : [];
+}
+
+/**
+ * SRC cell for a geoblock drop: offer break-glass when this IPv4 is not already
+ * covered by geo.break_glass_cidrs (exact /32 or containing range).
+ */
+function logsIpCell(ip, cc, opts) {
+  const raw = String(ip || "").trim();
+  const ipPart = raw === "" ? "—" : escapeHtml(raw);
   const code = cc && String(cc).trim();
-  if (!code) {
-    return '<td class="mono">' + ipPart + "</td>";
-  }
-  const flag = countryCodeToFlagEmoji(code);
-  const title = escapeHtml(code.toUpperCase());
+  const flag = code ? countryCodeToFlagEmoji(code) : "";
+  const title = code ? escapeHtml(code.toUpperCase()) : "";
   const flagPart = flag
-    ? '<span class="logs-ip-flag" title="' + title + '">' + flag + "</span> "
+    ? '<span class="logs-ip-flag" aria-hidden="true" title="' + title + '">' + flag + "</span> "
     : "";
-  return '<td class="mono logs-col-ip">' + flagPart + ipPart + "</td>";
+  let action = "";
+  if (opts && opts.offerBreakGlass && raw && ipv4ToInt(raw) !== null) {
+    if (!ipv4CoveredByCIDRList(raw, breakGlassCIDRsFromConfig())) {
+      const label = "Add " + raw + " to break-glass list";
+      action =
+        ' <button type="button" class="evu-btn evu-btn--ghost evu-btn--icon evu-btn--sm logs-breakglass-btn" data-logs-breakglass="' +
+        escapeHtml(raw) +
+        '" aria-label="' +
+        escapeHtml(label) +
+        '" title="' +
+        escapeHtml(label) +
+        '">' +
+        LOGS_BREAKGLASS_ICON +
+        "</button>";
+    }
+  }
+  const cls = code || action ? "mono logs-col-ip" : "mono";
+  return '<td class="' + cls + '">' + flagPart + ipPart + action + "</td>";
 }
 
 function setLogsViewMode(mode) {
@@ -203,6 +234,24 @@ function clearLogsFilters() {
   if (dateFrom) dateFrom.value = "";
   if (dateTo) dateTo.value = "";
   renderLogsView();
+}
+
+let logsCountAnnounceTimer = null;
+
+/**
+ * Mirrors the visible result count into a live region once filtering settles.
+ *
+ * The visible count follows every keystroke so sighted users get immediate
+ * feedback; announcing at that rate would talk over the person typing, so the
+ * spoken copy waits for a pause.
+ */
+function announceLogsCount(text) {
+  const status = $("logs-count-status");
+  if (!status) return;
+  clearTimeout(logsCountAnnounceTimer);
+  logsCountAnnounceTimer = setTimeout(() => {
+    if (status.textContent !== text) status.textContent = text;
+  }, 900);
 }
 
 function renderLogsView() {
@@ -236,6 +285,7 @@ function renderLogsView() {
         " entr" +
         (total === 1 ? "y" : "ies");
     }
+    announceLogsCount(countEl.textContent);
   }
   const rawMode = state.logsViewMode === "raw";
   if (wrap) wrap.hidden = rawMode;
@@ -252,11 +302,24 @@ function renderLogsView() {
   }
   if (!wrap) return;
   if (!total) {
-    wrap.innerHTML = "<p class=\"hint\">No log lines returned from the host.</p>";
+    wrap.innerHTML =
+      "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No log lines yet</p><p>Nothing has been dropped since the kernel log was last rotated, or the host has no journal to read.</p></div>";
     return;
   }
   if (!filtered.length) {
-    wrap.innerHTML = "<p class=\"hint\">No lines match the current filters.</p>";
+    wrap.innerHTML =
+      "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No lines match the current filters</p><p>Widen the time range or clear the filters to see more.</p><button type=\"button\" class=\"evu-btn evu-btn--outline\" id=\"logs-empty-clear\">Clear filters</button></div>";
+    const clearBtn = wrap.querySelector("#logs-empty-clear");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        const toolbarClear = $("logs-filter-clear");
+        if (!toolbarClear) return;
+        toolbarClear.click();
+        // Clearing re-renders this table, destroying the button that was just
+        // activated; without this, focus falls back to <body>.
+        toolbarClear.focus();
+      });
+    }
     return;
   }
   const rows = filtered
@@ -275,7 +338,7 @@ function renderLogsView() {
         '<td class="logs-col-type">' +
         escapeHtml(tlabel) +
         "</td>" +
-        logsIpCell(e.src, e.srcCC) +
+        logsIpCell(e.src, e.srcCC, { offerBreakGlass: e.kind === "geo" }) +
         logsIpCell(e.dst, e.dstCC) +
         "<td>" +
         cell(e.proto) +
@@ -306,7 +369,7 @@ function renderLogsView() {
     .join("");
   wrap.innerHTML =
     '<table class="data logs-data" aria-describedby="logs-count"><thead><tr>' +
-    "<th>Time</th><th>Type</th><th>SRC</th><th>DST</th><th>Proto</th><th>SPT</th><th>DPT</th><th>IN</th><th>OUT</th><th>LEN</th><th>Flags</th>" +
+    "<th scope=\"col\">Time</th><th scope=\"col\">Type</th><th scope=\"col\">SRC</th><th scope=\"col\">DST</th><th scope=\"col\">Proto</th><th scope=\"col\">SPT</th><th scope=\"col\">DPT</th><th scope=\"col\">IN</th><th scope=\"col\">OUT</th><th scope=\"col\">LEN</th><th scope=\"col\">Flags</th>" +
     "</tr></thead><tbody>" +
     rows +
     "</tbody></table>";
@@ -332,8 +395,10 @@ export async function refreshLogsPage() {
   if (src) src.textContent = "";
   state.lastFirewallLogEntries = [];
   try {
-    const j = await api("/v1/logs?limit=1000");
+    // Config is needed so break-glass affordances know which SRC IPs are already covered.
+    const [j, cfg] = await Promise.all([api("/v1/logs?limit=1000"), api("/v1/config")]);
     if (seq !== state.logsRefreshSeq) return;
+    state.lastConfig = cfg;
     setApiStatus(true);
     if (src) {
       src.textContent = j.source ? "Source: " + j.source : "";
@@ -373,9 +438,66 @@ export async function refreshLogsPage() {
   }
 }
 
+/** One break-glass write at a time so overlapping GET→PUT cannot drop a sibling /32. */
+let logsBreakGlassBusy = false;
+
+function confirmAddBreakGlass(ip) {
+  if (logsBreakGlassBusy) return;
+  const cidr = ip + "/32";
+  openConfirmModal({
+    title: "Add to break-glass?",
+    message:
+      "Add " +
+      cidr +
+      " to the geoblocking break-glass list? That address will bypass country rules after you Apply from Pending changes.",
+    confirmLabel: "Add to break-glass",
+    onConfirm: async () => {
+      if (logsBreakGlassBusy) return;
+      logsBreakGlassBusy = true;
+      // Drop any in-flight Logs refresh so its older config cannot overwrite this write.
+      state.logsRefreshSeq++;
+      setLogsMsg("…");
+      try {
+        const cfg = await api("/v1/config");
+        if (!cfg.geo) cfg.geo = {};
+        const list = Array.isArray(cfg.geo.break_glass_cidrs) ? cfg.geo.break_glass_cidrs.slice() : [];
+        if (ipv4CoveredByCIDRList(ip, list)) {
+          state.logsRefreshSeq++;
+          state.lastConfig = cfg;
+          setLogsMsg(ip + " is already covered by the break-glass list.");
+          renderLogsView();
+          return;
+        }
+        list.push(cidr);
+        cfg.geo.break_glass_cidrs = list;
+        await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
+        state.logsRefreshSeq++;
+        state.lastConfig = cfg;
+        setLogsMsg("Added " + cidr + " to break-glass. Review Pending changes, then Apply.");
+        setApiStatus(true);
+        await refreshPendingBadge();
+        renderLogsView();
+      } catch (e) {
+        setLogsMsg(String(e.message || e), true);
+      } finally {
+        logsBreakGlassBusy = false;
+      }
+    },
+  });
+}
+
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initLogsPage() {
   $("logs-refresh").addEventListener("click", refreshLogsPage);
+  const tableWrap = $("logs-table-wrap");
+  if (tableWrap) {
+    tableWrap.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-logs-breakglass]");
+      if (!btn || !tableWrap.contains(btn)) return;
+      const ip = btn.getAttribute("data-logs-breakglass");
+      if (ip) confirmAddBreakGlass(ip);
+    });
+  }
   const logsFilterType = $("logs-filter-type");
   if (logsFilterType) logsFilterType.addEventListener("change", () => renderLogsView());
   const logsDateFrom = $("logs-date-from");

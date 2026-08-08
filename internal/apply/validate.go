@@ -69,8 +69,20 @@ func ValidateConfigWithWarnings(c *config.Config, clientIP ClientIPInfo, geoRead
 	res.IPDetectionSource = clientIP.Source
 	res.IPDetectionNote = clientIP.Note
 	res.ValidatedFromDraft = fromDraft
-	if clientIP.IP != "" {
-		res.Warnings = LockoutWarnings(c, clientIP.IP, geoReader)
+	// Unconditional: the maintenance-mode risk does not depend on the client
+	// address, and skipping the whole evaluation when the address is unknown hid
+	// it. LockoutWarnings itself skips the address-specific checks on an empty IP.
+	res.Warnings = LockoutWarnings(c, clientIP.IP, geoReader)
+	if clientIP.IP == "" {
+		// Reported as a lockout risk so the caller treats "we could not check" as
+		// needing the same acknowledgement as a risk we did find — a clean result
+		// here would otherwise read as "safe to apply". Reached for every IPv6
+		// client, since detection and CIDR matching are both IPv4-only.
+		res.Warnings = append(res.Warnings, LockoutWarning{
+			Code: "lockout_risk_check_unavailable",
+			Message: "Could not determine your IPv4 address, so the address-specific lockout checks " +
+				"(forward denylists, allowlists and geoblocking) did not run.",
+		})
 	}
 	return res
 }

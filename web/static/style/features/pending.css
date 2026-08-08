@@ -1,0 +1,280 @@
+/**
+ * EvuProxy — Pending changes — banner, diff views, apply gate.
+ */
+
+.pending-toolbar {
+  margin-top: 0.75rem;
+}
+
+.pending-validate-panel {
+  margin: 0 0 1rem;
+}
+
+/* .evu-alert is a flex row (icon + body); the body is the only child here. */
+.pending-validate-body,
+.pending-status-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-client-ip {
+  margin: 0;
+}
+
+.pending-validate-warnings {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  color: var(--evuproxy-warning-text);
+}
+
+/* Errors are failures to fix, not risks to accept — colour them accordingly. */
+.evu-alert--danger .pending-validate-warnings {
+  color: var(--evuproxy-danger-text);
+}
+
+/* Machine code trails the message it belongs to; useful for docs, not the fix. */
+.pending-validate-code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.pending-lockout-ack-wrap {
+  border-top: 1px solid var(--evu-border);
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+}
+
+.pending-lockout-ack {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin-top: 0;
+  font-size: 0.9rem;
+  color: var(--evu-foreground);
+}
+
+.pending-status-alert {
+  margin-bottom: 0;
+}
+
+.pending-banner {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.pending-nft-pre {
+  max-height: min(55vh, 28rem);
+  margin-top: 0.5rem;
+}
+
+.pending-diff-root {
+  margin-top: 0.5rem;
+}
+
+.pending-diff-toolbar {
+  margin-bottom: 0.5rem;
+}
+
+.pending-diff-panel {
+  border: 1px solid var(--evu-border);
+  border-radius: 6px;
+  background: var(--evu-background);
+  overflow: auto;
+  min-width: 0;
+}
+
+.pending-diff-scroll {
+  max-height: min(55vh, 28rem);
+  overflow: auto;
+  margin: 0;
+}
+
+.pending-diff-same {
+  margin: 0.75rem 1rem;
+}
+
+.pending-diff-raw-h {
+  margin: 0.75rem 1rem 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--evu-foreground);
+}
+
+.pending-diff-unified {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.pending-diff-unified td {
+  vertical-align: top;
+  padding: 0 0.35rem;
+  white-space: pre;
+  word-break: normal;
+}
+
+.pending-diff-unified .diff-ln {
+  width: 3.25rem;
+  text-align: right;
+  color: var(--evu-muted-foreground);
+  user-select: none;
+  background: var(--evu-card);
+  border-right: 1px solid var(--evu-border);
+}
+
+.pending-diff-unified .diff-sign {
+  width: 1.25rem;
+  text-align: center;
+  color: var(--evu-muted-foreground);
+  user-select: none;
+  background: var(--evu-card);
+  border-right: 1px solid var(--evu-border);
+}
+
+.pending-diff-unified .diff-code {
+  padding-left: 0.5rem;
+  color: var(--evu-foreground);
+}
+
+.pending-diff-unified .diff-row-diff-del .diff-code,
+.pending-diff-unified .diff-row-diff-del .diff-sign,
+.pending-diff-unified .diff-row-diff-del .diff-ln {
+  background: hsl(var(--destructive) / 0.12);
+}
+
+.pending-diff-unified .diff-row-diff-ins .diff-code,
+.pending-diff-unified .diff-row-diff-ins .diff-sign,
+.pending-diff-unified .diff-row-diff-ins .diff-ln {
+  background: hsl(var(--success) / 0.12);
+}
+
+.pending-diff-unified .diff-row-ctx .diff-ln,
+.pending-diff-unified .diff-row-ctx .diff-sign {
+  background: var(--evu-card);
+}
+
+.pending-diff-unified .diff-ch-strong.diff-ch-del {
+  background: hsl(var(--destructive) / 0.45);
+  border-radius: 2px;
+}
+
+.pending-diff-unified .diff-ch-strong.diff-ch-ins {
+  background: hsl(var(--success) / 0.45);
+  border-radius: 2px;
+}
+
+/* Split = two panes: each has its own horizontal (and vertical) scrollbars; JS syncs scrollTop. */
+.pending-diff-split-view {
+  display: flex;
+  max-height: min(55vh, 28rem);
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.pending-diff-split-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+
+.pending-diff-split-pane:first-child {
+  border-right: 1px solid var(--evu-border);
+}
+
+.pending-diff-split-side {
+  border-collapse: collapse;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+}
+
+.pending-diff-split-side td {
+  vertical-align: top;
+  padding: 0 0.35rem;
+  white-space: pre;
+  word-break: normal;
+}
+
+.pending-diff-split-side .diff-split-ln {
+  width: 1%;
+  min-width: 2.75rem;
+  text-align: right;
+  color: var(--evu-muted-foreground);
+  user-select: none;
+  background: var(--evu-card);
+  border-right: 1px solid var(--evu-border);
+  white-space: nowrap;
+}
+
+.pending-diff-split-side .diff-split-code {
+  color: var(--evu-foreground);
+}
+
+.pending-diff-split-side .diff-split-row-ctx .diff-split-ln,
+.pending-diff-split-side .diff-split-row-ctx .diff-split-code {
+  background: transparent;
+}
+
+.pending-diff-split-side .diff-split-row-ctx .diff-split-ln {
+  background: var(--evu-card);
+}
+
+.pending-diff-split-side .diff-split-row-del .diff-split-ln,
+.pending-diff-split-side .diff-split-row-del .diff-split-code {
+  background: hsl(var(--destructive) / 0.12);
+}
+
+.pending-diff-split-side .diff-split-row-ins .diff-split-ln,
+.pending-diff-split-side .diff-split-row-ins .diff-split-code {
+  background: hsl(var(--success) / 0.12);
+}
+
+.pending-diff-split-side .diff-split-row-both-l .diff-split-ln,
+.pending-diff-split-side .diff-split-row-both-l .diff-split-code {
+  background: hsl(var(--destructive) / 0.12);
+}
+
+.pending-diff-split-side .diff-split-row-both-r .diff-split-ln,
+.pending-diff-split-side .diff-split-row-both-r .diff-split-code {
+  background: hsl(var(--success) / 0.12);
+}
+
+.pending-diff-split-side .diff-split-row-gap .diff-split-ln,
+.pending-diff-split-side .diff-split-row-gap .diff-split-code {
+  background: hsl(var(--muted-foreground) / 0.08);
+}
+
+.pending-diff-split-side .diff-ch-strong.diff-ch-del {
+  background: hsl(var(--destructive) / 0.45);
+  border-radius: 2px;
+}
+
+.pending-diff-split-side .diff-ch-strong.diff-ch-ins {
+  background: hsl(var(--success) / 0.45);
+  border-radius: 2px;
+}
+
+.pending-raw-diff-pre {
+  margin: 0;
+  white-space: pre;
+  word-break: normal;
+}
+
+.config-upload-diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .config-upload-diff-grid {
+    grid-template-columns: 1fr;
+  }
+}

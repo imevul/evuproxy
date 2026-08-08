@@ -17,9 +17,21 @@
   <link rel="stylesheet" href="/static/evu/base.css" />
   <link rel="stylesheet" href="/static/evu/components.css" />
   <link rel="stylesheet" href="/static/evu/layouts.css" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <!-- App layer, loaded after the theme. Order matters: tokens → shell → forms → components → features. -->
+  <link rel="stylesheet" href="/static/style/tokens.css" />
+  <link rel="stylesheet" href="/static/style/shell.css" />
+  <link rel="stylesheet" href="/static/style/forms.css" />
+  <link rel="stylesheet" href="/static/style/components.css" />
+  <link rel="stylesheet" href="/static/style/features/overview.css" />
+  <link rel="stylesheet" href="/static/style/features/topology.css" />
+  <link rel="stylesheet" href="/static/style/features/geo.css" />
+  <link rel="stylesheet" href="/static/style/features/pending.css" />
+  <link rel="stylesheet" href="/static/style/features/logs.css" />
+  <link rel="stylesheet" href="/static/style/features/peers.css" />
+  <link rel="stylesheet" href="/static/style/features/routes.css" />
 </head>
 <body class="app evu-shell evu-shell--sidebar">
+  <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="evu-backdrop" id="sidebar-backdrop" hidden></div>
   <header class="evu-app-header">
     <div class="evu-brand">
@@ -37,7 +49,7 @@
       </div>
     </div>
     <div class="evu-app-header__meta">
-      <label class="visually-hidden" for="global-table-search">Filter peers and routes tables</label>
+      <label class="evu-sr-only" for="global-table-search">Filter peers and routes tables</label>
       <input
         type="search"
         id="global-table-search"
@@ -46,7 +58,7 @@
         autocomplete="off"
         spellcheck="false"
       />
-      <span id="api-status" class="pill pill-muted" aria-live="polite">API</span>
+      <span id="api-status" class="evu-pill" aria-live="polite">API</span>
     </div>
   </header>
 
@@ -61,7 +73,7 @@
         <a href="#/topology" class="nav-link evu-nav-link" data-route="topology">Topology</a>
         <a href="#/inbound" class="nav-link evu-nav-link" data-route="inbound">Inbound access</a>
         <a href="#/geoblocking" class="nav-link evu-nav-link" data-route="geoblocking">Geoblock &amp; limits</a>
-        <a href="#/pending" class="nav-link evu-nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span></a>
+        <a href="#/pending" class="nav-link evu-nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span><span class="evu-sr-only" id="nav-pending-sr"></span></a>
         <a href="#/stats" class="nav-link evu-nav-link" data-route="stats">Stats</a>
         <a href="#/logs" class="nav-link evu-nav-link" data-route="logs">Logs</a>
       </nav>
@@ -115,89 +127,120 @@
         <button type="button" class="evu-shell__menu-btn" id="shell-menu-toggle" aria-label="Open navigation" aria-expanded="false">☰</button>
         <span class="evu-brand__name">EvuProxy</span>
       </div>
-      <main class="evu-main__inner content">
+      <main class="evu-main__inner content" id="main-content" tabindex="-1">
       <section id="page-overview" class="page" hidden>
-        <h2 class="page-title">Overview</h2>
-        <div id="overview-cards" class="card-grid overview-cards-compact"></div>
-        <div id="overview-actions-card" class="card actions-card">
-          <h3>Apply</h3>
-          <div class="field overview-maintenance-field">
-            <div class="toggle-switch-row">
-              <span class="toggle-switch-text" id="overview-maintenance-desc">Maintenance mode</span>
-              <label class="evu-switch toggle-switch">
-                <input type="checkbox" id="overview-maintenance-toggle" class="evu-switch__input toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" />
-                <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
-              </label>
-            </div>
-            <p class="meta">When on, public forwards are omitted until you turn this off and reload.</p>
-          </div>
-          <div class="btn-row">
-            <button type="button" class="btn-primary" id="btn-reload">Reload config</button>
-            <button type="button" class="btn-primary" id="btn-geo">Update geo lists</button>
-          </div>
-          <p id="overview-action-msg" class="msg" aria-live="polite"></p>
+        <div class="page-title-row">
+          <h1 class="page-title">Overview</h1>
+          <button type="button" class="btn-help-trigger" aria-label="More about Overview (dialog)" data-help-title="Overview" data-help-template="help-overview-intro">?</button>
         </div>
-        <div id="overview-events-card" class="card overview-events-card">
-          <div class="toolbar overview-events-toolbar">
-            <h3>Recent activity</h3>
-            <button type="button" class="btn-quiet" id="overview-events-export-csv">Export CSV</button>
+        <p class="hint">Host, tunnel and geo state at a glance, plus the two host actions that do not need a config change.</p>
+        <div id="overview-cards" class="card-grid overview-cards-compact"></div>
+        <div class="overview-bottom-grid">
+          <div id="overview-actions-card" class="evu-card card actions-card">
+            <h3>Apply</h3>
+            <div class="field overview-maintenance-field">
+              <div class="toggle-switch-row">
+                <span class="toggle-switch-text" id="overview-maintenance-desc">Maintenance mode</span>
+                <label class="evu-switch toggle-switch">
+                  <input type="checkbox" id="overview-maintenance-toggle" class="evu-switch__input toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" />
+                  <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+              <p class="meta">When on, public forwards are omitted until you turn this off and reload.</p>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="evu-btn evu-btn--primary" id="btn-reload">Reload config</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="btn-geo">Update geo lists</button>
+            </div>
+            <p id="overview-action-msg" class="msg" aria-live="polite"></p>
           </div>
-          <p class="hint meta">From the host <code class="inline">state/events.jsonl</code> (append-only, size-capped). Polls while you stay on Overview.</p>
-          <ul id="overview-events-list" class="overview-events-list"></ul>
-          <p id="overview-events-empty" class="hint meta is-hidden">No events recorded yet.</p>
+          <div id="overview-events-card" class="evu-card card">
+            <div class="toolbar overview-events-toolbar">
+              <h3>Recent activity</h3>
+              <button type="button" class="evu-btn evu-btn--outline" id="overview-events-export-csv">Export CSV</button>
+            </div>
+            <p class="hint meta">From the host <code class="inline">state/events.jsonl</code> (append-only, size-capped). Polls while you stay on Overview.</p>
+            <ul id="overview-events-list" class="overview-events-list"></ul>
+            <p id="overview-events-empty" class="hint meta is-hidden">No events recorded yet.</p>
+          </div>
         </div>
       </section>
 
       <section id="page-settings" class="page" hidden>
-        <h2 class="page-title">Settings</h2>
-        <p class="hint">
-          Preferences below are stored on the EvuProxy host as <code class="inline">ui-preferences.json</code> next to the main config (not in WireGuard YAML). The API token is on the sidebar page “API token” and stays in the browser only.
-        </p>
-        <div class="geo-segmented settings-page-tabs" role="tablist" aria-label="Settings sections">
-          <button type="button" class="geo-seg-btn is-active" id="settings-tab-prefs-btn" role="tab" aria-selected="true" aria-controls="settings-tab-prefs-panel">
+        <div class="page-title-row">
+          <h1 class="page-title">Settings</h1>
+          <button type="button" class="btn-help-trigger" aria-label="More about Settings (dialog)" data-help-title="Settings" data-help-template="help-settings-intro">?</button>
+        </div>
+        <p class="hint">Admin UI preferences, operator notes and backups. Stored on the host, not in WireGuard YAML.</p>
+        <div class="evu-tabs section-tabs settings-page-tabs" role="tablist" aria-label="Settings sections">
+          <button type="button" class="evu-tabs__tab is-active" id="settings-tab-prefs-btn" role="tab" aria-selected="true" aria-controls="settings-tab-prefs-panel">
             Preferences
           </button>
-          <button type="button" class="geo-seg-btn" id="settings-tab-maint-btn" role="tab" aria-selected="false" aria-controls="settings-tab-maint-panel">
+          <button type="button" class="evu-tabs__tab" id="settings-tab-maint-btn" role="tab" aria-selected="false" aria-controls="settings-tab-maint-panel">
             Notes &amp; backups
           </button>
-          <button type="button" class="geo-seg-btn" id="settings-tab-adv-btn" role="tab" aria-selected="false" aria-controls="settings-tab-adv-panel">
+          <button type="button" class="evu-tabs__tab" id="settings-tab-adv-btn" role="tab" aria-selected="false" aria-controls="settings-tab-adv-panel">
             Advanced
           </button>
         </div>
         <div id="settings-tab-prefs-panel" role="tabpanel" aria-labelledby="settings-tab-prefs-btn">
-          <div class="card">
-            <h3 id="peer-subnet-cidr-heading">Peer tunnel subnet</h3>
-            <p class="hint">
-              IPv4 CIDR used to pick the next free tunnel IP when you add a peer. Should match the WireGuard tunnel network. Server default is <code>10.100.0.0/24</code> when unset.
-            </p>
-            <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" aria-labelledby="peer-subnet-cidr-heading" />
-            <h3 class="settings-block-gap" id="settings-wg-endpoint-heading">WireGuard server endpoint</h3>
-            <p class="hint">
-              Public address peers use to reach this VPN (<code>host:port</code> or <code>hostname:port</code>). Pre-filled in the peer form; port can be omitted if it matches the server listen port after you refresh server details.
-            </p>
-            <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" aria-labelledby="settings-wg-endpoint-heading" />
-            <h3 class="settings-block-gap">
-              Public interface
-              <button
-                type="button"
-                class="btn-help-trigger btn-help-trigger--compact"
-                aria-label="Details: public interface"
-                title="Explain public interface"
-                data-help-title="Public interface"
-                data-help-template="help-public-interface"
-              >
-                ?
-              </button>
-            </h3>
-            <p class="hint">
-              Linux NIC that faces the Internet (e.g. <code>eth0</code>, <code>ens18</code>). Written to <code>config.yaml</code> for nftables and NAT — reload firewall rules after changing.
-            </p>
-            <input type="text" id="settings-public-interface" placeholder="eth0" spellcheck="false" autocomplete="off" aria-label="Public interface" />
-            <div class="field settings-block-gap">
+          <div class="evu-card card">
+            <div class="settings-field-grid">
+              <div class="field">
+                <label for="peer-subnet-cidr">Peer tunnel subnet</label>
+                <p class="hint meta hint--tight">IPv4 CIDR used to pick the next free tunnel IP for a new peer. Defaults to <code class="inline">10.100.0.0/24</code>.</p>
+                <input type="text" id="peer-subnet-cidr" placeholder="10.100.0.0/24" autocomplete="off" />
+              </div>
+              <div class="field">
+                <div class="field-label-row">
+                  <label for="settings-wg-endpoint">WireGuard server endpoint</label>
+                  <button
+                    type="button"
+                    class="btn-help-trigger btn-help-trigger--compact"
+                    aria-label="Details: WireGuard server endpoint"
+                    title="Explain the server endpoint"
+                    data-help-title="WireGuard server endpoint"
+                    data-help-template="help-wg-endpoint"
+                  >
+                    ?
+                  </button>
+                </div>
+                <p class="hint meta hint--tight">Public <code class="inline">host:port</code> peers dial to reach this VPN. Pre-filled in the peer form.</p>
+                <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+              </div>
+              <div class="field">
+                <div class="field-label-row">
+                  <label for="settings-public-interface">Public interface</label>
+                  <button
+                    type="button"
+                    class="btn-help-trigger btn-help-trigger--compact"
+                    aria-label="Details: public interface"
+                    title="Explain public interface"
+                    data-help-title="Public interface"
+                    data-help-template="help-public-interface"
+                  >
+                    ?
+                  </button>
+                </div>
+                <p class="hint meta hint--tight">Linux NIC facing the Internet, e.g. <code class="inline">eth0</code>. Reload firewall rules after changing.</p>
+                <input type="text" id="settings-public-interface" placeholder="eth0" spellcheck="false" autocomplete="off" />
+              </div>
+            </div>
+            <div class="field settings-prefs-switch">
               <div class="toggle-switch-row">
-                <span class="toggle-switch-text" id="settings-metrics-collection-desc"
-                  >Collect peer ICMP metrics on the host (<code class="inline">evuproxy metrics</code> systemd service). Enables the Ping column on Peers; overview latency cards always load from stored metrics. Requires <code class="inline">ping</code> on the server.</span
-                >
+                <span class="toggle-switch-label-group">
+                  <span class="toggle-switch-text" id="settings-metrics-collection-desc">Collect peer ICMP metrics</span>
+                  <button
+                    type="button"
+                    class="btn-help-trigger btn-help-trigger--compact"
+                    aria-label="Details: peer ICMP metrics"
+                    title="Explain peer ICMP metrics"
+                    data-help-title="Peer ICMP metrics"
+                    data-help-template="help-metrics-collection"
+                  >
+                    ?
+                  </button>
+                </span>
                 <label class="evu-switch toggle-switch">
                   <input
                     type="checkbox"
@@ -209,16 +252,17 @@
                   <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                 </label>
               </div>
+              <p class="hint meta hint--tight">Runs the <code class="inline">evuproxy metrics</code> service on the host and enables the Ping column on Peers.</p>
             </div>
-            <div class="btn-row settings-block-gap">
-              <button type="button" class="btn-primary" id="settings-save-prefs">Save preferences</button>
-              <button type="button" class="btn-quiet" id="settings-download-yaml">Download config.yaml</button>
+            <div class="btn-row stack-gap">
+              <button type="button" class="evu-btn evu-btn--primary" id="settings-save-prefs">Save preferences</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="settings-download-yaml">Download config.yaml</button>
             </div>
             <p id="settings-prefs-msg" class="msg" aria-live="polite"></p>
           </div>
         </div>
         <div id="settings-tab-maint-panel" role="tabpanel" aria-labelledby="settings-tab-maint-btn" hidden>
-          <div class="card">
+          <div class="evu-card card">
             <h3>Operator notes</h3>
             <p class="hint meta">Plain text on the host as <code class="inline">config-notes.txt</code> next to <code class="inline">config.yaml</code>. Not part of WireGuard YAML.</p>
             <div class="field">
@@ -226,11 +270,11 @@
               <textarea id="config-notes-body" rows="6" spellcheck="false" autocomplete="off" placeholder="Why this host is configured this way…"></textarea>
             </div>
             <div class="btn-row">
-              <button type="button" class="btn-primary" id="config-notes-save">Save notes</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="config-notes-save">Save notes</button>
             </div>
             <p id="config-notes-msg" class="msg" aria-live="polite"></p>
           </div>
-          <div class="card">
+          <div class="evu-card card">
             <h3>Backup &amp; restore</h3>
             <p class="hint meta">
               Archives live under the backup allow directory (default <code class="inline">/var/backups</code>); paths are validated by the API (
@@ -241,29 +285,29 @@
               <input type="text" id="backup-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
             </div>
             <div class="btn-row">
-              <button type="button" class="btn-primary" id="btn-backup-run">Create backup</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="btn-backup-run">Create backup</button>
             </div>
-            <div class="field settings-block-gap">
+            <div class="field stack-gap">
               <label for="restore-path-input">Restore from archive</label>
               <input type="text" id="restore-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
             </div>
             <div class="btn-row">
-              <button type="button" class="btn-primary" id="btn-restore-run">Restore</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="btn-restore-run">Restore</button>
             </div>
             <p id="backup-restore-msg" class="msg" aria-live="polite"></p>
           </div>
         </div>
         <div id="settings-tab-adv-panel" role="tabpanel" aria-labelledby="settings-tab-adv-btn" hidden>
-          <div class="card">
+          <div class="evu-card card">
             <h3>Replace config (upload)</h3>
             <p class="hint meta">Preview JSON before saving to the server. The saved config replaces what is on disk; YAML comments from the uploaded file are not preserved.</p>
             <div class="btn-row">
-              <button type="button" class="btn-primary" id="config-upload-open">Upload JSON…</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="config-upload-open">Upload JSON…</button>
               <input type="file" id="config-upload-file" accept="application/json,.json" class="is-hidden" />
             </div>
             <p id="config-upload-msg" class="msg" aria-live="polite"></p>
           </div>
-          <div class="card">
+          <div class="evu-card card">
             <h3>Advanced settings</h3>
             <p class="hint">
               Shows the <strong>Advanced</strong> tab on <strong>Routes</strong> and <strong>Geoblocking</strong> (rate limits, port maps, break-glass, etc.). When off, that tab is visible but disabled with a link here. Stored only in this browser (<code class="inline">localStorage</code>).
@@ -281,9 +325,9 @@
                 <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
               </label>
             </div>
-            <div class="field settings-content-width-field">
+            <div class="field stack-gap">
               <label for="settings-content-width">Main content width</label>
-              <p class="hint meta settings-content-width-hint">
+              <p class="hint meta hint--tight">
                 Max width of the main panel. Stored only in this browser (<code class="inline">localStorage</code>).
               </p>
               <select id="settings-content-width" autocomplete="off">
@@ -294,11 +338,11 @@
               </select>
             </div>
           </div>
-          <div class="card">
+          <div class="evu-card card">
             <h3>Diagnostics</h3>
             <p class="hint">Raw status from the host (WireGuard + nftables table).</p>
             <div class="btn-row">
-              <button type="button" class="btn-quiet" id="btn-status">Fetch status</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="btn-status">Fetch status</button>
             </div>
             <pre id="settings-status-out" class="code-block is-collapsed"></pre>
           </div>
@@ -306,22 +350,26 @@
       </section>
 
       <section id="page-token" class="page" hidden>
-        <h2 class="page-title">API token</h2>
-        <div class="card">
-          <p class="hint">Matches <code>/etc/evuproxy/api.token</code> on the host (mock dev: <code>dev</code>). Stored only in this browser.</p>
+        <div class="page-title-row">
+          <h1 class="page-title">API token</h1>
+          <button type="button" class="btn-help-trigger" aria-label="More about the API token (dialog)" data-help-title="API token" data-help-template="help-token-intro">?</button>
+        </div>
+        <p class="hint">Credentials this browser uses to talk to the EvuProxy API. Never sent anywhere else.</p>
+        <div class="evu-card card">
           <div class="field">
             <label for="token">API token</label>
+            <p class="hint meta hint--tight">Matches <code class="inline">/etc/evuproxy/api.token</code> on the host (mock dev: <code class="inline">dev</code>).</p>
             <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
           </div>
-          <div class="field settings-block-gap">
+          <div class="field stack-gap">
             <label for="api-base">API base URL <span class="meta">(optional)</span></label>
-            <p class="hint meta hint-tight-under-label">
+            <p class="hint meta hint--tight">
               Defaults to this host’s <code class="inline">/api</code> (same origin). Set a full URL only if the UI is served from a different host than the EvuProxy API (no trailing slash).
             </p>
             <input type="text" id="api-base" placeholder="/api" autocomplete="off" spellcheck="false" />
           </div>
-          <div class="btn-row settings-block-gap">
-            <button type="button" id="save-token" class="btn-primary">Save in browser</button>
+          <div class="btn-row stack-gap">
+            <button type="button" id="save-token" class="evu-btn evu-btn--primary">Save in browser</button>
           </div>
           <p id="auth-msg" class="msg" aria-live="polite"></p>
         </div>
@@ -329,7 +377,7 @@
 
       <section id="page-peers" class="page" hidden>
         <div class="page-title-row">
-          <h2 class="page-title">Peers</h2>
+          <h1 class="page-title">Peers</h1>
           <button
             type="button"
             class="btn-help-trigger"
@@ -343,10 +391,10 @@
         <p class="hint">
           Tunnel endpoints and WireGuard keys for each client. Saves write server YAML; use <strong>Pending changes</strong> to reload the tunnel and firewall rules.
         </p>
-        <div class="card">
+        <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="btn-primary" id="peers-refresh">Refresh</button>
-            <button type="button" class="btn-quiet" id="peers-add-start">Add peer</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="peers-refresh">Refresh</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="peers-add-start">Add peer</button>
           </div>
           <div id="peers-table-wrap" class="table-wrap"></div>
           <p id="peers-msg" class="msg" aria-live="polite"></p>
@@ -364,11 +412,11 @@
             <div id="peer-editor" class="peer-editor">
               <h3 id="peer-editor-title">Edit peer</h3>
               <input type="hidden" id="peer-edit-index" value="" />
-              <div class="geo-segmented peer-editor-tabs" role="tablist" aria-label="Peer editor sections">
-                <button type="button" class="geo-seg-btn is-active" id="peer-tab-fields-btn" role="tab" aria-selected="true" aria-controls="peer-tab-fields-panel">
+              <div class="evu-tabs section-tabs peer-editor-tabs" role="tablist" aria-label="Peer editor sections">
+                <button type="button" class="evu-tabs__tab is-active" id="peer-tab-fields-btn" role="tab" aria-selected="true" aria-controls="peer-tab-fields-panel">
                   Peer fields
                 </button>
-                <button type="button" class="geo-seg-btn" id="peer-tab-onboard-btn" role="tab" aria-selected="false" aria-controls="peer-tab-onboard-panel">
+                <button type="button" class="evu-tabs__tab" id="peer-tab-onboard-btn" role="tab" aria-selected="false" aria-controls="peer-tab-onboard-panel">
                   Setup &amp; onboarding
                 </button>
               </div>
@@ -413,8 +461,8 @@
                   </div>
                 </div>
                 <div class="btn-row">
-                  <button type="button" class="btn-primary" id="peer-save">Save</button>
-                  <button type="button" class="btn-quiet" id="peer-cancel">Cancel</button>
+                  <button type="button" class="evu-btn evu-btn--primary" id="peer-save">Save</button>
+                  <button type="button" class="evu-btn evu-btn--outline" id="peer-cancel">Cancel</button>
                 </div>
               </div>
 
@@ -429,7 +477,7 @@
                     <input type="text" id="onboard-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
                   </div>
                   <div class="onboard-toolbar">
-                    <button type="button" id="onboard-clear-keys" class="btn-quiet">Clear / regenerate keys</button>
+                    <button type="button" id="onboard-clear-keys" class="evu-btn evu-btn--outline">Clear / regenerate keys</button>
                   </div>
                   <p id="onboard-server-hint" class="hint onboard-hint is-hidden" aria-live="polite"></p>
                   <div class="field">
@@ -453,10 +501,10 @@
                       </button>
                     </div>
                   </div>
-                  <div class="geo-segmented onboard-method-tabs" role="tablist" aria-label="Peer install method">
+                  <div class="evu-tabs section-tabs onboard-method-tabs" role="tablist" aria-label="Peer install method">
                     <button
                       type="button"
-                      class="geo-seg-btn is-active"
+                      class="evu-tabs__tab is-active"
                       id="onboard-tab-linux-btn"
                       role="tab"
                       aria-selected="true"
@@ -466,7 +514,7 @@
                     </button>
                     <button
                       type="button"
-                      class="geo-seg-btn"
+                      class="evu-tabs__tab"
                       id="onboard-tab-other-btn"
                       role="tab"
                       aria-selected="false"
@@ -494,8 +542,8 @@
                   </div>
                   <div class="onboard-bundle-panel onboard-bundle-quick">
                     <div class="onboard-toolbar">
-                      <button type="button" class="btn-quiet" id="onboard-bundle-copy-snippet">Copy commands</button>
-                      <button type="button" class="btn-quiet" id="onboard-bundle-regenerate-unlock">Regenerate bundle</button>
+                      <button type="button" class="evu-btn evu-btn--outline" id="onboard-bundle-copy-snippet">Copy commands</button>
+                      <button type="button" class="evu-btn evu-btn--outline" id="onboard-bundle-regenerate-unlock">Regenerate bundle</button>
                     </div>
                     <pre id="onboard-bundle-snippet-cmd" class="code-block onboard-bundle-cmd" aria-live="polite"></pre>
                   </div>
@@ -513,10 +561,10 @@
                     </ol>
                   </div>
                   <div class="onboard-toolbar onboard-build-toolbar">
-                    <button type="button" id="onboard-build" class="btn-primary">Build YAML + WireGuard config</button>
-                    <button type="button" id="onboard-download-conf" class="btn-quiet">Download .conf</button>
-                    <button type="button" id="onboard-download-sh" class="btn-quiet">Download command snippet</button>
-                    <button type="button" id="onboard-show-qr" class="btn-quiet">Show QR code</button>
+                    <button type="button" id="onboard-build" class="evu-btn evu-btn--primary">Build YAML + WireGuard config</button>
+                    <button type="button" id="onboard-download-conf" class="evu-btn evu-btn--outline">Download .conf</button>
+                    <button type="button" id="onboard-download-sh" class="evu-btn evu-btn--outline">Download command snippet</button>
+                    <button type="button" id="onboard-show-qr" class="evu-btn evu-btn--outline">Show QR code</button>
                   </div>
                   <p id="onboard-msg" class="msg" aria-live="polite"></p>
                   <pre id="onboard-out" class="code-block is-collapsed"></pre>
@@ -534,7 +582,7 @@
             <div id="peer-qr-canvas-wrap" class="peer-qr-canvas-wrap"></div>
             <p id="peer-qr-msg" class="msg" aria-live="polite"></p>
             <div class="btn-row">
-              <button type="button" class="btn-quiet" id="peer-qr-close">Close</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="peer-qr-close">Close</button>
             </div>
           </div>
         </div>
@@ -542,7 +590,7 @@
 
       <section id="page-routes" class="page" hidden>
         <div class="page-title-row">
-          <h2 class="page-title">Routes</h2>
+          <h1 class="page-title">Routes</h1>
           <button
             type="button"
             class="btn-help-trigger"
@@ -556,10 +604,10 @@
         <p class="hint">
           WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily; edits apply after <strong>Pending changes</strong> → Apply/reload.
         </p>
-        <div class="card">
+        <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="btn-primary" id="routes-refresh">Refresh</button>
-            <button type="button" class="btn-quiet" id="routes-add">Add route</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="routes-refresh">Refresh</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="routes-add">Add route</button>
           </div>
           <div id="routes-table-wrap" class="table-wrap"></div>
           <p id="routes-msg" class="msg" aria-live="polite"></p>
@@ -604,10 +652,10 @@
                   </label>
                 </div>
               </div>
-              <div class="geo-segmented route-editor-tabs" role="tablist" aria-label="Route editor sections">
+              <div class="evu-tabs section-tabs route-editor-tabs" role="tablist" aria-label="Route editor sections">
                 <button
                   type="button"
-                  class="geo-seg-btn is-active"
+                  class="evu-tabs__tab is-active"
                   id="route-tab-default-btn"
                   role="tab"
                   aria-selected="true"
@@ -617,7 +665,7 @@
                 </button>
                 <button
                   type="button"
-                  class="geo-seg-btn"
+                  class="evu-tabs__tab"
                   id="route-tab-advanced-btn"
                   role="tab"
                   aria-selected="false"
@@ -651,27 +699,64 @@
               </div>
               <div id="route-tab-advanced-panel" role="tabpanel" aria-labelledby="route-tab-advanced-btn" hidden>
                 <div class="field">
-                  <label for="route-f-source-allow">Source allowlist <span class="meta">(optional, WAN IPv4)</span></label>
+                  <div class="field-label-row">
+                    <label for="route-f-source-allow">Source allowlist <span class="meta">(optional, WAN IPv4)</span></label>
+                    <button
+                      type="button"
+                      class="btn-help-trigger btn-help-trigger--compact"
+                      aria-label="Details: route source lists"
+                      title="Explain source allow and deny lists"
+                      data-help-title="Source allow and deny lists"
+                      data-help-template="help-route-source-lists"
+                    >
+                      ?
+                    </button>
+                  </div>
                   <textarea id="route-f-source-allow" rows="3" placeholder="Leave empty for any source, or e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
-                  <span class="meta">Comma or whitespace separated. Applied on <strong>Apply to host</strong>; wrong entries can block legitimate traffic.</span>
+                  <span class="meta">Comma or whitespace separated. Empty means any source.</span>
                 </div>
                 <div class="field">
                   <label for="route-f-source-deny">Source denylist <span class="meta">(optional, WAN IPv4)</span></label>
                   <textarea id="route-f-source-deny" rows="2" placeholder="e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
-                  <span class="meta">Comma or whitespace separated. Matched sources are dropped for this route before geo and forwarding.</span>
+                  <span class="meta">Comma or whitespace separated. Checked before geo and forwarding.</span>
                 </div>
                 <div class="field">
-                  <span class="field-label">Port mapping</span>
+                  <div class="field-label-row">
+                    <label for="route-f-port-map-mode">Port mapping</label>
+                    <button
+                      type="button"
+                      class="btn-help-trigger btn-help-trigger--compact"
+                      aria-label="Details: port mapping"
+                      title="Explain port mapping"
+                      data-help-title="Port mapping"
+                      data-help-template="help-route-port-map"
+                    >
+                      ?
+                    </button>
+                  </div>
                   <select id="route-f-port-map-mode">
                     <option value="same">Same as public</option>
                     <option value="one">One internal port for all</option>
                     <option value="table">Per-entry map</option>
                   </select>
-                  <input type="text" id="route-f-internal-one" class="is-hidden" autocomplete="off" />
+                  <label class="evu-sr-only" for="route-f-internal-one">Internal port for all public ports</label>
+                  <input type="text" id="route-f-internal-one" class="is-hidden" placeholder="internal port" autocomplete="off" />
                   <div id="route-port-map-rows" class="route-port-map-rows is-hidden"></div>
                 </div>
                 <div class="field">
-                  <label for="route-f-geo-mode">Route geo</label>
+                  <div class="field-label-row">
+                    <label for="route-f-geo-mode">Route geo</label>
+                    <button
+                      type="button"
+                      class="btn-help-trigger btn-help-trigger--compact"
+                      aria-label="Details: per-route geoblocking"
+                      title="Explain per-route geoblocking"
+                      data-help-title="Route geo"
+                      data-help-template="help-route-geo"
+                    >
+                      ?
+                    </button>
+                  </div>
                   <select id="route-f-geo-mode">
                     <option value="inherit">Inherit global</option>
                     <option value="off">Off</option>
@@ -679,28 +764,42 @@
                   </select>
                   <input type="text" id="route-f-geo-countries" class="is-hidden" placeholder="se, no" autocomplete="off" />
                 </div>
-                <div class="field">
-                  <span class="field-label">Rate limits <span class="meta">(optional; overrides global defaults)</span></span>
-                  <div class="rate-limit-grid">
-                    <div class="field">
-                      <label for="route-f-rate-tcp-syn">TCP SYN / second</label>
-                      <input type="number" id="route-f-rate-tcp-syn" min="0" max="10000" placeholder="inherit" autocomplete="off" />
-                    </div>
-                    <div class="field">
-                      <label for="route-f-rate-max-conn">Max connections / IP</label>
-                      <input type="number" id="route-f-rate-max-conn" min="0" max="65535" placeholder="inherit" autocomplete="off" />
-                    </div>
-                    <div class="field">
-                      <label for="route-f-rate-udp">UDP packets / second</label>
-                      <input type="number" id="route-f-rate-udp" min="0" max="100000" placeholder="inherit" autocomplete="off" />
+                <section class="evu-panel field-group" role="group" aria-labelledby="route-rate-limits-title">
+                  <div class="evu-panel__head">
+                    <span class="field-label" id="route-rate-limits-title">Rate limits <span class="meta">(optional; overrides global defaults)</span></span>
+                    <button
+                      type="button"
+                      class="btn-help-trigger btn-help-trigger--compact"
+                      aria-label="Details: rate limits"
+                      title="Explain rate limits"
+                      data-help-title="Rate limits"
+                      data-help-template="help-rate-limits"
+                    >
+                      ?
+                    </button>
+                  </div>
+                  <div class="evu-panel__body">
+                    <div class="rate-limit-grid">
+                      <div class="field">
+                        <label for="route-f-rate-tcp-syn">TCP SYN / second</label>
+                        <input type="number" id="route-f-rate-tcp-syn" min="0" max="10000" placeholder="inherit" autocomplete="off" />
+                      </div>
+                      <div class="field">
+                        <label for="route-f-rate-max-conn">Max connections / IP</label>
+                        <input type="number" id="route-f-rate-max-conn" min="0" max="65535" placeholder="inherit" autocomplete="off" />
+                      </div>
+                      <div class="field">
+                        <label for="route-f-rate-udp">UDP packets / second</label>
+                        <input type="number" id="route-f-rate-udp" min="0" max="100000" placeholder="inherit" autocomplete="off" />
+                      </div>
                     </div>
                   </div>
-                </div>
+                </section>
               </div>
               <div class="route-editor-actions">
                 <div class="btn-row">
-                  <button type="button" class="btn-primary" id="route-save">Save route</button>
-                  <button type="button" class="btn-quiet" id="route-cancel">Cancel</button>
+                  <button type="button" class="evu-btn evu-btn--primary" id="route-save">Save route</button>
+                  <button type="button" class="evu-btn evu-btn--outline" id="route-cancel">Cancel</button>
                 </div>
               </div>
             </div>
@@ -710,13 +809,17 @@
       </section>
 
       <section id="page-topology" class="page" hidden>
-        <h2 class="page-title">Topology</h2>
-        <div class="card topology-card">
+        <div class="page-title-row">
+          <h1 class="page-title">Topology</h1>
+          <button type="button" class="btn-help-trigger" aria-label="More about Topology (dialog)" data-help-title="Topology" data-help-template="help-topology-intro">?</button>
+        </div>
+        <p class="hint">How WAN, this host, and each peer connect for the forwards you have configured.</p>
+        <div class="evu-card card topology-card">
           <div class="toolbar">
-            <button type="button" class="btn-primary" id="topology-refresh">Refresh</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="topology-refresh">Refresh</button>
             <button
               type="button"
-              class="btn-quiet"
+              class="evu-btn evu-btn--outline"
               id="topology-center"
               title="Reset pan and zoom (scroll wheel zooms; drag the empty background to pan)"
               aria-label="Center topology view; reset pan and zoom"
@@ -747,15 +850,23 @@
       </section>
 
       <section id="page-inbound" class="page" hidden>
-        <h2 class="page-title">Inbound access</h2>
-        <p class="hint">
-          Extra nftables <strong>INPUT</strong> accept rules on the host (SSH, HTTP, etc.). Stored as <code class="inline">input_allows</code> in config. Use the
-          <strong>Enabled</strong> toggle (off = keep in config, omit from generated nftables until you turn it on again).
-        </p>
-        <div class="card">
+        <div class="page-title-row">
+          <h1 class="page-title">Inbound access</h1>
+          <button
+            type="button"
+            class="btn-help-trigger"
+            aria-label="More about inbound access (dialog)"
+            data-help-title="Inbound access"
+            data-help-template="help-inbound-intro"
+          >
+            ?
+          </button>
+        </div>
+        <p class="hint">Which ports on this host itself accept connections — SSH, HTTP and friends. Forwarded services live on Routes.</p>
+        <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="btn-primary" id="inbound-refresh">Refresh</button>
-            <button type="button" class="btn-quiet" id="inbound-add">Add rule</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="inbound-refresh">Refresh</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="inbound-add">Add rule</button>
           </div>
           <div id="inbound-table-wrap" class="table-wrap"></div>
           <p id="inbound-msg" class="msg" aria-live="polite"></p>
@@ -816,8 +927,8 @@
                 </div>
               </div>
               <div class="btn-row">
-                <button type="button" class="btn-primary" id="inbound-save">Save rule</button>
-                <button type="button" class="btn-quiet" id="inbound-cancel">Cancel</button>
+                <button type="button" class="evu-btn evu-btn--primary" id="inbound-save">Save rule</button>
+                <button type="button" class="evu-btn evu-btn--outline" id="inbound-cancel">Cancel</button>
               </div>
             </div>
           </div>
@@ -826,7 +937,7 @@
 
       <section id="page-geoblocking" class="page" hidden>
         <div class="page-title-row">
-          <h2 class="page-title">Geoblock &amp; limits</h2>
+          <h1 class="page-title">Geoblock &amp; limits</h1>
           <button
             type="button"
             class="btn-help-trigger"
@@ -838,10 +949,10 @@
           </button>
         </div>
         <p class="hint">
-          Country-zone rules for forwarded ports (<code class="inline">geo</code> in config). Toggle list mode below, refresh zone files, then <strong>Pending changes</strong> → Apply.
+          Which countries may reach forwarded ports. Save here, then apply from <strong>Pending changes</strong>.
         </p>
-        <div class="card geo-enable-card">
-          <div class="field geo-enable-field">
+        <div class="evu-card card geo-editor">
+          <div class="geo-enable-row">
             <div class="toggle-switch-row">
               <span class="toggle-switch-text" id="geo-f-enabled-desc">Enable geoblocking</span>
               <label class="evu-switch toggle-switch">
@@ -855,14 +966,12 @@
                 <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
               </label>
             </div>
-            <p class="meta geo-enable-hint">When off, country lists are kept in config but omitted from nftables until you turn this on and apply.</p>
+            <p class="meta geo-enable-hint">Off keeps country lists in config but leaves them out of nftables.</p>
           </div>
-        </div>
-        <div class="card geo-editor">
-          <div class="geo-segmented geo-page-tabs" role="tablist" aria-label="Geoblock and limits sections">
+          <div class="evu-tabs section-tabs geo-page-tabs" role="tablist" aria-label="Geoblock and limits sections">
             <button
               type="button"
-              class="geo-seg-btn is-active"
+              class="evu-tabs__tab is-active"
               id="geo-tab-default-btn"
               role="tab"
               aria-selected="true"
@@ -872,7 +981,7 @@
             </button>
             <button
               type="button"
-              class="geo-seg-btn"
+              class="evu-tabs__tab"
               id="geo-tab-advanced-btn"
               role="tab"
               aria-selected="false"
@@ -881,19 +990,29 @@
             >
               Advanced
             </button>
+            <button
+              type="button"
+              class="evu-tabs__tab"
+              id="geo-tab-zones-btn"
+              role="tab"
+              aria-selected="false"
+              aria-controls="geo-tab-zones-panel"
+            >
+              Zone files
+            </button>
           </div>
           <p class="meta editor-tabs-gated-hint" id="geo-tabs-gated-hint" hidden>
             Advanced editing is off. Turn on <strong>Advanced mode</strong> in
-            <a href="#/settings">Settings</a> to edit nftables set name, zone paths, break-glass CIDRs, and rate limits.
+            <a href="#/settings">Settings</a> to edit the global denylist, nftables set name, zone paths, break-glass CIDRs, rate limits and CrowdSec.
           </p>
           <div id="geo-tab-default-panel" role="tabpanel" aria-labelledby="geo-tab-default-btn">
             <div class="field">
               <span class="field-label">List mode</span>
-              <div class="geo-segmented geo-mode-seg" role="group" aria-label="Allow or block listed countries">
-                <button type="button" class="geo-seg-btn" id="geo-mode-block" data-geo-mode="block" aria-pressed="false">
+              <div class="geo-mode-seg" role="group" aria-label="Allow or block listed countries">
+                <button type="button" class="geo-mode-btn" id="geo-mode-block" data-geo-mode="block" aria-pressed="false">
                   Block
                 </button>
-                <button type="button" class="geo-seg-btn is-active" id="geo-mode-allow" data-geo-mode="allow" aria-pressed="true">
+                <button type="button" class="geo-mode-btn is-active" id="geo-mode-allow" data-geo-mode="allow" aria-pressed="true">
                   Allow
                 </button>
               </div>
@@ -905,7 +1024,7 @@
               <span class="field-label" id="geo-tags-label">Countries</span>
               <div id="geo-tags-wrap" class="geo-tags-wrap">
                 <div id="geo-tags-chips" class="geo-tags-chips" aria-labelledby="geo-tags-label"></div>
-                <button type="button" class="btn-quiet geo-tags-edit" id="geo-tags-edit" aria-expanded="false">
+                <button type="button" class="evu-btn evu-btn--outline geo-tags-edit" id="geo-tags-edit" aria-expanded="false">
                   Edit <span class="geo-tags-edit-count" id="geo-tags-edit-count">(0)</span>
                 </button>
               </div>
@@ -913,8 +1032,20 @@
             </div>
             <div class="field">
               <div class="toggle-switch-row">
-                <span class="toggle-switch-text" id="geo-f-apply-input-desc">
-                  Apply geoblocking to inbound allow rules (<code class="inline">input_allows</code>)
+                <span class="toggle-switch-label-group">
+                  <span class="toggle-switch-text" id="geo-f-apply-input-desc"
+                    >Apply geoblocking to inbound allow rules (<code class="inline">input_allows</code>)</span
+                  >
+                  <button
+                    type="button"
+                    class="btn-help-trigger btn-help-trigger--compact"
+                    aria-label="Details: geoblocking on inbound allow rules"
+                    title="Explain geoblocking on inbound allow rules"
+                    data-help-title="Geoblocking on inbound allow rules"
+                    data-help-template="help-geo-apply-inbound"
+                  >
+                    ?
+                  </button>
                 </span>
                 <label class="evu-switch toggle-switch">
                   <input
@@ -928,9 +1059,7 @@
                 </label>
               </div>
               <p class="hint meta geo-field-subhint geo-inbound-rule-hint">
-                When off (default), SSH, HTTP, and other <code class="inline">input_allows</code> stay reachable from any
-                source IPv4 even if geoblocking is on. When on, those ports use the same allow-list or block-list rules as
-                forwarded services. Use <strong>Save</strong> below to store changes, then <strong>Apply</strong> on the host.
+                Off (default) leaves SSH, HTTP and other <code class="inline">input_allows</code> reachable from any source IPv4.
               </p>
             </div>
           </div>
@@ -947,7 +1076,7 @@
             <div class="field">
               <label for="geo-f-break-glass">Break-glass CIDRs <span class="meta">(bypass geo)</span></label>
               <div class="btn-row">
-                <button type="button" class="btn-quiet" id="geo-add-detected-ip">Add detected IP</button>
+                <button type="button" class="evu-btn evu-btn--outline" id="geo-add-detected-ip">Add detected IP</button>
               </div>
               <textarea id="geo-f-break-glass" rows="2" placeholder="e.g. 203.0.113.5/32" autocomplete="off" spellcheck="false"></textarea>
               <p id="geo-detected-ip-line" class="meta is-hidden" aria-live="polite"></p>
@@ -957,26 +1086,38 @@
               <textarea id="geo-f-global-deny" rows="2" placeholder="e.g. 203.0.113.1, 198.51.100.0/24" autocomplete="off" spellcheck="false"></textarea>
               <span class="meta">Comma or whitespace separated WAN IPv4 addresses or CIDRs.</span>
             </div>
-            <div class="field">
-              <span class="field-label">Global rate limits <span class="meta">(optional defaults for all routes)</span></span>
-              <p class="hint meta">
-                Per-source limits on published ports: TCP SYN rate, max concurrent connections per IP, and UDP packets per second. Per-route overrides: Routes → Advanced. UDP limits meter every datagram and can affect bursty game traffic.
-              </p>
-              <div class="rate-limit-grid">
-                <div class="field">
-                  <label for="geo-f-rate-tcp-syn">TCP SYN / second</label>
-                  <input type="number" id="geo-f-rate-tcp-syn" min="0" max="10000" placeholder="off" autocomplete="off" />
-                </div>
-                <div class="field">
-                  <label for="geo-f-rate-max-conn">Max connections / IP</label>
-                  <input type="number" id="geo-f-rate-max-conn" min="0" max="65535" placeholder="off" autocomplete="off" />
-                </div>
-                <div class="field">
-                  <label for="geo-f-rate-udp">UDP packets / second</label>
-                  <input type="number" id="geo-f-rate-udp" min="0" max="100000" placeholder="off" autocomplete="off" />
+            <section class="evu-panel field-group" role="group" aria-labelledby="geo-rate-limits-title">
+              <div class="evu-panel__head">
+                <span class="field-label" id="geo-rate-limits-title">Global rate limits <span class="meta">(optional defaults for all routes)</span></span>
+                <button
+                  type="button"
+                  class="btn-help-trigger btn-help-trigger--compact"
+                  aria-label="Details: global rate limits"
+                  title="Explain global rate limits"
+                  data-help-title="Global rate limits"
+                  data-help-template="help-rate-limits"
+                >
+                  ?
+                </button>
+              </div>
+              <div class="evu-panel__body">
+                <p class="hint meta hint--tight">Per-source limits on published ports. Leave blank for no limit.</p>
+                <div class="rate-limit-grid">
+                  <div class="field">
+                    <label for="geo-f-rate-tcp-syn">TCP SYN / second</label>
+                    <input type="number" id="geo-f-rate-tcp-syn" min="0" max="10000" placeholder="off" autocomplete="off" />
+                  </div>
+                  <div class="field">
+                    <label for="geo-f-rate-max-conn">Max connections / IP</label>
+                    <input type="number" id="geo-f-rate-max-conn" min="0" max="65535" placeholder="off" autocomplete="off" />
+                  </div>
+                  <div class="field">
+                    <label for="geo-f-rate-udp">UDP packets / second</label>
+                    <input type="number" id="geo-f-rate-udp" min="0" max="100000" placeholder="off" autocomplete="off" />
+                  </div>
                 </div>
               </div>
-            </div>
+            </section>
             <div class="field">
               <div class="toggle-switch-row">
                 <span class="toggle-switch-text" id="geo-crowdsec-desc">CrowdSec integration <span class="meta">(optional)</span></span>
@@ -993,27 +1134,66 @@
               </p>
             </div>
           </div>
-        </div>
-
-        <div class="card geo-actions-card">
-          <div class="btn-row">
-            <button type="button" class="btn-primary" id="geo-save">Save</button>
-            <button type="button" class="btn-quiet" id="geo-refresh">Refresh</button>
-            <button type="button" class="btn-primary" id="geo-update-lists">Update geo lists</button>
+          <div id="geo-tab-zones-panel" role="tabpanel" aria-labelledby="geo-tab-zones-btn" hidden>
+            <p class="hint meta">
+              Per-country counts from the on-disk <code class="inline">.zone</code> files. Totals are approximate — overlaps between countries are not subtracted.
+            </p>
+            <div id="geo-zones-table-wrap"></div>
+            <p id="geo-zones-msg" class="msg" aria-live="polite"></p>
+          </div>
+          <section class="evu-panel field-group geo-ip-check" role="group" aria-labelledby="geo-ip-check-title">
+            <div class="evu-panel__head">
+              <span class="field-label" id="geo-ip-check-title">Check an IP</span>
+              <button
+                type="button"
+                class="btn-help-trigger btn-help-trigger--compact"
+                aria-label="Details: check an IP against geoblocking"
+                title="Explain IP check"
+                data-help-title="Check an IP"
+                data-help-template="help-geo-ip-check"
+              >
+                ?
+              </button>
+            </div>
+            <div class="evu-panel__body">
+              <p class="hint meta hint--tight">
+                Preview whether a source IPv4 would be allowed or blocked under the rules in this form (not yet applied).
+              </p>
+              <div class="geo-ip-check-row">
+                <div class="field geo-ip-check-field">
+                  <label for="geo-ip-check-input">IPv4 address</label>
+                  <input
+                    type="text"
+                    id="geo-ip-check-input"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="e.g. 203.0.113.9"
+                  />
+                </div>
+                <div class="geo-ip-check-actions">
+                  <button type="button" class="evu-btn evu-btn--outline" id="geo-ip-check-mine">Use my IP</button>
+                  <button type="button" class="evu-btn evu-btn--primary" id="geo-ip-check-run">Check</button>
+                </div>
+              </div>
+              <div
+                id="geo-ip-check-result"
+                class="evu-alert geo-ip-check-result is-hidden"
+                role="status"
+                aria-live="polite"
+              >
+                <p id="geo-ip-check-summary" class="evu-alert__title"></p>
+                <p id="geo-ip-check-detail" class="meta"></p>
+              </div>
+            </div>
+          </section>
+          <div class="btn-row geo-actions-row">
+            <button type="button" class="evu-btn evu-btn--primary" id="geo-save">Save</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="geo-refresh">Refresh</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="geo-update-lists">Update geo lists</button>
           </div>
           <p id="geo-unsaved-msg" class="msg geo-unsaved-msg meta" hidden aria-live="polite"></p>
           <p id="geo-msg" class="msg" aria-live="polite"></p>
-        </div>
-
-
-        <div id="geo-zones-summary" class="card geo-zones-card">
-          <h3>Loaded zone files</h3>
-          <p class="hint meta">
-            Per-country counts come from on-disk <code class="inline">.zone</code> files. Totals are approximate; overlaps between countries are not subtracted. Optional
-            <strong>nft</strong> column reflects the merged set in the kernel when available.
-          </p>
-          <div id="geo-zones-table-wrap"></div>
-          <p id="geo-zones-msg" class="msg" aria-live="polite"></p>
         </div>
 
         <div
@@ -1028,43 +1208,68 @@
             <h3 id="geo-modal-title">Countries</h3>
             <p class="hint meta geo-modal-hint" id="geo-modal-hint"></p>
             <div class="geo-modal-search-wrap">
-              <label class="visually-hidden" for="geo-modal-search">Search countries</label>
+              <label class="evu-sr-only" for="geo-modal-search">Search countries</label>
               <input type="search" id="geo-modal-search" class="geo-modal-search" placeholder="Search" autocomplete="off" />
             </div>
-            <div id="geo-modal-list" class="geo-modal-list" role="group" aria-label="Countries"></div>
+            <div id="geo-modal-list" class="geo-modal-list scroll-thin" role="group" aria-label="Countries"></div>
             <div class="btn-row geo-modal-actions">
-              <button type="button" class="btn-quiet" id="geo-modal-cancel">Cancel</button>
-              <button type="button" class="btn-primary" id="geo-modal-save">Save</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="geo-modal-cancel">Cancel</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="geo-modal-save">Save</button>
             </div>
           </div>
         </div>
       </section>
 
       <section id="page-pending" class="page" hidden>
-        <h2 class="page-title">Pending changes</h2>
-        <p class="hint">
-          Saving peers, routes, inbound rules, geoblocking, or peer profile output writes YAML on the server only.
-          nftables and WireGuard reload after you review the generated rules and click Apply (or use
-          Overview → Reload config).
-        </p>
-        <div class="card">
-          <p id="pending-status" class="pending-banner" aria-live="polite"></p>
-          <div class="btn-row pending-toolbar">
-            <button type="button" class="btn-primary" id="pending-apply">Apply to host</button>
-            <button type="button" class="btn-quiet" id="pending-discard" disabled>Discard pending</button>
-            <button type="button" class="btn-danger" id="pending-restore-previous" disabled>Restore previous applied</button>
-            <button type="button" class="btn-quiet" id="pending-refresh">Refresh preview</button>
+        <div class="page-title-row">
+          <h1 class="page-title">Pending changes</h1>
+          <button
+            type="button"
+            class="btn-help-trigger"
+            aria-label="More about pending changes (dialog)"
+            data-help-title="Pending changes"
+            data-help-template="help-pending-intro"
+          >
+            ?
+          </button>
+        </div>
+        <p class="hint">Saved config that the host is not running yet. Review the generated rules, then apply.</p>
+        <div class="evu-card card">
+          <div id="pending-status-alert" class="evu-alert pending-status-alert">
+            <div class="evu-alert__body pending-status-body">
+              <p id="pending-status" class="pending-banner" aria-live="polite"></p>
+            </div>
+          </div>
+          <div class="toolbar pending-toolbar">
+            <button type="button" class="evu-btn evu-btn--outline" id="pending-check-config">Check config</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="pending-apply">Apply to host</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="pending-discard" disabled>Discard pending</button>
+            <button type="button" class="evu-btn evu-btn--danger-outline" id="pending-restore-previous" disabled>Restore previous applied</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="pending-refresh">Refresh preview</button>
+          </div>
+          <div id="pending-validate-panel" class="evu-alert pending-validate-panel is-hidden" role="group" aria-labelledby="pending-validate-title">
+            <div class="evu-alert__body pending-validate-body">
+              <p class="evu-alert__title" id="pending-validate-title">Config check</p>
+              <p id="pending-client-ip" class="meta pending-client-ip"></p>
+              <ul id="pending-validate-warnings" class="pending-validate-warnings is-hidden"></ul>
+              <div id="pending-lockout-ack-wrap" class="pending-lockout-ack-wrap is-hidden">
+                <label class="check pending-lockout-ack">
+                  <input type="checkbox" id="pending-lockout-ack" />
+                  I understand these rules may lock me out of this host, and I have another way in.
+                </label>
+              </div>
+            </div>
           </div>
           <h3>Generated nftables</h3>
           <p class="hint meta">
             Compare <code class="inline">generated/nftables.nft</code> as it exists on disk to the ruleset generated from the current saved config (what apply would write).
           </p>
           <div id="pending-diff-root" class="pending-diff-root">
-            <div class="pending-diff-toolbar" role="tablist" aria-label="Diff view mode">
-              <div class="geo-segmented pending-diff-mode">
+            <div class="pending-diff-toolbar">
+              <div class="evu-tabs section-tabs pending-diff-mode" role="tablist" aria-label="Diff view mode">
                 <button
                   type="button"
-                  class="geo-seg-btn is-active"
+                  class="evu-tabs__tab is-active"
                   id="pending-mode-unified"
                   role="tab"
                   aria-selected="true"
@@ -1074,7 +1279,7 @@
                 </button>
                 <button
                   type="button"
-                  class="geo-seg-btn"
+                  class="evu-tabs__tab"
                   id="pending-mode-split"
                   role="tab"
                   aria-selected="false"
@@ -1091,16 +1296,19 @@
       </section>
 
       <section id="page-stats" class="page" hidden>
-        <h2 class="page-title">Stats</h2>
-        <p class="hint">WireGuard transfer/handshake and nftables counter lines (when available on the host).</p>
-        <div class="card">
+        <div class="page-title-row">
+          <h1 class="page-title">Stats</h1>
+          <button type="button" class="btn-help-trigger" aria-label="More about Stats (dialog)" data-help-title="Stats" data-help-template="help-stats-intro">?</button>
+        </div>
+        <p class="hint">Live counters read from the host: WireGuard transfer and handshakes, plus nftables rule hits.</p>
+        <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="btn-primary" id="stats-refresh">Refresh</button>
-            <button type="button" class="btn-quiet" id="stats-export-metrics-csv">Export peer metrics CSV</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="stats-refresh">Refresh</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="stats-export-metrics-csv">Export peer metrics CSV</button>
           </div>
           <h3>WireGuard peers</h3>
           <div id="stats-wg-wrap" class="table-wrap"></div>
-          <h3 class="settings-block-gap">nftables counters</h3>
+          <h3 class="stack-gap">nftables counters</h3>
           <div id="stats-nft-wrap" class="table-wrap"></div>
           <p id="stats-msg" class="msg" aria-live="polite"></p>
         </div>
@@ -1108,7 +1316,7 @@
 
       <section id="page-logs" class="page" hidden>
         <div class="page-title-row">
-          <h2 class="page-title">Logs</h2>
+          <h1 class="page-title">Logs</h1>
           <button
             type="button"
             class="btn-help-trigger"
@@ -1119,21 +1327,18 @@
             ?
           </button>
         </div>
-        <p class="hint">
-          Kernel <code class="inline">log</code> lines from EvuProxy drop rules (<strong>geoblock</strong> and <strong>forward</strong> prefixes). Use <strong>Refresh</strong>; the API prefers
-          <code class="inline">journalctl</code> (newest first) or falls back to <code class="inline">dmesg</code>.
-        </p>
-        <div class="card">
+        <p class="hint">Kernel log lines for packets EvuProxy dropped — geoblock, rate limit, CrowdSec and forward rules. Newest first.</p>
+        <div class="evu-card card">
           <div class="logs-toolbar-wrap">
             <div class="toolbar logs-toolbar logs-toolbar-row">
-              <button type="button" class="btn-primary" id="logs-refresh">Refresh</button>
-              <button type="button" class="btn-quiet" id="logs-filter-clear">Clear filters</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="logs-refresh">Refresh</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="logs-filter-clear">Clear filters</button>
               <span class="logs-toolbar-spacer" aria-hidden="true"></span>
-              <div class="geo-segmented logs-view-mode" role="group" aria-label="Log view mode">
-                <button type="button" class="geo-seg-btn is-active" id="logs-view-table" aria-pressed="true">
+              <div class="evu-tabs section-tabs logs-view-mode" role="group" aria-label="Log view mode">
+                <button type="button" class="evu-tabs__tab is-active" id="logs-view-table" aria-pressed="true">
                   Table
                 </button>
-                <button type="button" class="geo-seg-btn" id="logs-view-raw" aria-pressed="false">Raw</button>
+                <button type="button" class="evu-tabs__tab" id="logs-view-raw" aria-pressed="false">Raw</button>
               </div>
             </div>
             <div class="toolbar logs-toolbar logs-toolbar-row">
@@ -1181,7 +1386,10 @@
             </div>
           </div>
           <p id="logs-source" class="hint meta" aria-live="polite"></p>
-          <p id="logs-count" class="hint meta logs-count" aria-live="polite" role="status"></p>
+          <p id="logs-count" class="hint meta logs-count"></p>
+          <!-- Announced separately from the visible count: that updates on every
+               keystroke, which is too chatty to be a live region itself. -->
+          <p id="logs-count-status" class="evu-sr-only" role="status" aria-live="polite"></p>
           <div id="logs-table-wrap" class="table-wrap logs-table-wrap" hidden></div>
           <pre id="logs-pre" class="code-block logs-pre" hidden></pre>
           <p id="logs-msg" class="msg" aria-live="polite"></p>
@@ -1212,8 +1420,8 @@
             <span class="meta">Must be one of this route’s ports (see the Ports column). Default is the first port in the list.</span>
           </div>
           <div class="btn-row">
-            <button type="button" class="btn-primary" id="route-probe-run">Run test</button>
-            <button type="button" class="btn-quiet" id="route-probe-cancel">Cancel</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="route-probe-run">Run test</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="route-probe-cancel">Cancel</button>
           </div>
         </div>
       </div>
@@ -1231,8 +1439,8 @@
           <h3 id="confirm-modal-title">Confirm</h3>
           <p id="confirm-modal-desc" class="confirm-modal-body"></p>
           <div class="btn-row confirm-modal-actions">
-            <button type="button" class="btn-primary" id="confirm-modal-ok">OK</button>
-            <button type="button" class="btn-quiet" id="confirm-modal-cancel">Cancel</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="confirm-modal-ok">OK</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="confirm-modal-cancel">Cancel</button>
           </div>
         </div>
       </div>
@@ -1250,10 +1458,10 @@
           <ul class="shortcuts-list meta">
             <li><kbd class="kbd">/</kbd> — Focus peer/route filter</li>
             <li><kbd class="kbd">?</kbd> — This help</li>
-            <li><kbd class="kbd">Esc</kbd> — Close open dialog (keyboard help or page “?” help)</li>
+            <li><kbd class="kbd">Esc</kbd> — Close the topmost dialog, or the navigation drawer</li>
           </ul>
           <div class="btn-row">
-            <button type="button" class="btn-primary" id="shortcuts-modal-close">Close</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="shortcuts-modal-close">Close</button>
           </div>
         </div>
       </div>
@@ -1272,16 +1480,16 @@
           <div class="config-upload-diff-grid">
             <div class="field">
               <label>Current (server)</label>
-              <pre id="config-upload-pre-current" class="code-block code-block-tall"></pre>
+              <pre id="config-upload-pre-current" class="code-block code-block--tall"></pre>
             </div>
             <div class="field">
               <label>Uploaded</label>
-              <pre id="config-upload-pre-new" class="code-block code-block-tall"></pre>
+              <pre id="config-upload-pre-new" class="code-block code-block--tall"></pre>
             </div>
           </div>
           <div class="btn-row">
-            <button type="button" class="btn-primary" id="config-upload-apply">Save to server</button>
-            <button type="button" class="btn-quiet" id="config-upload-cancel">Cancel</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="config-upload-apply">Save to server</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="config-upload-cancel">Cancel</button>
           </div>
           <p id="config-upload-apply-msg" class="msg" aria-live="polite"></p>
         </div>
@@ -1299,7 +1507,7 @@
           <h3 id="context-help-modal-title">Help</h3>
           <div id="context-help-body" class="help-modal-rich"></div>
           <div class="btn-row">
-            <button type="button" class="btn-primary" id="context-help-close">Close</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="context-help-close">Close</button>
           </div>
         </div>
       </div>
@@ -1341,8 +1549,183 @@
         <p>Choose allow vs block via <strong>List mode</strong>, then run <strong>Update geo lists</strong> here or Overview, and <strong>Apply</strong> from Pending.</p>
         <p>
           Inbound SSH/HTTP (<code class="inline">input_allows</code>) obey geo only if <strong>Apply geoblocking to inbound allow rules</strong> is on (<strong>Countries &amp; rules</strong> tab).
-          Break-glass and global deny are on the <strong>Advanced</strong> tab.
+          Break-glass CIDRs, the global denylist and rate limits are on the <strong>Advanced</strong> tab, and <strong>Zone files</strong> shows what is currently on disk per country.
+          Use <strong>Check an IP</strong> at the bottom of the card to preview whether a source address would be allowed or blocked under the rules in the form.
         </p>
+      </div>
+    </template>
+
+    <template id="help-overview-intro">
+      <div class="help-modal-body">
+        <p>
+          A read-only summary of what the host is running right now: WireGuard interface and peer counts, forwarding, geo zone freshness, peer latency, and recent
+          activity from <code class="inline">state/events.jsonl</code>.
+        </p>
+        <p>
+          <strong>Reload config</strong> re-applies the saved config to nftables and WireGuard — the same action as Apply on <strong>Pending changes</strong>, including the
+          pre-apply check, so it asks you to confirm if the config could cut off your own access. <strong>Update geo lists</strong> refreshes the on-disk country zone files.
+        </p>
+        <p><strong>Maintenance mode</strong> keeps every route in config but omits public forwards from the generated rules until you turn it off and reload.</p>
+      </div>
+    </template>
+
+    <template id="help-settings-intro">
+      <div class="help-modal-body">
+        <p>
+          <strong>Preferences</strong> are admin UI defaults stored on the host as <code class="inline">ui-preferences.json</code> next to the main config — they are not
+          part of the WireGuard YAML.
+        </p>
+        <p><strong>Notes &amp; backups</strong> holds free-text operator notes and the config archive tools. <strong>Advanced</strong> unlocks the expert fields on Routes and Geoblock, and lets you replace the whole config by upload.</p>
+        <p>The API token is not here: it lives on the sidebar page <strong>API token</strong> and stays in this browser only.</p>
+      </div>
+    </template>
+
+    <template id="help-token-intro">
+      <div class="help-modal-body">
+        <p>
+          Every admin UI request sends this token to the EvuProxy API. It is kept in this browser's local storage and never written to the server config, so each browser
+          you administer from needs it once.
+        </p>
+        <p>
+          On the host it is the contents of <code class="inline">/etc/evuproxy/api.token</code>. Rotate it there and the UI will report an API error until you paste the
+          new value here.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-topology-intro">
+      <div class="help-modal-body">
+        <p>
+          The graph is built from the saved config plus live WireGuard state: WAN on the left, this host in the middle, and one card per peer. Edges are the forwards
+          that carry traffic to each peer.
+        </p>
+        <p>An edge is drawn as traffic when the peer is online and its byte counters moved since the last refresh; otherwise it stays idle. Scroll to zoom, drag the background to pan, and use <strong>Center</strong> to reset.</p>
+      </div>
+    </template>
+
+    <template id="help-pending-intro">
+      <div class="help-modal-body">
+        <p>
+          Saving on Peers, Routes, Inbound access or Geoblock writes YAML on the server only. Nothing reaches nftables or WireGuard until you apply here — so this page
+          is the diff between what is saved and what the host is running.
+        </p>
+        <p>
+          <strong>Check config</strong> validates the pending ruleset and reports anything that could lock you out of this host; <strong>Apply to host</strong> runs it
+          for real. <strong>Discard pending</strong> throws away unapplied edits and <strong>Restore previous applied</strong> rolls back to the last known-good config.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-stats-intro">
+      <div class="help-modal-body">
+        <p>
+          <strong>WireGuard peers</strong> comes from <code class="inline">wg show</code>: bytes transferred and the last handshake per peer. A peer with no recent
+          handshake is not connected, whatever the config says.
+        </p>
+        <p>
+          <strong>nftables counters</strong> lists the packet and byte counters attached to the generated rules, which is the quickest way to confirm a forward or a
+          drop rule is actually being hit. Counters reset when the ruleset is reloaded.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-inbound-intro">
+      <div class="help-modal-body">
+        <p>
+          These are extra nftables <strong>INPUT</strong> accept rules for services running on the EvuProxy host itself, stored as <code class="inline">input_allows</code>
+          in the config. Ports forwarded to peers belong on <strong>Routes</strong> instead.
+        </p>
+        <p>
+          Turning <strong>Enabled</strong> off keeps a rule in the config but omits it from the generated nftables until you turn it back on. Changes reach the host from
+          <strong>Pending changes</strong>.
+        </p>
+        <p>Take care with the rule that keeps your own SSH session alive — the config check on Pending changes warns before an apply would lock you out.</p>
+      </div>
+    </template>
+
+    <template id="help-geo-apply-inbound">
+      <div class="help-modal-body">
+        <p>
+          Geoblocking normally covers forwarded services only. Turn this on and the same allow-list or block-list also guards
+          <code class="inline">input_allows</code> — the ports on this host itself, such as SSH and the admin UI.
+        </p>
+        <p>
+          That is the setting most likely to lock you out: if your own address is outside the allowed countries, your next SSH connection is dropped. Add a break-glass
+          CIDR on the <strong>Advanced</strong> tab first, and read the config check on <strong>Pending changes</strong> before applying.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-geo-ip-check">
+      <div class="help-modal-body">
+        <p>
+          Dry-run against the rules currently shown in this form — including unsaved edits — using on-disk country zone files (and GeoLite2 when configured).
+          It does not change nftables.
+        </p>
+        <p>
+          The check follows the same order as the forward path for these filters: global denylist, then break-glass, then geoblocking.
+          CrowdSec and rate limits are not evaluated here. Results for the live host require <strong>Save</strong> and <strong>Apply</strong>.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-rate-limits">
+      <div class="help-modal-body">
+        <p>Per-source limits applied to published ports, enforced in nftables before traffic is forwarded:</p>
+        <p>
+          <strong>TCP SYN / second</strong> caps new connection attempts from one address. <strong>Max connections / IP</strong> caps how many can be open at once.
+          <strong>UDP packets / second</strong> meters every datagram — set it carefully for game or voice traffic, which is bursty by nature.
+        </p>
+        <p>Blank means no limit. Global values here are the default for every route; a route can override them under Routes → Advanced. Drops are logged with the <code class="inline">evuproxy-ratelimit</code> prefix and show up on <strong>Logs</strong>.</p>
+      </div>
+    </template>
+
+    <template id="help-route-source-lists">
+      <div class="help-modal-body">
+        <p>
+          Both lists take comma or whitespace separated WAN IPv4 addresses and CIDRs, and apply to this route only. The denylist is evaluated first, then the allowlist,
+          then geoblocking, then forwarding.
+        </p>
+        <p>An empty allowlist means any source. A non-empty one drops everything else, so a typo here is enough to make the service unreachable — the entries take effect on <strong>Apply to host</strong>.</p>
+      </div>
+    </template>
+
+    <template id="help-route-port-map">
+      <div class="help-modal-body">
+        <p>Chooses which port the peer receives traffic on:</p>
+        <p>
+          <strong>Same as public</strong> forwards each public port unchanged. <strong>One internal port for all</strong> sends every public port to a single port on the
+          peer. <strong>Per-entry map</strong> pairs each public port with its own internal port.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-route-geo">
+      <div class="help-modal-body">
+        <p>
+          <strong>Inherit global</strong> uses the country list from Geoblock &amp; limits. <strong>Off</strong> exempts this route entirely — useful for a service that
+          must stay reachable worldwide. <strong>Custom countries</strong> takes its own list of ISO codes, in the same allow or block mode as the global setting.
+        </p>
+      </div>
+    </template>
+
+    <template id="help-wg-endpoint">
+      <div class="help-modal-body">
+        <p>
+          The public address peers dial to reach this VPN — <code class="inline">host:port</code> or <code class="inline">hostname:port</code>. It is pre-filled when you
+          create a peer.
+        </p>
+        <p>The port can be omitted if it matches the server listen port, once you have refreshed server details on Overview.</p>
+      </div>
+    </template>
+
+    <template id="help-metrics-collection">
+      <div class="help-modal-body">
+        <p>
+          Runs the <code class="inline">evuproxy metrics</code> systemd service on the host, which pings each peer over the tunnel and stores the result. Requires
+          <code class="inline">ping</code> on the server.
+        </p>
+        <p>With it on, Peers gains a Ping column. Overview latency cards always read stored metrics, so they stay empty while collection is off.</p>
       </div>
     </template>
 

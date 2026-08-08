@@ -48,7 +48,7 @@ export async function refreshStatsPage() {
     setApiStatus(true);
     if (st.wireguard_dump_failed) {
       wgW.innerHTML =
-        "<p class=\"hint\">WireGuard stats unavailable (<code>wg show</code> failed — interface missing, permission denied, or tools not installed).</p>";
+        "<div class=\"evu-empty\"><p class=\"evu-empty__title\">WireGuard stats unavailable</p><p><code>wg show</code> failed — the interface is missing, permission was denied, or the tools are not installed.</p></div>";
     } else if (st.wireguard_peers && st.wireguard_peers.length) {
       const names = peerNamesByPublicKey(state.lastConfig);
       const rows = st.wireguard_peers
@@ -57,20 +57,22 @@ export async function refreshStatsPage() {
             `<tr><td>${escapeHtml(names[String(p.public_key || "").trim()] || "—")}</td><td class="mono">${escapeHtml(trunc(p.public_key, 24))}</td><td>${escapeHtml(p.endpoint || "—")}</td><td class="mono">${escapeHtml(fmtHandshake(p.latest_handshake_unix))}</td><td>${escapeHtml(String(p.transfer_rx ?? ""))} / ${escapeHtml(String(p.transfer_tx ?? ""))}</td></tr>`
         )
         .join("");
-      wgW.innerHTML = `<table class="data"><thead><tr><th>Peer</th><th>Public key</th><th>Endpoint</th><th>Handshake</th><th>RX / TX</th></tr></thead><tbody>${rows}</tbody></table>`;
+      wgW.innerHTML = `<table class="data"><thead><tr><th scope="col">Peer</th><th scope="col">Public key</th><th scope="col">Endpoint</th><th scope="col">Handshake</th><th scope="col">RX / TX</th></tr></thead><tbody>${rows}</tbody></table>`;
     } else {
-      wgW.innerHTML = "<p class=\"hint\">No peers on this WireGuard interface (dump succeeded but no peer rows).</p>";
+      wgW.innerHTML =
+        "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No peers on this interface</p><p>WireGuard responded, but the tunnel has no peers yet.</p></div>";
     }
     if (st.nftables_counters && st.nftables_counters.length) {
       const rows = st.nftables_counters
         .map(
           (r) =>
-            `<tr><td>${escapeHtml(r.family)}</td><td>${escapeHtml(r.table)}</td><td>${escapeHtml(String(r.packets ?? ""))}</td><td>${escapeHtml(String(r.bytes ?? ""))}</td><td class="mono" style="max-width:24rem;word-break:break-all">${escapeHtml(r.line)}</td></tr>`
+            `<tr><td>${escapeHtml(r.family)}</td><td>${escapeHtml(r.table)}</td><td>${escapeHtml(String(r.packets ?? ""))}</td><td>${escapeHtml(String(r.bytes ?? ""))}</td><td class="mono stats-nft-rule">${escapeHtml(r.line)}</td></tr>`
         )
         .join("");
-      nftW.innerHTML = `<table class="data"><thead><tr><th>Family</th><th>Table</th><th>Packets</th><th>Bytes</th><th>Rule</th></tr></thead><tbody>${rows}</tbody></table>`;
+      nftW.innerHTML = `<table class="data"><thead><tr><th scope="col">Family</th><th scope="col">Table</th><th scope="col">Packets</th><th scope="col">Bytes</th><th scope="col">Rule</th></tr></thead><tbody>${rows}</tbody></table>`;
     } else {
-      nftW.innerHTML = "<p class=\"hint\">No nft counter lines (nft not available or empty).</p>";
+      nftW.innerHTML =
+        "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No counters to show</p><p>The generated ruleset has no counter lines, or <code>nft</code> is unavailable on this host.</p></div>";
     }
   } catch (e) {
     setApiStatus(false, String(e.message || e));

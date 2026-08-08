@@ -9,6 +9,8 @@ import {
   bindTunnelIpCopyButtons,
   applyPeersRoutesTableFilter,
   downloadTextFile,
+  markFieldInvalid,
+  clearFieldInvalid,
 } from "../core/dom.js";
 import { api, apiBlob } from "../core/api.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
@@ -18,7 +20,12 @@ import {
   fetchPeerMetricsMap,
   wgPeerPubKeyMap,
 } from "../core/peers_data.js";
-import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
+import {
+  openModal,
+  closeModal,
+  openConfirmModal,
+  registerModalCloser,
+} from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 function serverEndpointDisplay() {
@@ -62,10 +69,12 @@ function suggestedPeerTunnelIP(cfg) {
 }
 
 /* ——— Peers ——— */
-function setPeersMsg(text, isErr) {
+function setPeersMsg(text, isErr, field) {
   const el = $("peers-msg");
   el.textContent = text;
   el.classList.toggle("err", !!isErr);
+  if (isErr && field) markFieldInvalid(el, field);
+  else clearFieldInvalid(el);
 }
 
 export function stopPeersPingPolling() {
@@ -129,7 +138,7 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
   const wrap = $("peers-table-wrap");
   if (!cfg.peers || !cfg.peers.length) {
     wrap.innerHTML =
-      "<div class=\"empty-state\"><span class=\"empty-state-msg\">No peers configured.</span> <button type=\"button\" class=\"btn-primary\" id=\"peers-empty-add\">Add peer</button></div>";
+      "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No peers configured</p><p>Add a peer to hand out a WireGuard tunnel address and keys.</p><button type=\"button\" class=\"evu-btn evu-btn--primary\" id=\"peers-empty-add\">Add peer</button></div>";
     const addBtn = $("peers-empty-add");
     if (addBtn) {
       addBtn.addEventListener("click", () => {
@@ -145,7 +154,7 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       : "";
   const pubMap = wgPeerPubKeyMap(wgStats);
   const pingOn = showPeersMetricsColumn();
-  const pingHead = pingOn ? "<th>Ping</th>" : "";
+  const pingHead = pingOn ? "<th scope=\"col\">Ping</th>" : "";
   const rows = cfg.peers
     .map((p, i) => {
       const f = [p.name, p.tunnel_ip, p.public_key].join(" ").toLowerCase();
@@ -153,11 +162,11 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       return (
         `<tr data-filter="${escapeHtml(f)}"><td>${escapeHtml(p.name)}</td>` +
         monoIpCopyCellHtml(p.tunnel_ip) +
-        `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" data-peer-edit="${i}">Edit</button> <button type="button" data-peer-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+        `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>`
       );
     })
     .join("");
-  wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th>Name</th><th>Tunnel IP</th><th>Public key</th>${pingHead}<th>Status</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th scope="col">Name</th><th scope="col">Tunnel IP</th><th scope="col">Public key</th>${pingHead}<th scope="col">Status</th><th scope="col">Enabled</th><th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
   bindTunnelIpCopyButtons(wrap, setPeersMsg);
   wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
     b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
@@ -392,8 +401,15 @@ async function savePeerEditor() {
     public_key: $("peer-f-pub").value.trim(),
     disabled: !($("peer-f-disabled") && $("peer-f-disabled").checked),
   };
-  if (!peer.name || !peer.tunnel_ip || !peer.public_key) {
-    setPeersMsg("Name, tunnel IP, and public key are required.", true);
+  // Report the first empty field rather than a combined message, so the
+  // invalid marker and the focus move land somewhere specific.
+  const missing = [
+    [peer.name, "peer-f-name", "Name is required."],
+    [peer.tunnel_ip, "peer-f-tunnel", "Tunnel IP is required."],
+    [peer.public_key, "peer-f-pub", "Public key is required."],
+  ].find(([value]) => !value);
+  if (missing) {
+    setPeersMsg(missing[2], true, $(missing[1]));
     return;
   }
   if (idxRaw === "") cfg.peers.push(peer);
@@ -813,6 +829,7 @@ function extractOnboardConfFromOutput() {
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initPeersPage() {
   $("peers-refresh").addEventListener("click", refreshPeersPage);
+  registerModalCloser($("peer-qr-modal"), closePeerQRModal);
   const peerTabFieldsBtn = $("peer-tab-fields-btn");
   const peerTabOnboardBtn = $("peer-tab-onboard-btn");
   if (peerTabFieldsBtn)

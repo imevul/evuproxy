@@ -1,11 +1,15 @@
 {
   "name": "evuproxy-playwright-visual",
   "private": true,
-  "description": "Headless/full-page screenshots of the EvuProxy admin UI against the dev mock stack",
+  "description": "Headless screenshots and axe-core accessibility checks for the EvuProxy admin UI against the dev mock stack",
   "devDependencies": {
-    "@playwright/test": "^1.60.0"
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.60.0",
+    "axe-core": "^4.12.1"
   },
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test smoke-visual",
+    "test:a11y": "playwright test a11y.spec",
+    "test:behavior": "playwright test modal-stack drawer-tabs a11y-markup apply-gate"
   }
 }

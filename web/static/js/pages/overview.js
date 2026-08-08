@@ -9,6 +9,13 @@ import {
 } from "../core/peers_data.js";
 import { tunnelToHost } from "../core/net.js";
 import { refreshPendingBadge } from "./pending.js";
+import { openConfirmModal } from "../core/modal.js";
+import {
+  fetchValidateResult,
+  lockoutRiskLines,
+  lockoutRisks,
+  lockoutSignature,
+} from "../core/lockout.js";
 
 /** 1 min aligns with collector buckets; avoids doubling load with full overview refetch. */
 const OVERVIEW_LATENCY_POLL_MS = 60 * 1000;
@@ -120,7 +127,7 @@ export async function refreshOverviewEventsList() {
 /* ——— Overview ——— */
 function overviewApiIssueCard(opts) {
   const wrap = document.createElement("div");
-  wrap.className = "card overview-api-issue-card";
+  wrap.className = "evu-card card overview-api-issue-card";
   const p = document.createElement("p");
   p.textContent = opts.message;
   wrap.appendChild(p);
@@ -503,7 +510,7 @@ function appendPingSparkInto(containerEl, met) {
 function overviewLatencyOverviewCard(met) {
   const wrap = document.createElement("div");
   wrap.id = "overview-latency-card";
-  wrap.className = "card overview-dash-card overview-dash-latency";
+  wrap.className = "evu-card card overview-dash-card overview-dash-latency";
   wrap.setAttribute("role", "group");
   wrap.setAttribute("aria-label", "Peer ICMP latency summary and rolling average chart");
 
@@ -564,7 +571,7 @@ function overviewLatencyOverviewCard(met) {
 
 function overviewHostGeoCard(o) {
   const wrap = document.createElement("div");
-  wrap.className = "card overview-dash-card overview-dash-host";
+  wrap.className = "evu-card card overview-dash-card overview-dash-host";
 
   const h = document.createElement("h3");
   h.textContent = "Tunnel, forwarding & geo";
@@ -622,9 +629,14 @@ function overviewHostGeoCard(o) {
       (stale ? "overview-geo-fresh-tag--stale" : "overview-geo-fresh-tag--ok");
     tag.textContent = stale ? "Stale" : "Up to date";
 
-    const ageLine = document.createElement("div");
+    const ageLine = document.createElement("span");
     ageLine.className = "overview-geo-fresh-age";
-    ageLine.textContent = age ? "Zones last loaded " + age : "Zones last loaded";
+    ageLine.textContent = age ? "Loaded " + age : "Loaded";
+
+    const head = document.createElement("div");
+    head.className = "overview-geo-fresh-head";
+    head.appendChild(tag);
+    head.appendChild(ageLine);
 
     const meta = document.createElement("div");
     meta.className = "overview-geo-fresh-meta";
@@ -653,8 +665,7 @@ function overviewHostGeoCard(o) {
     }
     meta.appendChild(tsWrap);
 
-    root.appendChild(tag);
-    root.appendChild(ageLine);
+    root.appendChild(head);
     root.appendChild(meta);
     return root;
   }
@@ -694,7 +705,13 @@ function overviewHostGeoCard(o) {
   addRow("Geo", geoLine, geoTitle || undefined);
 
   if (o.geo_enabled) {
-    addStructuredValueRow("Geo zones freshness", buildGeoFreshnessCell(o));
+    // Full width rather than a KV pair: the value is a stack that the narrow
+    // value column would break onto five lines.
+    const lab = document.createElement("div");
+    lab.className = "overview-kv-label overview-geo-fresh-label";
+    lab.textContent = "Geo zones freshness";
+    grid.appendChild(lab);
+    grid.appendChild(buildGeoFreshnessCell(o));
   }
 
   wrap.appendChild(grid);
@@ -721,39 +738,43 @@ function overviewApplySummaryLine(evs) {
   return line;
 }
 
+/** Theme panel used for the two groups nested inside the activity card. */
+function activityPane(title) {
+  const root = document.createElement("section");
+  root.className = "evu-panel overview-activity-pane";
+  const head = document.createElement("div");
+  head.className = "evu-panel__head";
+  const h = document.createElement("h3");
+  h.className = "overview-pane-title";
+  h.textContent = title;
+  head.appendChild(h);
+  const body = document.createElement("div");
+  body.className = "evu-panel__body";
+  root.appendChild(head);
+  root.appendChild(body);
+  return { root, body };
+}
+
 function overviewActivityAttentionCard(evs, items) {
   const wrap = document.createElement("div");
-  wrap.className = "card overview-dash-card overview-dash-activity";
+  wrap.className = "evu-card card overview-dash-card overview-dash-activity";
 
   const inner = document.createElement("div");
   inner.className = "overview-activity-merge-inner";
 
-  const left = document.createElement("section");
-  left.className = "overview-activity-pane";
-  const t1 = document.createElement("div");
-  t1.className = "overview-pane-title";
-  t1.textContent = "Last apply activity";
+  const left = activityPane("Last apply activity");
   const p1 = document.createElement("p");
   p1.className = "meta";
   p1.textContent = overviewApplySummaryLine(evs);
-  left.appendChild(t1);
-  left.appendChild(p1);
+  left.body.appendChild(p1);
 
-  const right = document.createElement("section");
-  right.className = "overview-activity-pane";
-  const t2 = document.createElement("div");
-  t2.className = "overview-pane-title";
-
+  const right = activityPane(items.length ? "Needs attention" : "Status");
   if (!items.length) {
-    t2.textContent = "Status";
     const ok = document.createElement("p");
     ok.className = "meta";
     ok.textContent = "No warnings from this pass.";
-    right.appendChild(t2);
-    right.appendChild(ok);
+    right.body.appendChild(ok);
   } else {
-    t2.textContent = "Needs attention";
-    right.appendChild(t2);
     const ul = document.createElement("ul");
     ul.className = "attention-list";
     for (const txt of items) {
@@ -761,13 +782,20 @@ function overviewActivityAttentionCard(evs, items) {
       li.textContent = txt;
       ul.appendChild(li);
     }
-    right.appendChild(ul);
+    right.body.appendChild(ul);
   }
 
-  inner.appendChild(left);
-  inner.appendChild(right);
+  inner.appendChild(left.root);
+  inner.appendChild(right.root);
   wrap.appendChild(inner);
   return wrap;
+}
+
+/** Routes have no name of their own, so identify them by the ports operators recognise. */
+function routeLabel(r) {
+  const ports = (r.ports || []).join(", ");
+  if (!ports) return "A route";
+  return "The route on port" + ((r.ports || []).length > 1 ? "s " : " ") + ports;
 }
 
 function buildOverviewAttentionItems(cfg, o, st, met) {
@@ -784,20 +812,20 @@ function buildOverviewAttentionItems(cfg, o, st, met) {
       items.push('Peer "' + (p.name || "unnamed") + '" looks offline (stale handshake).');
     }
   }
-  const disabledByTunnel = new Set();
+  const disabledPeerByTunnel = new Map();
   for (const p of peers) {
     if (p.disabled) {
       const th = tunnelToHost(p.tunnel_ip);
-      if (th) disabledByTunnel.add(th);
+      if (th) disabledPeerByTunnel.set(th, String(p.name || "").trim() || "unnamed");
     }
   }
   const routes = (cfg && cfg.forwarding && cfg.forwarding.routes) || [];
-  for (let i = 0; i < routes.length; i++) {
-    const r = routes[i];
+  for (const r of routes) {
     if (r.disabled) continue;
     const tip = String(r.target_ip || "").trim();
-    if (tip && disabledByTunnel.has(tip)) {
-      items.push("Route #" + (i + 1) + " targets a disabled peer tunnel (" + tip + ").");
+    if (tip && disabledPeerByTunnel.has(tip)) {
+      items.push(
+        routeLabel(r) + ' targets disabled peer "' + disabledPeerByTunnel.get(tip) + '" (' + tip + ").");
     }
   }
   if (met && !met.collection_disabled && (!met.peers || !met.peers.length)) {
@@ -823,10 +851,9 @@ function buildOverviewAttentionItems(cfg, o, st, met) {
   if (cfg && cfg.forwarding && cfg.forwarding.maintenance_mode) {
     items.push("Maintenance mode is on — public forwards are disabled until you turn it off and reload.");
   }
-  for (let i = 0; i < routes.length; i++) {
-    const r = routes[i];
+  for (const r of routes) {
     if (r.source_allow_cidrs && r.source_allow_cidrs.length) {
-      items.push("Route #" + (i + 1) + " restricts sources to an allowlist.");
+      items.push(routeLabel(r) + " restricts sources to an allowlist.");
     }
   }
   return items;
@@ -945,7 +972,64 @@ export function initOverviewPage() {
     });
   }
 
-  $("btn-reload").addEventListener("click", async () => {
+  const reloadBtn = $("btn-reload");
+  // Same host-mutating endpoint as Apply on Pending changes, so it gets the same
+  // lockout gate. Leaving this one ungated would make the gate decorative —
+  // maintenance mode is itself a lockout risk, and the copy next to this button
+  // tells the operator to press it.
+  async function reloadWithLockoutCheck() {
+    setOverviewMsg("Checking config…");
+    const { res, error } = await fetchValidateResult();
+    if (!res) {
+      setOverviewMsg(error, true);
+      return;
+    }
+    if (!res.ok) {
+      setOverviewMsg("Config check failed; see Pending changes → Check config.", true);
+      return;
+    }
+    const risks = lockoutRisks(res);
+    if (risks.length) {
+      const ip = res.detected_client_ip || "unknown";
+      setOverviewMsg("Reload needs confirmation: this config may lock you out.", true);
+      openConfirmModal({
+        title: "This reload may lock you out",
+        message:
+          "Your connection appears as " +
+          ip +
+          ".\n\n" +
+          lockoutRiskLines(risks).join("\n") +
+          "\n\nOnly continue if you have another way back into this host.",
+        confirmLabel: "Reload anyway",
+        // Re-check on confirm: the dialog can sit open while another tab, the CLI
+        // or another operator saves something else. The confirmation covers the
+        // risks that were on screen, so a different set has to be read first.
+        onConfirm: () => confirmedReload(lockoutSignature(risks)),
+      });
+      return;
+    }
+    await doReload();
+  }
+
+  async function confirmedReload(acknowledged) {
+    setOverviewMsg("Checking config…");
+    const { res, error } = await fetchValidateResult();
+    if (!res) {
+      setOverviewMsg(error, true);
+      return;
+    }
+    if (!res.ok) {
+      setOverviewMsg("Config check failed; see Pending changes → Check config.", true);
+      return;
+    }
+    if (lockoutSignature(lockoutRisks(res)) !== acknowledged) {
+      setOverviewMsg("The config changed since you confirmed. Press Reload config to review again.", true);
+      return;
+    }
+    await doReload();
+  }
+
+  async function doReload() {
     setOverviewMsg("…");
     try {
       await api("/v1/reload", { method: "POST" });
@@ -954,6 +1038,16 @@ export function initOverviewPage() {
       refreshPendingBadge();
     } catch (e) {
       setOverviewMsg(String(e.message || e), true);
+    }
+  }
+
+  reloadBtn.addEventListener("click", async () => {
+    if (reloadBtn.disabled) return;
+    reloadBtn.disabled = true;
+    try {
+      await reloadWithLockoutCheck();
+    } finally {
+      reloadBtn.disabled = false;
     }
   });
   $("btn-geo").addEventListener("click", async () => {

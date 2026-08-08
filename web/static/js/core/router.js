@@ -109,7 +109,7 @@ export async function navigate(name) {
     }, 4000);
   }
   if (name === "inbound") refreshInboundPage();
-  if (name === "geoblocking") await refreshGeoblockingPage();
+  if (name === "geoblocking") await refreshGeoblockingPage({ resetTab: true });
   if (name === "pending") refreshPendingPage();
   if (name === "stats") refreshStatsPage();
   if (name === "logs") refreshLogsPage();

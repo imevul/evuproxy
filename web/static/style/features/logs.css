@@ -1,0 +1,130 @@
+/**
+ * EvuProxy — Logs page — toolbar, filters, table.
+ */
+
+.logs-pre {
+  max-height: min(60vh, 36rem);
+  margin-top: 0.35rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.logs-toolbar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.logs-toolbar-wrap .logs-toolbar {
+  margin-bottom: 0;
+}
+
+.logs-toolbar-row {
+  width: 100%;
+}
+
+.logs-toolbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0.5rem;
+}
+
+.logs-toolbar {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 0.75rem;
+}
+
+.logs-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--evu-muted-foreground);
+}
+
+.logs-field-grow {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+}
+
+.logs-field-label {
+  line-height: 1.2;
+}
+
+.logs-field select,
+.logs-search-input,
+.logs-datetime-input {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--evu-foreground);
+  background: var(--evu-background);
+  border: 1px solid var(--evu-border);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  box-sizing: border-box;
+  min-width: 11.5rem;
+  min-height: 2.375rem;
+  line-height: 1.25;
+}
+
+.logs-search-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.logs-datetime-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.dark .logs-datetime-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
+.logs-count {
+  margin-top: 0.25rem;
+  margin-bottom: 0;
+}
+
+.logs-table-wrap {
+  max-height: min(60vh, 36rem);
+  margin-top: 0.35rem;
+  overflow: auto;
+}
+
+table.data.logs-data th,
+table.data.logs-data td {
+  vertical-align: top;
+}
+
+table.data.logs-data .logs-col-flags {
+  max-width: 14rem;
+  word-break: break-word;
+}
+
+table.data.logs-data .logs-col-type {
+  white-space: nowrap;
+}
+
+.logs-ip-flag {
+  font-family: "Twemoji Mozilla", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+}
+
+table.data.logs-data .logs-col-ip {
+  white-space: nowrap;
+}
+
+.logs-breakglass-btn {
+  margin-left: 0.2rem;
+  vertical-align: middle;
+}
+
+.logs-breakglass-btn.evu-btn--icon.evu-btn--sm {
+  height: 1.5rem;
+  width: 1.5rem;
+}
+
+.logs-breakglass-icon {
+  display: block;
+}

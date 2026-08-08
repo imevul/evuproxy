@@ -30,9 +30,14 @@ export function downloadTextFile(filename, text, mime) {
 export function setApiStatus(ok, detail) {
   const el = $("api-status");
   if (!el) return;
-  el.textContent = ok ? "API OK" : "API error";
-  el.classList.remove("pill-muted", "pill-ok", "pill-err");
-  el.classList.add(ok ? "pill-ok" : "pill-err");
+  const text = ok ? "API OK" : "API error";
+  // This is a live region and the poll re-runs every few seconds. Only touch it
+  // when the state actually flips, or screen readers announce "API OK" forever.
+  if (el.textContent !== text) {
+    el.textContent = text;
+    el.classList.remove("evu-pill--ok", "evu-pill--err");
+    el.classList.add(ok ? "evu-pill--ok" : "evu-pill--err");
+  }
   if (detail) el.title = detail;
 }
 
@@ -108,7 +113,7 @@ export function monoIpCopyCellHtml(value, displayName) {
   const display = escapeHtml(raw);
   const copyVal = tunnelIpWithoutSuffix(raw);
   const copyBtn = copyVal
-    ? `<button type="button" class="btn-quiet btn-tunnel-ip-copy" data-tunnel-ip-copy="${escapeHtml(copyVal)}" aria-label="Copy IP address" title="Copy IP (without subnet mask)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg></button>`
+    ? `<button type="button" class="evu-btn evu-btn--outline btn-tunnel-ip-copy" data-tunnel-ip-copy="${escapeHtml(copyVal)}" aria-label="Copy IP address" title="Copy IP (without subnet mask)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg></button>`
     : "";
   const label = String(displayName ?? "").trim();
   const labelHtml = label ? `<span class="route-target-name">${escapeHtml(label)}</span>` : "";

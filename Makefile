@@ -1,4 +1,4 @@
-.PHONY: all up down dev dev-fresh playwright-deps playwright-visual \
+.PHONY: all up down dev dev-fresh playwright-deps playwright-visual a11y ui-behavior \
 	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
 	check fmt vet test test-race deadcode
 
@@ -53,19 +53,34 @@ dev-fresh:
 down:
 	docker compose -f docker-compose.dev.yml down
 
-# Playwright: npm deps + Chromium for admin UI screenshots (devtools/playwright-visual).
+# Playwright: npm deps + Chromium for admin UI screenshots and axe checks (devtools/playwright-visual).
 playwright-deps:
 	cd $(PLAYWRIGHT_DIR) && npm ci && npx playwright install chromium
 
-playwright-visual:
+# Both Playwright targets need the dev UI answering; skip with SKIP_PLAYWRIGHT_PING=1.
+define require_dev_ui
 	@if [ -z "$$SKIP_PLAYWRIGHT_PING" ]; then \
 	  u="$${BASE_URL:-http://127.0.0.1:9080}"; \
 	  curl -sf --max-time 3 "$${u%/}/" >/dev/null || { \
-	    printf '%s\n' >&2 'playwright-visual: UI not reachable at '"$$u"' (hint: run `make up` from repo root first)'; \
+	    printf '%s\n' >&2 '$(1): UI not reachable at '"$$u"' (hint: run `make up` from repo root first)'; \
 	    exit 1; \
 	  }; \
 	fi
+endef
+
+playwright-visual:
+	$(call require_dev_ui,playwright-visual)
 	cd $(PLAYWRIGHT_DIR) && npm run test
+
+# axe-core gate: fails on critical/serious WCAG 2.1 AA violations in light and dark.
+a11y:
+	$(call require_dev_ui,a11y)
+	cd $(PLAYWRIGHT_DIR) && npm run test:a11y
+
+# Behavioural a11y the axe gate cannot see: Escape order, focus trap, inertness.
+ui-behavior:
+	$(call require_dev_ui,ui-behavior)
+	cd $(PLAYWRIGHT_DIR) && npm run test:behavior
 
 # Optional CrowdSec stack (same host as EvuProxy). See contrib/crowdsec/README.md.
 crowdsec-install:

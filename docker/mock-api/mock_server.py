@@ -923,6 +923,100 @@ def _geo_summary_mock(cfg: dict) -> dict:
     }
 
 
+# Small fixed map so the Geoblock "Check IP" panel has deterministic demos.
+_MOCK_IP_COUNTRY = {
+    "8.8.8.8": "us",
+    "1.1.1.1": "au",
+    "91.90.140.1": "se",
+    "85.19.1.1": "no",
+    "203.0.113.9": "se",
+    "203.0.113.50": "us",
+}
+
+
+def _mock_ip_in_cidrs(ip: str, cidrs) -> bool:
+    for raw in cidrs or []:
+        c = str(raw or "").strip()
+        if not c:
+            continue
+        if "/" in c:
+            net, _, bits = c.partition("/")
+            if bits == "32" and ip == net:
+                return True
+            parts = net.split(".")
+            if len(parts) == 4 and parts[-1] == "0" and bits in ("24", "16", "8"):
+                n = {"24": 3, "16": 2, "8": 1}[bits]
+                if ip.startswith(".".join(parts[:n]) + "."):
+                    return True
+        elif ip == c:
+            return True
+    return False
+
+
+def _geo_check_ip_mock(ip: str, cfg: dict, from_draft: bool) -> dict:
+    geo = cfg.get("geo") or {}
+    fwd = cfg.get("forwarding") or {}
+    enabled = bool(geo.get("enabled"))
+    mode = (geo.get("mode") or "allow").lower()
+    if mode not in ("allow", "block"):
+        mode = "allow"
+    countries = [str(c).strip().lower() for c in (geo.get("countries") or []) if str(c).strip()]
+    country = _MOCK_IP_COUNTRY.get(ip, "")
+    matched = [country] if country and country in countries else []
+    in_zones = bool(matched)
+    break_glass = _mock_ip_in_cidrs(ip, geo.get("break_glass_cidrs") or [])
+    global_deny = _mock_ip_in_cidrs(ip, fwd.get("source_deny_cidrs") or [])
+    apply_inbound = bool(geo.get("apply_to_input_allows"))
+
+    out = {
+        "ip": ip,
+        "ok": True,
+        "geo_enabled": enabled,
+        "geo_mode": mode if enabled else "",
+        "break_glass": break_glass,
+        "global_deny": global_deny,
+        "in_listed_zones": in_zones,
+        "matched_countries": matched,
+        "country_iso": country or "",
+        "apply_to_input_allows": apply_inbound,
+        "checked_from_draft": from_draft,
+        "note": "Mock API: country membership uses a small fixed map, not zone files.",
+    }
+
+    if not enabled:
+        if global_deny:
+            out["verdict"] = "blocked"
+            out["summary"] = f"{ip} is on the global forward denylist. Geoblocking is off."
+        else:
+            out["verdict"] = "geo_off"
+            out["summary"] = f"{ip} is not filtered by country rules (geoblocking is off)."
+        return out
+    if global_deny:
+        out["verdict"] = "blocked"
+        out["summary"] = f"{ip} is on the global forward denylist (checked before geoblocking)."
+        return out
+    if break_glass:
+        out["verdict"] = "allowed"
+        out["summary"] = f"{ip} matches a break-glass CIDR and bypasses geoblocking."
+        return out
+
+    blocked = in_zones if mode == "block" else not in_zones
+    out["verdict"] = "blocked" if blocked else "allowed"
+    if mode == "allow":
+        out["summary"] = (
+            f"{ip} matches a listed country and would be allowed (allow mode)."
+            if in_zones
+            else f"{ip} is not in any listed country and would be blocked (allow mode)."
+        )
+    else:
+        out["summary"] = (
+            f"{ip} matches a listed country and would be blocked (block mode)."
+            if in_zones
+            else f"{ip} is not in a listed country and would be allowed (block mode)."
+        )
+    return out
+
+
 def _auth_ok(handler: BaseHTTPRequestHandler) -> bool:
     auth = handler.headers.get("Authorization", "")
     tok = ""
@@ -1205,6 +1299,18 @@ class Handler(BaseHTTPRequestHandler):
                     "validated_from_draft": bool(isinstance(body, dict) and body),
                 },
             )
+        if path == "/api/v1/geo/check-ip":
+            body = self._read_json_body(MAX_JSON_PUT) if _content_len(self) else {}
+            if not isinstance(body, dict):
+                body = {}
+            ip = str(body.get("ip") or "").strip()
+            if not ip:
+                return self._send_json(400, {"error": "ip is required"})
+            cfg = body.get("config") if isinstance(body.get("config"), dict) else None
+            from_draft = cfg is not None
+            if cfg is None:
+                cfg = copy.deepcopy(MOCK_CONFIG)
+            return self._send_json(200, _geo_check_ip_mock(ip, cfg, from_draft))
         if path == "/api/v1/routes/test":
             if not _route_test_rate_ok():
                 return self._send_json(

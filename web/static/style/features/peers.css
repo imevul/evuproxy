@@ -1,0 +1,154 @@
+/**
+ * EvuProxy — Peers — editor modal, onboarding, QR, status chips.
+ */
+
+.proto-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.proto-checks label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.onboard-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.onboard-hint {
+  margin-top: 0;
+  padding: 0.5rem 0.65rem;
+  background: hsl(var(--muted) / 0.55);
+  border-radius: calc(var(--evu-radius) - 2px);
+  border: 1px solid var(--evu-border);
+  color: var(--evu-muted-foreground);
+  font-size: 0.8rem;
+}
+
+.onboard-install-hint-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  margin: 0.35rem 0 0;
+}
+
+.onboard-install-hint-row > .btn-help-trigger {
+  margin-top: 0.05rem;
+}
+
+.onboard-install-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+.onboard-bundle-panel {
+  margin-bottom: 0.15rem;
+}
+
+.onboard-bundle-cmd {
+  max-height: 14rem;
+  word-break: break-word;
+  white-space: pre-wrap;
+  margin-top: 0.45rem;
+}
+
+table.data .peer-status {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--evu-border);
+  white-space: nowrap;
+}
+
+table.data .peer-status-on {
+  color: var(--evuproxy-success-text);
+  border-color: var(--evu-success);
+}
+
+table.data .peer-status-off {
+  color: var(--evuproxy-danger-text);
+  border-color: var(--evu-destructive);
+}
+
+table.data .peer-status-unknown {
+  color: var(--evuproxy-warning-text);
+  border-color: var(--evu-warning);
+}
+
+table.data .peer-status-na {
+  color: var(--evu-muted-foreground);
+  border-color: var(--evu-border);
+  font-weight: 500;
+  text-transform: none;
+}
+
+.peer-editor {
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.peer-editor h3 {
+  margin-top: 0;
+}
+
+.peer-onboard-section {
+  margin: 1.15rem 0 0;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--evu-border);
+}
+
+.peer-section-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--evu-foreground);
+}
+
+.peer-qr-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+  min-height: 4rem;
+}
+
+.peer-qr-canvas-wrap img {
+  max-width: 100%;
+  height: auto;
+  /* Literal white, not a token: QR scanners need a real white quiet zone in both themes. */
+  background: #fff;
+  padding: 0.5rem;
+  border-radius: 6px;
+}
+
+.peer-editor-tabs {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.onboard-method-tabs {
+  margin: 1rem 0 0.75rem;
+}
+
+.peer-onboard-section .onboard-build-toolbar {
+  margin-top: 0.75rem;
+}
+
+.peer-editor [role='tabpanel'] > .peer-onboard-section {
+  padding-top: 0.35rem;
+}

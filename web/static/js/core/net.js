@@ -34,6 +34,10 @@ export function parseIPv4CIDR(cidr) {
   if (prefix === 32) {
     return { network: ip, broadcast: ip, prefix, mask: 0xffffffff };
   }
+  // JS shifts mask to 5 bits, so `<< 32` is `<< 0` — handle /0 explicitly.
+  if (prefix === 0) {
+    return { network: 0, broadcast: 0xffffffff, prefix, mask: 0 };
+  }
   const mask = ((-1) << (32 - prefix)) >>> 0;
   const network = (ip & mask) >>> 0;
   const broadcast = (network | (~mask >>> 0)) >>> 0;
@@ -78,6 +82,24 @@ export function parseSourceAllowListInput(raw) {
     .split(/[\s,]+/)
     .map((x) => x.trim())
     .filter(Boolean);
+}
+
+/** True when ip (IPv4) equals or falls inside any bare address / CIDR in entries. */
+export function ipv4CoveredByCIDRList(ip, entries) {
+  const ipInt = ipv4ToInt(ip);
+  if (ipInt === null) return false;
+  for (const raw of entries || []) {
+    const s = String(raw || "").trim();
+    if (!s) continue;
+    if (s.includes("/")) {
+      const parsed = parseIPv4CIDR(s);
+      if (parsed && ipInCidr(ipInt, parsed)) return true;
+      continue;
+    }
+    const other = ipv4ToInt(s);
+    if (other !== null && other === ipInt) return true;
+  }
+  return false;
 }
 
 export function routeProtoPlainText(p) {

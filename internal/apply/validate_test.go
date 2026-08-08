@@ -72,6 +72,45 @@ func TestValidateConfigWithWarnings_includesClientIP(t *testing.T) {
 	}
 }
 
+// An undetectable client address means the address-specific lockout checks did
+// not run. That must not present as a clean result, or the UI shows a green
+// "passed" for a config whose real risk was never evaluated.
+func TestValidateConfigWithWarnings_unknownClientIPWarnsCheckSkipped(t *testing.T) {
+	skipUnlessNFTablesCheck(t)
+	info := ClientIPInfo{Source: ClientIPSourceUnavailable, Note: "could not determine IPv4 client address"}
+	res := ValidateConfigWithWarnings(validTestConfig(t), info, nil, false)
+	if !res.OK {
+		t.Fatalf("validate failed: %+v", res.Errors)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if w.Code == "lockout_risk_check_unavailable" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected lockout_risk_check_unavailable, got %+v", res.Warnings)
+	}
+}
+
+// The maintenance-mode risk is address-independent, so it must survive the
+// address being unknown.
+func TestValidateConfigWithWarnings_maintenanceWarnsWithoutClientIP(t *testing.T) {
+	skipUnlessNFTablesCheck(t)
+	c := validTestConfig(t)
+	c.Forwarding.MaintenanceMode = true
+	res := ValidateConfigWithWarnings(c, ClientIPInfo{Source: ClientIPSourceUnavailable}, nil, false)
+	found := false
+	for _, w := range res.Warnings {
+		if w.Code == "lockout_risk_maintenance" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected lockout_risk_maintenance, got %+v", res.Warnings)
+	}
+}
+
 func TestValidateConfigFile_doesNotWriteBak(t *testing.T) {
 	skipUnlessNFTablesCheck(t)
 	dir := t.TempDir()

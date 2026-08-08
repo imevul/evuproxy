@@ -12,7 +12,7 @@ Production nginx sends **`Cache-Control: no-cache, private, must-revalidate`** f
 
 See also [Security and privacy](security-and-privacy.md) and [Local HTTP API](http-api.md).
 
-The UI is **dark-themed** only. **Overview** shows recent **audit events** (from the API), geo list freshness when available, and a **Maintenance mode** toggle (sets `forwarding.maintenance_mode`; when on, no forward DNAT/accept rules are generated until you apply with it off again). **Settings** uses tabs (**Preferences**, **Notes & backups**, **Advanced**) and can download raw **`config.yaml`** from Preferences. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API. **Topology** shows a read-only graph of `forwarding.routes` from the EvuProxy host (ingress) to each target peer, using `GET /v1/stats` for WireGuard handshake-style edge coloring.
+The UI is **dark-themed** only. **Overview** shows recent **audit events** (from the API), geo list freshness when available, and a **Maintenance mode** toggle (sets `forwarding.maintenance_mode`; when on, no forward DNAT/accept rules are generated until you apply with it off again). **Settings** uses tabs (**Preferences**, **Notes & backups**, **Advanced**) and can download raw **`config.yaml`** from Preferences. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API and includes a **Check an IP** preview (dry-run against form rules via **`POST /api/v1/geo/check-ip`**). **Topology** shows a read-only graph of `forwarding.routes` from the EvuProxy host (ingress) to each target peer, using `GET /v1/stats` for WireGuard handshake-style edge coloring.
 
 **Backup & restore (Settings → Notes & backups):** create a config tarball via `POST /api/v1/backup` and restore one via `POST /api/v1/restore`. Paths must resolve under the API's backup allowlist directory (default `/var/backups`, override with `EVUPROXY_BACKUP_DIR` on the API service) — see [Local HTTP API](http-api.md). After a restore, apply with reload.
 
@@ -24,7 +24,7 @@ The UI is **dark-themed** only. **Overview** shows recent **audit events** (from
 
 **WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft list table … -a`).
 
-Generated EvuProxy enforcement drops (geoblock, rate limits, CrowdSec, forward catch-all) use **`log prefix`** and **`drop`** — not **`counter`** — so hit counts show up on the **Logs** page (journal/dmesg), not in the Stats nftables table, even when those features are enabled and dropping traffic.
+Generated EvuProxy enforcement drops (geoblock, rate limits, CrowdSec, forward catch-all) use **`log prefix`** and **`drop`** — not **`counter`** — so hit counts show up on the **Logs** page (journal/dmesg), not in the Stats nftables table, even when those features are enabled and dropping traffic. Geoblock **SRC** cells offer a break-glass add control when that IPv4 is not already covered by **`geo.break_glass_cidrs`**.
 
 **Deferred:** add optional **`counter`** on selected drop rules (or dedicated summary rules) so rate-limit and CrowdSec packet counts could also appear on Stats, in addition to log lines on Logs.
 
