@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/imevul/evuproxy/compare/v0.14.0...v0.15.0) (2026-08-08)
+
+
+### Features
+
+* **ui:** density/a11y pass, apply gate, geo IP check, and logs break-glass ([290b8c1](https://github.com/imevul/evuproxy/commit/290b8c18c1bbb6b7e5352594f1c0b54b462d6e6a))
+
 ## [0.14.0](https://github.com/imevul/evuproxy/compare/v0.13.0...v0.14.0) (2026-08-08)
 
 
