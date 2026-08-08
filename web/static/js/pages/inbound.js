@@ -1,7 +1,14 @@
 import { state } from "../core/state.js";
-import { $, escapeHtml, setApiStatus, tableDisabledToggleCell } from "../core/dom.js";
+import {
+  $,
+  escapeHtml,
+  setApiStatus,
+  tableDisabledToggleCell,
+  markFieldInvalid,
+  clearFieldInvalid,
+} from "../core/dom.js";
 import { api } from "../core/api.js";
-import { openModal, closeModal } from "../core/modal.js";
+import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 async function patchInboundDisabled(index, disabled) {
@@ -22,11 +29,13 @@ async function patchInboundDisabled(index, disabled) {
 }
 
 /* ——— Inbound access (input_allows) ——— */
-function setInboundMsg(text, isErr) {
+function setInboundMsg(text, isErr, field) {
   const el = $("inbound-msg");
   if (!el) return;
   el.textContent = text;
   el.classList.toggle("err", !!isErr);
+  if (isErr && field) markFieldInvalid(el, field);
+  else clearFieldInvalid(el);
 }
 
 function renderInboundTable(cfg) {
@@ -36,7 +45,7 @@ function renderInboundTable(cfg) {
 
   if (!rules.length) {
     wrap.innerHTML =
-      "<div class=\"empty-state\"><span class=\"empty-state-msg\">No inbound rules yet.</span> <button type=\"button\" class=\"btn-primary\" id=\"inbound-empty-add\">Add rule</button></div>";
+      "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No inbound rules yet</p><p>Add a rule to open a port on the host itself, outside the tunnel.</p><button type=\"button\" class=\"evu-btn evu-btn--primary\" id=\"inbound-empty-add\">Add rule</button></div>";
     const addBtn = wrap.querySelector("#inbound-empty-add");
     if (addBtn) addBtn.addEventListener("click", () => openInboundEditor(-1));
     return;
@@ -49,11 +58,11 @@ function renderInboundTable(cfg) {
         " " +
         String(r.dport || r.note || "#" + i);
       return (
-        `<tr><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" data-inbound-edit="${i}">Edit</button> <button type="button" data-inbound-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+        `<tr><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>`
       );
     })
     .join("");
-  wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Port(s)</th><th>Note</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML = `<table class="data"><thead><tr><th scope="col">Proto</th><th scope="col">Port(s)</th><th scope="col">Note</th><th scope="col">Enabled</th><th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
   wrap.querySelectorAll("[data-inbound-edit]").forEach((b) => {
     b.addEventListener("click", () => openInboundEditor(+b.getAttribute("data-inbound-edit")));
   });
@@ -125,13 +134,13 @@ async function saveInboundEditor() {
   const dport = $("inbound-f-dport").value.trim();
   const note = $("inbound-f-note").value.trim();
   if (proto !== "tcp" && proto !== "udp") {
-    setInboundMsg("Protocol must be tcp or udp.", true);
+    setInboundMsg("Protocol must be tcp or udp.", true, $("inbound-f-proto"));
     return;
   }
   const disEl = $("inbound-f-disabled");
   const enabled = disEl && disEl.checked;
   if (enabled && !dport) {
-    setInboundMsg("Destination port is required.", true);
+    setInboundMsg("Destination port is required.", true, $("inbound-f-dport"));
     return;
   }
   const entry = { proto };
@@ -154,20 +163,74 @@ async function saveInboundEditor() {
   }
 }
 
-async function removeInboundRule(index) {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.input_allows) return;
-  cfg.input_allows.splice(index, 1);
-  try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
-    setInboundMsg("Rule removed. Apply on Pending changes when ready.");
-    renderInboundTable(cfg);
-    setApiStatus(true);
-    refreshPendingBadge();
-  } catch (e) {
-    setInboundMsg(String(e.message || e), true);
+function inboundRuleIdentity(r) {
+  return (
+    String(r.proto || "").toLowerCase() +
+    "\0" +
+    String(r.dport || "") +
+    "\0" +
+    String(r.note || "").trim()
+  );
+}
+
+function resolveListIndex(list, openIndex, identity, identityOf) {
+  // Prefer the open-time index when it still matches (handles duplicate keys).
+  if (!list) return -1;
+  if (list[openIndex] != null && identityOf(list[openIndex]) === identity) return openIndex;
+  const matches = [];
+  for (let i = 0; i < list.length; i++) {
+    if (identityOf(list[i]) === identity) matches.push(i);
   }
+  if (matches.length === 1) return matches[0];
+  if (matches.length === 0) return -1;
+  return -2; // ambiguous after list churn
+}
+
+async function removeInboundRule(index) {
+  const cfg = state.lastConfig;
+  if (!cfg || !cfg.input_allows || cfg.input_allows[index] === undefined) return;
+  const rule = cfg.input_allows[index];
+  const identity = inboundRuleIdentity(rule);
+  const openIndex = index;
+  const proto = String(rule.proto || "").toLowerCase() || "—";
+  const dport = String(rule.dport || "—");
+  const note = String(rule.note || "").trim();
+  const label = note ? proto + " " + dport + " (" + note + ")" : proto + " " + dport;
+  openConfirmModal({
+    title: "Remove inbound rule?",
+    message:
+      "Remove " +
+      label +
+      " from the saved config? The host is not updated until you apply on Pending changes.",
+    confirmLabel: "Remove",
+    onConfirm: async () => {
+      // Re-resolve: list may have changed while the dialog was open.
+      const c = JSON.parse(JSON.stringify(state.lastConfig));
+      if (!c.input_allows) return;
+      const i = resolveListIndex(c.input_allows, openIndex, identity, inboundRuleIdentity);
+      if (i === -1) {
+        setInboundMsg("That inbound rule is no longer in the saved config.", true);
+        renderInboundTable(c);
+        return;
+      }
+      if (i === -2) {
+        setInboundMsg("Could not uniquely identify that inbound rule; refresh and try again.", true);
+        renderInboundTable(c);
+        return;
+      }
+      c.input_allows.splice(i, 1);
+      try {
+        await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
+        state.lastConfig = c;
+        setInboundMsg("Rule removed. Apply on Pending changes when ready.");
+        renderInboundTable(c);
+        setApiStatus(true);
+        refreshPendingBadge();
+      } catch (e) {
+        setInboundMsg(String(e.message || e), true);
+      }
+    },
+  });
 }
 
 export async function refreshInboundPage() {

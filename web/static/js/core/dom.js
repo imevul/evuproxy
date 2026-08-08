@@ -36,6 +36,51 @@ export function setApiStatus(ok, detail) {
   if (detail) el.title = detail;
 }
 
+/*
+ * Field-level validation state.
+ *
+ * Validation used to be signalled only by a message at the bottom of the form,
+ * which never says which control is wrong and is not associated with any of
+ * them. These tie the message to the offending field so it is announced when
+ * focus lands there, and mark the field itself as invalid.
+ */
+
+/** Fields currently marked invalid, keyed by the message element describing them. */
+const invalidFields = new WeakMap();
+
+/** Drops the invalid state from whichever field `msgEl` last described. */
+export function clearFieldInvalid(msgEl) {
+  if (!msgEl) return;
+  const prev = invalidFields.get(msgEl);
+  if (!prev) return;
+  prev.removeAttribute("aria-invalid");
+  const described = (prev.getAttribute("aria-describedby") || "")
+    .split(/\s+/)
+    .filter((id) => id && id !== msgEl.id)
+    .join(" ");
+  if (described) prev.setAttribute("aria-describedby", described);
+  else prev.removeAttribute("aria-describedby");
+  invalidFields.delete(msgEl);
+}
+
+/**
+ * Marks `field` invalid, points it at `msgEl` for the reason, and focuses it.
+ * Focusing is the point: the operator should land on the control to fix, not
+ * have to hunt for it after reading a message elsewhere in the dialog.
+ */
+export function markFieldInvalid(msgEl, field) {
+  clearFieldInvalid(msgEl);
+  if (!msgEl || !field || !msgEl.id) return;
+  field.setAttribute("aria-invalid", "true");
+  const existing = (field.getAttribute("aria-describedby") || "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!existing.includes(msgEl.id)) existing.push(msgEl.id);
+  field.setAttribute("aria-describedby", existing.join(" "));
+  invalidFields.set(msgEl, field);
+  field.focus();
+}
+
 export function applyPeersRoutesTableFilter() {
   const q = ($("global-table-search") && $("global-table-search").value.trim().toLowerCase()) || "";
   document.querySelectorAll("#peers-table-wrap tbody tr[data-filter]").forEach((tr) => {

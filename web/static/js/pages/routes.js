@@ -9,11 +9,13 @@ import {
   applyPeersRoutesTableFilter,
   writeRateLimitFields,
   readRateLimitFromForm,
+  markFieldInvalid,
+  clearFieldInvalid,
 } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
 import { setRouteEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
-import { openModal, closeModal } from "../core/modal.js";
+import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 function expandRoutePortTokens(portsArr) {
@@ -131,10 +133,12 @@ function runRouteProbe(index) {
 }
 
 /* ——— Routes ——— */
-function setRoutesMsg(text, isErr) {
+function setRoutesMsg(text, isErr, field) {
   const el = $("routes-msg");
   el.textContent = text;
   el.classList.toggle("err", !!isErr);
+  if (isErr && field) markFieldInvalid(el, field);
+  else clearFieldInvalid(el);
 }
 
 function peerTunnelIPv4Options(cfg) {
@@ -204,7 +208,7 @@ function renderRoutesTable(cfg) {
 
   if (!routes.length) {
     wrap.innerHTML =
-      "<div class=\"empty-state\"><span class=\"empty-state-msg\">No forwarding routes yet.</span> <button type=\"button\" class=\"btn-primary\" id=\"routes-empty-add\">Add route</button></div>";
+      "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No forwarding routes yet</p><p>Add a route to forward a public port to a peer on the tunnel.</p><button type=\"button\" class=\"evu-btn evu-btn--primary\" id=\"routes-empty-add\">Add route</button></div>";
     const addBtn = $("routes-empty-add");
     if (addBtn) {
       addBtn.addEventListener("click", () => {
@@ -231,11 +235,11 @@ function renderRoutesTable(cfg) {
       return (
         `<tr data-filter="${escapeHtml(f)}"><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
         monoIpCopyCellHtml(r.target_ip, targetPeerName) +
-        `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" data-route-test="${i}" class="btn-quiet">Test</button> <button type="button" data-route-edit="${i}">Edit</button> <button type="button" data-route-del="${i}" class="btn-quiet">Remove</button></td></tr>`
+        `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-test="${i}">Test</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-del="${i}">Remove</button></td></tr>`
       );
     })
     .join("");
-  wrap.innerHTML = `<table class="data"><thead><tr><th>Proto</th><th>Ports</th><th>Target</th><th>Source</th><th>Enabled</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML = `<table class="data"><thead><tr><th scope="col">Proto</th><th scope="col">Ports</th><th scope="col">Target</th><th scope="col">Source</th><th scope="col">Enabled</th><th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
   bindTunnelIpCopyButtons(wrap, setRoutesMsg);
   wrap.querySelectorAll("[data-route-edit]").forEach((b) => {
     b.addEventListener("click", () => openRouteEditor(+b.getAttribute("data-route-edit")));
@@ -342,14 +346,24 @@ function renderRoutePortMapRows(existingMaps) {
   });
   wrap.innerHTML = ports
     .map(
-      (p) =>
-        '<div class="route-port-map-row field"><span class="meta">' +
-        escapeHtml(p) +
-        ' →</span><input type="text" class="route-port-map-internal" data-public="' +
-        escapeHtml(p) +
-        '" placeholder="internal port" value="' +
-        escapeHtml(byPub[p] || "") +
-        '" autocomplete="off" /></div>'
+      (p) => {
+        // The "123 →" prefix is the only thing identifying each input, so it has
+        // to be a real label rather than decorative text next to it.
+        const id = `route-port-map-internal-${escapeHtml(p)}`;
+        return (
+          '<div class="route-port-map-row field"><label class="meta" for="' +
+          id +
+          '">' +
+          escapeHtml(p) +
+          ' →<span class="evu-sr-only"> internal port</span></label><input type="text" id="' +
+          id +
+          '" class="route-port-map-internal" data-public="' +
+          escapeHtml(p) +
+          '" placeholder="internal port" value="' +
+          escapeHtml(byPub[p] || "") +
+          '" autocomplete="off" /></div>'
+        );
+      }
     )
     .join("");
 }
@@ -424,11 +438,15 @@ async function saveRouteEditor() {
   const ports = parsePortsList($("route-f-ports").value);
   const target = $("route-f-target").value.trim();
   if (!proto) {
-    setRoutesMsg("Select at least one protocol (TCP and/or UDP).", true);
+    setRoutesMsg("Select at least one protocol (TCP and/or UDP).", true, $("route-f-proto-tcp"));
     return;
   }
-  if (!ports.length || !target) {
-    setRoutesMsg("Ports and target are required.", true);
+  if (!ports.length) {
+    setRoutesMsg("Ports are required.", true, $("route-f-ports"));
+    return;
+  }
+  if (!target) {
+    setRoutesMsg("Target is required.", true, $("route-f-target"));
     return;
   }
   const routeEn = $("route-f-disabled");
@@ -471,20 +489,77 @@ async function saveRouteEditor() {
   }
 }
 
-async function removeRoute(index) {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.forwarding || !cfg.forwarding.routes) return;
-  cfg.forwarding.routes.splice(index, 1);
-  try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
-    setRoutesMsg("Route removed from config. Apply on Pending changes when ready.");
-    renderRoutesTable(cfg);
-    setApiStatus(true);
-    refreshPendingBadge();
-  } catch (e) {
-    setRoutesMsg(String(e.message || e), true);
+function routeIdentity(r) {
+  return (
+    String(r.proto || "").toLowerCase() +
+    "\0" +
+    (r.ports || []).join(",") +
+    "\0" +
+    String(r.target_ip || "")
+  );
+}
+
+function resolveListIndex(list, openIndex, identity, identityOf) {
+  // Prefer the open-time index when it still matches (handles duplicate keys).
+  if (!list) return -1;
+  if (list[openIndex] != null && identityOf(list[openIndex]) === identity) return openIndex;
+  const matches = [];
+  for (let i = 0; i < list.length; i++) {
+    if (identityOf(list[i]) === identity) matches.push(i);
   }
+  if (matches.length === 1) return matches[0];
+  if (matches.length === 0) return -1;
+  return -2; // ambiguous after list churn
+}
+
+async function removeRoute(index) {
+  const cfg = state.lastConfig;
+  if (!cfg || !cfg.forwarding || !cfg.forwarding.routes || !cfg.forwarding.routes[index]) return;
+  const route = cfg.forwarding.routes[index];
+  const identity = routeIdentity(route);
+  const openIndex = index;
+  const ports = (route.ports || []).join(", ") || "—";
+  const proto = routeProtoPlainText(route.proto);
+  const target = String(route.target_ip || "—");
+  openConfirmModal({
+    title: "Remove route?",
+    message:
+      "Remove " +
+      proto +
+      " " +
+      ports +
+      " → " +
+      target +
+      " from the saved config? The host is not updated until you apply on Pending changes.",
+    confirmLabel: "Remove",
+    onConfirm: async () => {
+      // Re-resolve: list may have changed while the dialog was open.
+      const c = JSON.parse(JSON.stringify(state.lastConfig));
+      if (!c.forwarding || !c.forwarding.routes) return;
+      const i = resolveListIndex(c.forwarding.routes, openIndex, identity, routeIdentity);
+      if (i === -1) {
+        setRoutesMsg("That route is no longer in the saved config.", true);
+        renderRoutesTable(c);
+        return;
+      }
+      if (i === -2) {
+        setRoutesMsg("Could not uniquely identify that route; refresh and try again.", true);
+        renderRoutesTable(c);
+        return;
+      }
+      c.forwarding.routes.splice(i, 1);
+      try {
+        await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
+        state.lastConfig = c;
+        setRoutesMsg("Route removed from config. Apply on Pending changes when ready.");
+        renderRoutesTable(c);
+        setApiStatus(true);
+        refreshPendingBadge();
+      } catch (e) {
+        setRoutesMsg(String(e.message || e), true);
+      }
+    },
+  });
 }
 
 export async function refreshRoutesPage() {
