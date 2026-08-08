@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.0](https://github.com/imevul/evuproxy/compare/v0.13.0...v0.14.0) (2026-08-08)
+
+
+### Features
+
+* **ui:** adopt Evu Theme with light/dark/system ([cc5af78](https://github.com/imevul/evuproxy/commit/cc5af7889cf1f586630d4deecc95b6d68d02cfc2))
+* **ui:** sync Evu Theme elevated buttons and form contrast ([c917056](https://github.com/imevul/evuproxy/commit/c917056440013771a443bd4b410b27d6a9a0ce51))
+
+
+### Bug Fixes
+
+* **crowdsec:** move Docker LAPI off host :8080 to :8082 ([c48e853](https://github.com/imevul/evuproxy/commit/c48e853aed1996a7b64ed0c42bb5b502f94e5ca5))
+* **ui:** confirm Routes/Inbound removes and re-resolve the row ([aa1dcb4](https://github.com/imevul/evuproxy/commit/aa1dcb4313d2005be1f7af5042d4124790db6344))
+
 ## [0.13.0](https://github.com/imevul/evuproxy/compare/v0.12.0...v0.13.0) (2026-07-03)
 
 
