@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/imevul/evuproxy/compare/v0.15.0...v0.15.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **logs:** read kernel journal and fall back to dmesg when empty ([5846d9c](https://github.com/imevul/evuproxy/commit/5846d9cc8647864cb8d9df52b23f2a2aca4ffc66))
+
 ## [0.15.0](https://github.com/imevul/evuproxy/compare/v0.14.0...v0.15.0) (2026-08-08)
 
 
