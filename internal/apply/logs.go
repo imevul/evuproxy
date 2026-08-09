@@ -16,7 +16,10 @@ const (
 )
 
 // FirewallDropLogs returns recent lines for geoblock and forward drop events.
-// It prefers journalctl (newest first); if that fails, falls back to dmesg.
+// It prefers journalctl kernel messages (newest first). If that fails or yields
+// no matches, it falls back to dmesg. A plain "last N journal lines" read is not
+// enough on busy hosts: userspace spam can push nft drop lines out of the window
+// while they remain in the kernel ring buffer.
 func FirewallDropLogs(ctx context.Context, limit int) ([]string, string, error) {
 	if limit < 1 {
 		limit = 200
@@ -25,19 +28,44 @@ func FirewallDropLogs(ctx context.Context, limit int) ([]string, string, error) 
 		limit = 2000
 	}
 	lines, err := journalctlDropLines(ctx)
-	if err == nil {
-		return headLimit(lines, limit), "journalctl", nil
+	var lines2 []string
+	var err2 error
+	if err != nil || len(lines) == 0 {
+		lines2, err2 = dmesgDropLines(ctx)
 	}
-	lines2, err2 := dmesgDropLines(ctx)
-	if err2 != nil {
-		return nil, "", fmt.Errorf("journalctl: %v; dmesg: %v", err, err2)
+	out, source, pickErr := pickFirewallLogSource(lines, err, lines2, err2)
+	if pickErr != nil {
+		return nil, "", pickErr
 	}
-	return headLimit(lines2, limit), "dmesg", nil
+	out = headLimit(out, limit)
+	if out == nil {
+		out = []string{}
+	}
+	return out, source, nil
+}
+
+// pickFirewallLogSource chooses journalctl vs dmesg results.
+func pickFirewallLogSource(journal []string, journalErr error, dmesg []string, dmesgErr error) ([]string, string, error) {
+	if journalErr == nil && len(journal) > 0 {
+		return journal, "journalctl", nil
+	}
+	if dmesgErr == nil && len(dmesg) > 0 {
+		return dmesg, "dmesg", nil
+	}
+	if journalErr == nil {
+		// Empty journal (and empty or failed dmesg): still a successful empty read.
+		return nil, "journalctl", nil
+	}
+	if dmesgErr == nil {
+		return nil, "dmesg", nil
+	}
+	return nil, "", fmt.Errorf("journalctl: %v; dmesg: %v", journalErr, dmesgErr)
 }
 
 func journalctlDropLines(ctx context.Context) ([]string, error) {
-	// Cap journal lines read: filtering keeps only drop-related rows; lower -n reduces journal I/O.
-	cmd := exec.CommandContext(ctx, "journalctl", "-b", "--no-pager", "-n", "6000", "-o", "short-iso", "-r")
+	// -k: kernel messages only. Without it, -n counts every unit and busy
+	// userspace can starve nft drop lines out of the window.
+	cmd := exec.CommandContext(ctx, "journalctl", "-k", "-b", "--no-pager", "-n", "6000", "-o", "short-iso", "-r")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

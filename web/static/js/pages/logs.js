@@ -303,7 +303,7 @@ function renderLogsView() {
   if (!wrap) return;
   if (!total) {
     wrap.innerHTML =
-      "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No log lines yet</p><p>Nothing has been dropped since the kernel log was last rotated, or the host has no journal to read.</p></div>";
+      "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No log lines yet</p><p>Nothing matching EvuProxy drop prefixes since boot/rotation, or the API cannot read the kernel journal (non-root <code class=\"inline\">evuproxy-api</code> needs the <code class=\"inline\">systemd-journal</code> group). Check the Source line above.</p></div>";
     return;
   }
   if (!filtered.length) {
@@ -395,10 +395,15 @@ export async function refreshLogsPage() {
   if (src) src.textContent = "";
   state.lastFirewallLogEntries = [];
   try {
-    // Config is needed so break-glass affordances know which SRC IPs are already covered.
-    const [j, cfg] = await Promise.all([api("/v1/logs?limit=1000"), api("/v1/config")]);
+    // Logs must not depend on /config: a config read failure used to blank the
+    // whole page. Break-glass coverage is best-effort from a parallel config fetch.
+    const logsP = api("/v1/logs?limit=1000");
+    const cfgP = api("/v1/config").catch(() => null);
+    const j = await logsP;
     if (seq !== state.logsRefreshSeq) return;
-    state.lastConfig = cfg;
+    const cfg = await cfgP;
+    if (seq !== state.logsRefreshSeq) return;
+    if (cfg) state.lastConfig = cfg;
     setApiStatus(true);
     if (src) {
       src.textContent = j.source ? "Source: " + j.source : "";
