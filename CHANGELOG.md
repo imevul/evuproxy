@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/imevul/evuproxy/compare/v0.16.0...v0.17.0) (2026-08-11)
+
+
+### Features
+
+* diagnostics bundle, endpoint DNS warnings, and peer route UX ([238a7d0](https://github.com/imevul/evuproxy/commit/238a7d0bc192bb40a5e10b925ac28412e6d8dcc5))
+
 ## [0.16.0](https://github.com/imevul/evuproxy/compare/v0.15.1...v0.16.0) (2026-08-11)
 
 
