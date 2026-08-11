@@ -29,6 +29,47 @@ An annotated example lives at [`config/evuproxy.example.yaml`](../config/evuprox
 | `private_key_file` | string | Path to the server’s WireGuard private key file. |
 | `address` | string | Server tunnel address in CIDR form, IPv4 (e.g. `10.100.0.1/24`). |
 
+### WireGuard and systemd-networkd / netplan
+
+The default interface name **`evuproxy0`** starts with **`e`**. A common netplan snippet matches **all** such names:
+
+```yaml
+network:
+  ethernets:
+    nic:
+      match:
+        name: "e*"   # matches eth0 AND evuproxy0
+      dhcp4: true
+```
+
+When **systemd-networkd** reloads (for example during `apt-daily-upgrade`), it can reconfigure `evuproxy0` under that match and **wipe** `wireguard.address`. DNATed forwards then leave via the default route (`OUT=eth0` instead of `OUT=evuproxy0`) and hit **`evuproxy-forward-drop`**, while peers may still show a recent WireGuard handshake.
+
+**Prevention (install/update/reload):** when netplan or systemd-networkd appears in use, EvuProxy installs:
+
+`/etc/systemd/network/00-<interface>.network`
+
+```ini
+[Match]
+Name=evuproxy0
+
+[Link]
+Unmanaged=yes
+```
+
+The **`00-`** prefix sorts before netplan’s typical **`10-netplan-*.network`** so `Unmanaged=yes` wins (networkd applies the first matching `.network` file). Install and `scripts/update.sh` run `evuproxy ensure-wg-networkd` and print the path. `evuproxy reload` refreshes the same file quietly. Uninstall removes it (and any legacy `80-` drop-in).
+
+**Also fix netplan** so it matches only the real NIC (e.g. `name: "eth0"`), not `e*`.
+
+**Recovery** if the address is already gone:
+
+```bash
+sudo ip -4 addr replace 10.100.0.1/24 dev evuproxy0   # use your wireguard.address / interface
+# or
+sudo evuproxy reload
+```
+
+`evuproxy status` and the Overview “Needs attention” list warn when the tunnel address is missing on a live iface.
+
 ---
 
 ## `network`

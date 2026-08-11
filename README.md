@@ -51,7 +51,8 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 
 | Command                           | Purpose                                                                                                  |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `evuproxy reload`                 | Regenerate `/etc/wireguard/<iface>.conf`, nftables tables `inet evuproxy` / `ip evuproxy`, load geo sets |
+| `evuproxy reload`                 | Regenerate `/etc/wireguard/<iface>.conf`, nftables tables `inet evuproxy` / `ip evuproxy`, load geo sets; refresh systemd-networkd `Unmanaged=yes` drop-in when netplan/networkd is in use |
+| `evuproxy ensure-wg-networkd`     | Install `/etc/systemd/network/00-<iface>.network` (`Unmanaged=yes`) if networkd/netplan is in use; prints the path (used by install/update) |
 | `evuproxy update-geo`             | Refresh IPDeny country files and reload nftables geo **in both** inet and ip tables                      |
 | `evuproxy status`                 | `wg show` + `nft list table inet evuproxy`                                                               |
 | `evuproxy serve`                  | Local HTTP API on `127.0.0.1:9847` (token in `/etc/evuproxy/api.token`)                                  |
@@ -108,6 +109,10 @@ The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild
 # destructive config removal:
 PURGE=1 ./scripts/uninstall.sh
 ```
+
+Removes EvuProxy units, the sysctl drop-in, and the systemd-networkd `00-<wireguard.interface>.network` Unmanaged file when present. Leaves `/etc/evuproxy` unless `PURGE=1`.
+
+If forwards suddenly fail with `evuproxy-forward-drop` and `OUT=eth0` while peers still handshake, see [docs/config.md](docs/config.md#wireguard-and-systemd-networkd--netplan) (netplan `e*` matching `evuproxy0`).
 
 ## Building from source
 

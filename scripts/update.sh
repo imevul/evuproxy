@@ -31,16 +31,27 @@ else
   "$SCRIPT_DIR/rebuild.sh"
 fi
 
+SUDO=()
+if [[ "$(id -u)" -ne 0 ]]; then
+  SUDO=(sudo)
+fi
+
 if [[ "$SYSTEMD_UNITS" -eq 1 ]] && command -v systemctl >/dev/null 2>&1; then
-  SUDO=()
-  if [[ "$(id -u)" -ne 0 ]]; then
-    SUDO=(sudo)
-  fi
   for unit in evuproxy.service evuproxy-api.service; do
     if systemctl is-active --quiet "$unit" 2>/dev/null; then
       "${SUDO[@]}" systemctl restart "$unit"
     fi
   done
+fi
+
+# Refresh Unmanaged=yes drop-in when networkd/netplan is in use (path logged on stdout).
+# Runs even without systemd units so binary-only hosts still get 00- / migrate off 80-.
+if [[ -r /etc/evuproxy/config.yaml ]] && { command -v evuproxy >/dev/null 2>&1 || [[ -x /usr/local/bin/evuproxy ]]; }; then
+  _evu_bin="$(command -v evuproxy 2>/dev/null || true)"
+  [[ -n "$_evu_bin" ]] || _evu_bin=/usr/local/bin/evuproxy
+  if ! "${SUDO[@]}" "$_evu_bin" ensure-wg-networkd --config /etc/evuproxy/config.yaml; then
+    echo "warning: ensure-wg-networkd failed (non-fatal); run: sudo $_evu_bin ensure-wg-networkd" >&2
+  fi
 fi
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then

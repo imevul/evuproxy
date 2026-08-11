@@ -97,6 +97,16 @@ if [[ "$INSTALL_API" -eq 1 ]]; then
   systemctl enable evuproxy-api.service 2>/dev/null || true
 fi
 
+if command -v "$PREFIX/bin/evuproxy" >/dev/null 2>&1 || command -v evuproxy >/dev/null 2>&1; then
+  _evu_bin="$PREFIX/bin/evuproxy"
+  command -v "$_evu_bin" >/dev/null 2>&1 || _evu_bin="$(command -v evuproxy)"
+  # Marks the WireGuard iface Unmanaged under systemd-networkd/netplan so a broad
+  # netplan match like name: "e*" cannot wipe the tunnel address (see docs/config.md).
+  if ! "$_evu_bin" ensure-wg-networkd --config "$CONFIG_DIR/config.yaml"; then
+    echo "warning: ensure-wg-networkd failed (non-fatal); run: $_evu_bin ensure-wg-networkd --config $CONFIG_DIR/config.yaml" >&2
+  fi
+fi
+
 echo "Installed EvuProxy tooling."
 echo "Edit $CONFIG_DIR/config.yaml, add peer keys, then: evuproxy reload --config $CONFIG_DIR/config.yaml"
 if [[ "$INSTALL_API" -eq 1 ]]; then

@@ -25,3 +25,24 @@ func SwapWireGuardConfigDirForTest(dir string) (restore func()) {
 	wireguardConfigDir = dir
 	return func() { wireguardConfigDir = prev }
 }
+
+// SwapSystemdNetworkDirForTest redirects Unmanaged=yes drop-in writes. Test use only.
+func SwapSystemdNetworkDirForTest(dir string) (restore func()) {
+	prev := systemdNetworkDir
+	systemdNetworkDir = dir
+	return func() { systemdNetworkDir = prev }
+}
+
+// SwapNetworkdOrNetplanInUseForTest forces networkd/netplan detection. Test use only.
+func SwapNetworkdOrNetplanInUseForTest(fn func() bool) (restore func()) {
+	prev := networkdOrNetplanInUse
+	networkdOrNetplanInUse = fn
+	return func() { networkdOrNetplanInUse = prev }
+}
+
+// SwapWgInterfaceExistsForTest stubs kernel iface presence. Test use only.
+func SwapWgInterfaceExistsForTest(fn func(string) bool) (restore func()) {
+	prev := wgInterfaceExists
+	wgInterfaceExists = fn
+	return func() { wgInterfaceExists = prev }
+}

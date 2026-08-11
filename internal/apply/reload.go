@@ -69,6 +69,17 @@ func reload(ctx context.Context, cfgPath string) error {
 		return fmt.Errorf("write nftables: %w", err)
 	}
 
+	wgSrc, err := gen.WireGuardConf(c)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(wireguardConfigDir, 0o700); err != nil {
+		return fmt.Errorf("wireguard config dir: %w", err)
+	}
+	if err := writeAtomic(wgPath, []byte(wgSrc), 0o600); err != nil {
+		return fmt.Errorf("write wireguard config: %w", err)
+	}
+
 	// When geo is enabled, fold the geo set population into the same nft file as
 	// the table replace so the whole apply is one kernel transaction: sets are
 	// never live-but-empty (block mode would fail open, allow mode would drop
@@ -124,6 +135,10 @@ func reload(ctx context.Context, cfgPath string) error {
 
 	if err := reloadWireGuard(ctx, c.WireGuard.Interface, strings.TrimSpace(c.WireGuard.Address), wgPath); err != nil {
 		return err
+	}
+	ensureWireGuardUnmanagedQuiet(c.WireGuard.Interface)
+	for _, w := range WireGuardHostWarnings(ctx, c) {
+		slog.Warn(w.Message, "code", w.Code)
 	}
 
 	if err := state.RecordAppliedConfigHash(cfgPath); err != nil {
@@ -260,6 +275,9 @@ func Status(ctx context.Context, cfgPath string) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
+	for _, w := range WireGuardHostWarnings(ctx, c) {
+		fmt.Fprintf(&b, "WARNING [%s]: %s\n", w.Code, w.Message)
+	}
 	wgOut, err := runCmdCombined(ctx, "wg", "show", c.WireGuard.Interface)
 	if err != nil {
 		fmt.Fprintf(&b, "wireguard (%s): not running or missing: %v\n", c.WireGuard.Interface, err)

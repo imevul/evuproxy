@@ -856,6 +856,12 @@ function buildOverviewAttentionItems(cfg, o, st, met) {
       items.push(routeLabel(r) + " restricts sources to an allowlist.");
     }
   }
+  if (o && Array.isArray(o.host_warnings)) {
+    for (const w of o.host_warnings) {
+      const msg = w && (w.message || w.Message);
+      if (msg) items.push(String(msg));
+    }
+  }
   return items;
 }
 

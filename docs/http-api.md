@@ -100,7 +100,7 @@ All paths below are under **`/api/v1`** unless noted.
 
 Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**) with HTTP **400** in addition to **`error`**.
 
-**`GET /api/v1/overview`** may include **`geo_last_success_utc`** and **`geo_last_success_source`** after a successful geo loader run.
+**`GET /api/v1/overview`** may include **`geo_last_success_utc`** and **`geo_last_success_source`** after a successful geo loader run, and **`host_warnings`** (array of `{code, message}`) when live WireGuard host checks fail (e.g. tunnel address missing after systemd-networkd wipe — see [config.md](config.md#wireguard-and-systemd-networkd--netplan)).
 
 ### Metrics peers semantics
 

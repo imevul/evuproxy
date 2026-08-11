@@ -28,6 +28,8 @@ type Overview struct {
 	GeoLastSuccessUTC string `json:"geo_last_success_utc,omitempty"`
 	// GeoLastSuccessSource is "reload" or "update-geo" when GeoLastSuccessUTC is set.
 	GeoLastSuccessSource string `json:"geo_last_success_source,omitempty"`
+	// HostWarnings are live host checks (e.g. missing tunnel address after networkd wipe).
+	HostWarnings []WireGuardHostWarning `json:"host_warnings,omitempty"`
 }
 
 func OverviewFromConfig(path string) (*Overview, error) {
@@ -56,6 +58,7 @@ func OverviewFromConfig(path string) (*Overview, error) {
 	g := state.ReadGeoLastSuccess(path)
 	o.GeoLastSuccessUTC = strings.TrimSpace(g.UTC)
 	o.GeoLastSuccessSource = strings.TrimSpace(g.Source)
+	o.HostWarnings = WireGuardHostWarnings(context.Background(), c)
 	return o, nil
 }
 

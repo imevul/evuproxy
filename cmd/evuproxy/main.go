@@ -37,6 +37,7 @@ func main() {
 		cmdReload(),
 		cmdUpdateGeo(),
 		cmdStatus(),
+		cmdEnsureWgNetworkd(),
 		cmdServe(),
 		cmdBackup(),
 		cmdRestore(),
@@ -93,6 +94,16 @@ func cmdStatus() *cobra.Command {
 			}
 			_, werr := fmt.Print(out)
 			return werr
+		},
+	}
+}
+
+func cmdEnsureWgNetworkd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "ensure-wg-networkd",
+		Short: "Install systemd-networkd Unmanaged=yes drop-in for the WireGuard iface (no-op without networkd/netplan)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apply.EnsureWireGuardUnmanagedFromConfig(cfgPath)
 		},
 	}
 }

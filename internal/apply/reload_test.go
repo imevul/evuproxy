@@ -57,13 +57,19 @@ func withFakeReloadEnv(t *testing.T, f *fakeRunner, ifaceUp bool) {
 	prevRunner := runner
 	prevWGDir := wireguardConfigDir
 	prevExists := wgInterfaceExists
+	prevNetDetect := networkdOrNetplanInUse
+	prevNetDir := systemdNetworkDir
 	runner = f
 	wireguardConfigDir = t.TempDir()
+	systemdNetworkDir = t.TempDir()
+	networkdOrNetplanInUse = func() bool { return false }
 	wgInterfaceExists = func(string) bool { return ifaceUp }
 	t.Cleanup(func() {
 		runner = prevRunner
 		wireguardConfigDir = prevWGDir
 		wgInterfaceExists = prevExists
+		networkdOrNetplanInUse = prevNetDetect
+		systemdNetworkDir = prevNetDir
 	})
 }
 

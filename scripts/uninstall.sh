@@ -32,6 +32,24 @@ rm -f /usr/local/bin/evuproxy
 
 rm -f /etc/sysctl.d/99-evuproxy-forwarding.conf
 
+# systemd-networkd Unmanaged drop-in for the WireGuard iface (default evuproxy0).
+# 00- sorts before netplan's 10-netplan-*; 80- was an earlier ineffective name.
+_wg_iface="evuproxy0"
+if [[ -r /etc/evuproxy/config.yaml ]]; then
+  _from_cfg="$(awk '
+    /^[[:space:]]*wireguard:[[:space:]]*$/ { in_wg=1; next }
+    in_wg && /^[^[:space:]#]/ { in_wg=0 }
+    in_wg && /^[[:space:]]*interface:[[:space:]]*/ {
+      sub(/^[[:space:]]*interface:[[:space:]]*/, ""); gsub(/["\047]/, ""); print; exit
+    }
+  ' /etc/evuproxy/config.yaml)"
+  if [[ -n "$_from_cfg" ]]; then
+    _wg_iface="$_from_cfg"
+  fi
+fi
+rm -f "/etc/systemd/network/00-${_wg_iface}.network" "/etc/systemd/network/80-${_wg_iface}.network"
+rm -f /etc/systemd/network/00-evuproxy0.network /etc/systemd/network/80-evuproxy0.network
+
 if [[ "${PURGE:-0}" == "1" ]]; then
   rm -rf /etc/evuproxy
   echo "Removed /etc/evuproxy (purge)."
