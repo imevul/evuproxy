@@ -343,7 +343,14 @@ func (c *Config) validateForwardingRoutes() error {
 			return fmt.Errorf("forwarding.routes[%d]: target_ip must be a valid IPv4 address", i)
 		}
 		if _, ok := allowed[tip]; !ok {
-			return fmt.Errorf("forwarding.routes[%d]: target_ip %s must match a non-disabled peer tunnel_ip", i, tip)
+			return &ValidationError{
+				Code: "route_target_peer_disabled",
+				Msg: fmt.Sprintf(
+					"forwarding.routes[%d]: target_ip %s must match a non-disabled peer tunnel_ip "+
+						"(disable or retarget those routes before disabling the peer)",
+					i, tip,
+				),
+			}
 		}
 		if err := ValidateSourceAllowCIDRs(i, r.SourceAllowCIDRs); err != nil {
 			return err

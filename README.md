@@ -55,6 +55,7 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 | `evuproxy ensure-wg-networkd`     | Install `/etc/systemd/network/00-<iface>.network` (`Unmanaged=yes`) if networkd/netplan is in use; prints the path (used by install/update) |
 | `evuproxy update-geo`             | Refresh IPDeny country files and reload nftables geo **in both** inet and ip tables                      |
 | `evuproxy status`                 | `wg show` + `nft list table inet evuproxy`                                                               |
+| `evuproxy diagnostics [-o PATH]`  | Markdown host support bundle (WG, routes, logs, networkd, sanitized config); also **Settings → Diagnostics** / `GET /api/v1/diagnostics.md` |
 | `evuproxy serve`                  | Local HTTP API on `127.0.0.1:9847` (token in `/etc/evuproxy/api.token`)                                  |
 | `evuproxy metrics`                | Background peer ICMP metrics collector into SQLite (respects `metrics_collection_enabled` in UI preferences) |
 | `evuproxy version`                | Print the binary version                                                                                 |

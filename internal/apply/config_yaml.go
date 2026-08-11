@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -17,7 +18,13 @@ import (
 func SaveConfigYAML(path string, c *config.Config) error {
 	c.Normalize()
 	if err := c.Validate(); err != nil {
-		return err
+		// Most Validate checks still return plain errors; wrap so the API can
+		// surface the message (and a stable code) instead of a generic save failure.
+		var ve *config.ValidationError
+		if errors.As(err, &ve) {
+			return err
+		}
+		return &config.ValidationError{Code: "config_invalid", Msg: err.Error()}
 	}
 	unlock, err := acquireApplyLock(context.Background(), path)
 	if err != nil {

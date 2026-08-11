@@ -47,6 +47,7 @@ type Server struct {
 	EventLog  *eventlog.Logger
 	routeTest *slidingLimiter
 	logsRL    *slidingLimiter
+	diagRL    *slidingLimiter
 	geoCheck  *slidingLimiter
 }
 
@@ -98,6 +99,9 @@ func (s *Server) Routes() http.Handler {
 	if s.logsRL == nil {
 		s.logsRL = newSlidingLimiter()
 	}
+	if s.diagRL == nil {
+		s.diagRL = newSlidingLimiter()
+	}
 	if s.geoCheck == nil {
 		s.geoCheck = newSlidingLimiter()
 	}
@@ -134,6 +138,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
 	mux.HandleFunc("GET /api/v1/about", s.auth(s.handleAbout))
 	mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleLogs))
+	mux.HandleFunc("GET /api/v1/diagnostics.md", s.auth(s.handleDiagnosticsMD))
 	mux.HandleFunc("POST /api/v1/backup", s.auth(s.handleBackup))
 	mux.HandleFunc("POST /api/v1/restore", s.auth(s.handleRestore))
 	return mux

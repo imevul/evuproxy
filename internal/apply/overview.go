@@ -58,7 +58,7 @@ func OverviewFromConfig(path string) (*Overview, error) {
 	g := state.ReadGeoLastSuccess(path)
 	o.GeoLastSuccessUTC = strings.TrimSpace(g.UTC)
 	o.GeoLastSuccessSource = strings.TrimSpace(g.Source)
-	o.HostWarnings = WireGuardHostWarnings(context.Background(), c)
+	o.HostWarnings = WireGuardHostWarnings(context.Background(), c, path)
 	return o, nil
 }
 

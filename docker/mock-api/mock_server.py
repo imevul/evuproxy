@@ -1197,6 +1197,25 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if path == "/api/v1/diagnostics.md":
+            data = (
+                "---\n"
+                "title: EvuProxy host diagnostics\n"
+                "evuproxy_version: \"mock\"\n"
+                "---\n\n"
+                "# EvuProxy host diagnostics\n\n"
+                "Mock diagnostics report for UI development.\n"
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/markdown; charset=utf-8")
+            self.send_header(
+                "Content-Disposition",
+                'attachment; filename="evuproxy-diagnostics-mock.md"',
+            )
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         return self._send_json(404, {"error": "not found"})
 
     def do_PUT(self) -> None:

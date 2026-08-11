@@ -70,6 +70,14 @@ sudo evuproxy reload
 
 `evuproxy status` and the Overview “Needs attention” list warn when the tunnel address is missing on a live iface.
 
+### WireGuard server endpoint (UI preferences)
+
+Peer install snippets use **Settings → WireGuard server endpoint** (`ui-preferences.json`, not this YAML). That value must be a **UDP-reachable** `host:port` for this VPS.
+
+Do **not** use a Cloudflare **orange-cloud** (proxied) hostname: DNS can return Cloudflare anycast (often IPv6 `2606:4700:…`) instead of the server, so clients show `0 B received` while the host looks healthy. Prefer the VPS public IP, or a **grey-cloud / DNS-only** name whose A/AAAA records match this host.
+
+Overview / Settings warn (`wg_endpoint_host_mismatch`) when the endpoint looks proxied (e.g. Cloudflare anycast) or, on hosts with a public address on the NIC, when DNS/IP does not match those addresses. DNS failures may surface as `wg_endpoint_dns_lookup_failed`. On NAT/EIP hosts (only private addresses on the NIC), non-Cloudflare mismatches are skipped to avoid false positives.
+
 ---
 
 ## `network`

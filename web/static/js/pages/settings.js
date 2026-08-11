@@ -49,6 +49,26 @@ function setContentWidthPreset(preset) {
   syncContentWidthSelect();
 }
 
+async function refreshEndpointHostWarning() {
+  const el = $("settings-wg-endpoint-warn");
+  if (!el) return;
+  el.textContent = "";
+  el.classList.add("is-hidden");
+  try {
+    const o = await api("/v1/overview");
+    const warnings = (o && o.host_warnings) || [];
+    const hit = warnings.find(
+      (w) => w && (w.code === "wg_endpoint_host_mismatch" || w.code === "wg_endpoint_dns_lookup_failed")
+    );
+    if (hit && (hit.message || hit.Message)) {
+      el.textContent = String(hit.message || hit.Message);
+      el.classList.remove("is-hidden");
+    }
+  } catch {
+    /* overview optional for settings prefs */
+  }
+}
+
 function syncContentWidthSelect() {
   const sel = $("settings-content-width");
   if (!sel) return;
@@ -101,6 +121,7 @@ export async function refreshSettingsPage() {
       }
     }
   }
+  await refreshEndpointHostWarning();
   syncAdvancedSettingsToggle();
   syncAdvancedTabsGating();
   syncContentWidthSelect();
@@ -301,6 +322,7 @@ export function initSettingsPage() {
         }
       }
       setApiStatus(true);
+      await refreshEndpointHostWarning();
     } catch (e) {
       if (msg) {
         msg.textContent = String(e.message || e);
@@ -322,6 +344,48 @@ export function initSettingsPage() {
       setApiStatus(false, String(e.message || e));
     }
   });
+
+  const dlDiag = $("btn-diagnostics-download");
+  if (dlDiag) {
+    dlDiag.addEventListener("click", async () => {
+      const msg = $("settings-diagnostics-msg");
+      if (msg) {
+        msg.textContent = "";
+        msg.classList.remove("err");
+      }
+      try {
+        const r = await fetch(getApiBase() + "/v1/diagnostics.md", { headers: headersDownload() });
+        if (!r.ok) {
+          let err = r.statusText;
+          try {
+            const j = await r.json();
+            err = j.error || err;
+          } catch {
+            /* ignore */
+          }
+          throw new Error(err || "HTTP " + r.status);
+        }
+        const blob = await r.blob();
+        let filename = "evuproxy-diagnostics.md";
+        const cd = r.headers.get("Content-Disposition") || "";
+        const m = /filename="([^"]+)"/i.exec(cd);
+        if (m && m[1]) filename = m[1];
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        if (msg) msg.textContent = "Download started (" + filename + ").";
+        setApiStatus(true);
+      } catch (e) {
+        if (msg) {
+          msg.textContent = String(e.message || e);
+          msg.classList.add("err");
+        }
+        setApiStatus(false, String(e.message || e));
+      }
+    });
+  }
 
   const notesSaveBtn = $("config-notes-save");
   if (notesSaveBtn) {

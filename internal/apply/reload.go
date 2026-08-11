@@ -137,7 +137,7 @@ func reload(ctx context.Context, cfgPath string) error {
 		return err
 	}
 	ensureWireGuardUnmanagedQuiet(c.WireGuard.Interface)
-	for _, w := range WireGuardHostWarnings(ctx, c) {
+	for _, w := range WireGuardHostWarnings(ctx, c, cfgPath) {
 		slog.Warn(w.Message, "code", w.Code)
 	}
 
@@ -275,7 +275,7 @@ func Status(ctx context.Context, cfgPath string) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	for _, w := range WireGuardHostWarnings(ctx, c) {
+	for _, w := range WireGuardHostWarnings(ctx, c, cfgPath) {
 		fmt.Fprintf(&b, "WARNING [%s]: %s\n", w.Code, w.Message)
 	}
 	wgOut, err := runCmdCombined(ctx, "wg", "show", c.WireGuard.Interface)

@@ -72,6 +72,7 @@ export const state = {
   /** Signature the operator actually acknowledged; Apply requires the two to match. */
   pendingLockoutAckSig: "",
   confirmModalCallback: null,
+  confirmModalCancelCallback: null,
 
   peersPingTimer: null,
 

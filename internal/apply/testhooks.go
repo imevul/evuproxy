@@ -1,6 +1,9 @@
 package apply
 
-import "context"
+import (
+	"context"
+	"net"
+)
 
 // CommandRunner mirrors the internal subprocess seam so tests in other
 // packages (e.g. internal/api) can stub privileged command execution.
@@ -45,4 +48,18 @@ func SwapWgInterfaceExistsForTest(fn func(string) bool) (restore func()) {
 	prev := wgInterfaceExists
 	wgInterfaceExists = fn
 	return func() { wgInterfaceExists = prev }
+}
+
+// SwapLookupIPForTest stubs DNS resolution for endpoint warnings. Test use only.
+func SwapLookupIPForTest(fn func(host string) ([]net.IP, error)) (restore func()) {
+	prev := lookupIPFn
+	lookupIPFn = fn
+	return func() { lookupIPFn = prev }
+}
+
+// SwapHostPublicAddrsForTest stubs host public address discovery. Test use only.
+func SwapHostPublicAddrsForTest(fn func(ctx context.Context, pubIF string) ([]net.IP, error)) (restore func()) {
+	prev := hostPublicAddrsFn
+	hostPublicAddrsFn = fn
+	return func() { hostPublicAddrsFn = prev }
 }

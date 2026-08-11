@@ -153,9 +153,11 @@ type WireGuardHostWarning struct {
 	Message string `json:"message"`
 }
 
-// WireGuardHostWarnings returns warnings about tunnel address presence and
-// iface names that are likely to match broad netplan "e*" patterns.
-func WireGuardHostWarnings(ctx context.Context, c *config.Config) []WireGuardHostWarning {
+// WireGuardHostWarnings returns warnings about tunnel address presence,
+// iface names that are likely to match broad netplan "e*" patterns, and
+// WireGuard server endpoint DNS that does not match this host's public IPs.
+// cfgPath is used to load ui-preferences.json for the endpoint check; empty skips that check.
+func WireGuardHostWarnings(ctx context.Context, c *config.Config, cfgPath string) []WireGuardHostWarning {
 	if c == nil {
 		return nil
 	}
@@ -174,6 +176,7 @@ func WireGuardHostWarnings(ctx context.Context, c *config.Config) []WireGuardHos
 			})
 		}
 	}
+	out = append(out, endpointHostWarnings(ctx, cfgPath, c)...)
 	if iface == "" || addr == "" {
 		return out
 	}

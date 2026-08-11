@@ -11,6 +11,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+      args:
+        EVUPROXY_VERSION: ${EVUPROXY_VERSION:-dev}
+        EVUPROXY_REVISION: ${EVUPROXY_REVISION:-unknown}
+        EVUPROXY_CREATED: ${EVUPROXY_CREATED:-unknown}
     network_mode: host
     restart: unless-stopped
     healthcheck:

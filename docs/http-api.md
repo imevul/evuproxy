@@ -82,6 +82,7 @@ All paths below are under **`/api/v1`** unless noted.
 | `POST`        | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config. Also updates **`config.yaml.bak`** / rotation (see [Applying changes](config.md#applying-changes)). |
 | `POST`        | `/update-geo`                                                   | Download zones and refresh geo sets in nftables.                                                                                                          |
 | `GET`         | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`, `/about` | Diagnostics, config summary, **`/metrics`** text for both **inet evuproxy** forward and input chains (either `nft list` failure → 5xx), host stats, recent firewall-related journal lines, version info. **`/logs`** accepts **`?limit=N`** (default **200**) and is rate-limited to **20 requests/minute per token** (excess → **429** with `error_code: rate_limit`). |
+| `GET`         | `/diagnostics.md`                                               | Markdown **host support bundle** (`Content-Disposition: attachment`). Collects WireGuard, routes, sockets, networkd drop-ins, unit/kernel logs, nftables snapshot, sanitized config, version + best-effort UI Docker OCI labels. Secrets redacted (no API token / private keys); public IPs and peer public keys may still appear. Rate-limited (**10**/minute per token → **429** `rate_limit`). CLI: **`evuproxy diagnostics`**. |
 | `POST`        | `/backup?path=…`, `/restore?path=…`                             | Archive or restore under `/etc/evuproxy`. Paths must resolve under **`EVUPROXY_BACKUP_DIR`** (default `/var/backups`). **`backup`** defaults `path` to `/var/backups/evuproxy-config.tgz` if omitted; **`restore`** requires `path`.   |
 | `GET`         | `/healthz`                                                      | Plain `ok` (no `/api/v1` prefix, no token).                                                                                                               |
 | `GET`         | `/config.yaml`                                                  | Raw **`config.yaml` bytes** from disk (`Content-Disposition: attachment`). Same auth as **`GET /config`**.                                               |
@@ -98,9 +99,9 @@ All paths below are under **`/api/v1`** unless noted.
 
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
 
-Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**) with HTTP **400** in addition to **`error`**.
+Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**, **`route_target_peer_disabled`**, or **`config_invalid`**) with HTTP **400** in addition to **`error`**. **`route_target_peer_disabled`** means an enabled route’s `target_ip` does not match any non-disabled peer (common when disabling a peer that still has forwards).
 
-**`GET /api/v1/overview`** may include **`geo_last_success_utc`** and **`geo_last_success_source`** after a successful geo loader run, and **`host_warnings`** (array of `{code, message}`) when live WireGuard host checks fail (e.g. tunnel address missing after systemd-networkd wipe — see [config.md](config.md#wireguard-and-systemd-networkd--netplan)).
+**`GET /api/v1/overview`** may include **`geo_last_success_utc`** and **`geo_last_success_source`** after a successful geo loader run, and **`host_warnings`** (array of `{code, message}`) when live WireGuard host checks fail — e.g. tunnel address missing after systemd-networkd wipe, or **`wg_endpoint_host_mismatch`** when Settings’ WireGuard server endpoint DNS does not match this host’s public IPs (Cloudflare orange-cloud footgun — see [config.md](config.md#wireguard-server-endpoint-ui-preferences)).
 
 ### Metrics peers semantics
 

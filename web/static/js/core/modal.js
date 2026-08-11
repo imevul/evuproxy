@@ -185,10 +185,15 @@ function onModalTrapKeydown(ev) {
 
 /* ——— Confirm modal (shared across pages) ——— */
 
-export function closeConfirmModal() {
+/** Close the confirm modal. Pass { confirmed: true } after OK so onCancel is not run. */
+export function closeConfirmModal(opts) {
+  const cancelFn = state.confirmModalCancelCallback;
+  const confirmed = !!(opts && opts.confirmed);
   state.confirmModalCallback = null;
+  state.confirmModalCancelCallback = null;
   const m = $("confirm-modal");
   if (m) closeModal(m);
+  if (!confirmed && cancelFn) cancelFn();
 }
 
 export function openConfirmModal(opts) {
@@ -201,6 +206,7 @@ export function openConfirmModal(opts) {
   descEl.textContent = opts.message || "";
   okBtn.textContent = opts.confirmLabel || "OK";
   state.confirmModalCallback = opts.onConfirm || null;
+  state.confirmModalCancelCallback = opts.onCancel || null;
   openModal(modal);
   const cancelBtn = $("confirm-modal-cancel");
   if (cancelBtn) requestAnimationFrame(() => cancelBtn.focus());
@@ -209,14 +215,14 @@ export function openConfirmModal(opts) {
 /** One-time wiring: confirm modal buttons + the global modal focus trap. */
 export function initModals() {
   document.addEventListener("keydown", onModalTrapKeydown);
-  registerModalCloser($("confirm-modal"), closeConfirmModal);
+  registerModalCloser($("confirm-modal"), () => closeConfirmModal());
   const confirmModal = $("confirm-modal");
   const confirmBackdrop = confirmModal && confirmModal.querySelector(".modal-backdrop");
-  if (confirmBackdrop) confirmBackdrop.addEventListener("click", closeConfirmModal);
-  $("confirm-modal-cancel").addEventListener("click", closeConfirmModal);
+  if (confirmBackdrop) confirmBackdrop.addEventListener("click", () => closeConfirmModal());
+  $("confirm-modal-cancel").addEventListener("click", () => closeConfirmModal());
   $("confirm-modal-ok").addEventListener("click", async () => {
     const fn = state.confirmModalCallback;
-    closeConfirmModal();
+    closeConfirmModal({ confirmed: true });
     if (fn) await fn();
   });
 }

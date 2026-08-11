@@ -91,7 +91,7 @@ func TestWireGuardHostWarnings_missingAddrAndEPrefix(t *testing.T) {
 	restoreRunner := SwapCommandRunnerForTest(&stubIPAddrRunner{out: "3: evuproxy0    inet 127.0.0.1/8 scope host\n"})
 	defer restoreRunner()
 
-	ws := WireGuardHostWarnings(context.Background(), c)
+	ws := WireGuardHostWarnings(context.Background(), c, "")
 	codes := map[string]bool{}
 	for _, w := range ws {
 		codes[w.Code] = true
@@ -107,7 +107,7 @@ func TestWireGuardHostWarnings_missingAddrAndEPrefix(t *testing.T) {
 	if _, _, err := EnsureWireGuardUnmanaged("evuproxy0"); err != nil {
 		t.Fatal(err)
 	}
-	ws = WireGuardHostWarnings(context.Background(), c)
+	ws = WireGuardHostWarnings(context.Background(), c, "")
 	codes = map[string]bool{}
 	for _, w := range ws {
 		codes[w.Code] = true

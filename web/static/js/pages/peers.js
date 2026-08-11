@@ -184,21 +184,89 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
   applyPeersRoutesTableFilter();
 }
 
+function peerTunnelHost(peer) {
+  return tunnelHostOnly(peer && peer.tunnel_ip ? peer.tunnel_ip : "");
+}
+
+/** Enabled routes whose target_ip matches the peer tunnel IPv4. */
+function dependentRoutesForPeer(cfg, peer) {
+  const tip = peerTunnelHost(peer);
+  if (!tip) return [];
+  const routes = (cfg && cfg.forwarding && cfg.forwarding.routes) || [];
+  const out = [];
+  for (let i = 0; i < routes.length; i++) {
+    const r = routes[i];
+    if (!r || r.disabled) continue;
+    if (String(r.target_ip || "").trim() === tip) out.push({ index: i, route: r });
+  }
+  return out;
+}
+
+function dependentRoutesConfirmMessage(peerName, deps) {
+  const labels = deps.map(({ route: r }) => {
+    const ports = (r.ports || []).join(", ") || "?";
+    const proto = String(r.proto || "").toLowerCase() || "?";
+    return proto + " " + ports + " → " + String(r.target_ip || "");
+  });
+  const list = labels.map((l) => "• " + l).join("\n");
+  return (
+    "Peer \"" +
+    peerName +
+    "\" still has " +
+    deps.length +
+    " enabled route(s):\n\n" +
+    list +
+    "\n\nDisable those routes in this save so the config stays valid?"
+  );
+}
+
+function disableDependentRoutes(cfg, deps) {
+  if (!cfg.forwarding || !cfg.forwarding.routes) return;
+  for (const { index } of deps) {
+    if (cfg.forwarding.routes[index]) cfg.forwarding.routes[index].disabled = true;
+  }
+}
+
 async function patchPeerDisabled(index, disabled) {
   const cfg = JSON.parse(JSON.stringify(state.lastConfig));
   if (!cfg.peers || cfg.peers[index] === undefined) return;
-  cfg.peers[index].disabled = disabled;
-  try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
-    setPeersMsg("");
-    setApiStatus(true);
-    refreshPendingBadge();
-    renderPeersTable(cfg, state.lastPeerWgStats);
-  } catch (e) {
-    setPeersMsg(String(e.message || e), true);
-    renderPeersTable(state.lastConfig, state.lastPeerWgStats);
+  const peer = cfg.peers[index];
+  const finish = async (nextCfg) => {
+    try {
+      await api("/v1/config", { method: "PUT", body: JSON.stringify(nextCfg) });
+      state.lastConfig = nextCfg;
+      setPeersMsg("");
+      setApiStatus(true);
+      refreshPendingBadge();
+      renderPeersTable(nextCfg, state.lastPeerWgStats);
+    } catch (e) {
+      setPeersMsg(String(e.message || e), true);
+      renderPeersTable(state.lastConfig, state.lastPeerWgStats);
+    }
+  };
+  if (disabled) {
+    const deps = dependentRoutesForPeer(cfg, peer);
+    if (deps.length) {
+      openConfirmModal({
+        title: "Disable peer and routes?",
+        message: dependentRoutesConfirmMessage(peer.name || "peer", deps),
+        confirmLabel: "Disable peer and routes",
+        onConfirm: async () => {
+          const c = JSON.parse(JSON.stringify(state.lastConfig));
+          if (!c.peers || c.peers[index] === undefined) return;
+          disableDependentRoutes(c, dependentRoutesForPeer(c, c.peers[index]));
+          c.peers[index].disabled = true;
+          await finish(c);
+        },
+        onCancel: () => {
+          renderPeersTable(state.lastConfig, state.lastPeerWgStats);
+        },
+      });
+      return;
+    }
   }
+  cfg.peers[index].disabled = disabled;
+  await finish(cfg);
 }
 
 export async function refreshPeersPage() {
@@ -430,24 +498,38 @@ async function savePeerEditor() {
 async function removePeer(index) {
   const cfg = state.lastConfig;
   if (!cfg || !cfg.peers || !cfg.peers[index]) return;
-  const peerName = cfg.peers[index].name;
+  const peer = cfg.peers[index];
+  const peerName = peer.name;
+  const deps = dependentRoutesForPeer(cfg, peer);
+  const baseMsg =
+    "Remove \"" +
+    peerName +
+    "\" from the saved config? The host is not updated until you apply on Pending changes.";
+  const message = deps.length
+    ? dependentRoutesConfirmMessage(peerName || "peer", deps) +
+      "\n\nThe peer will then be removed from the saved config. " +
+      "The host is not updated until you apply on Pending changes."
+    : baseMsg;
   openConfirmModal({
-    title: "Remove peer?",
-    message:
-      "Remove \"" +
-      peerName +
-      "\" from the saved config? The host is not updated until you apply on Pending changes.",
-    confirmLabel: "Remove",
+    title: deps.length ? "Remove peer and disable routes?" : "Remove peer?",
+    message,
+    confirmLabel: deps.length ? "Disable routes and remove" : "Remove",
     onConfirm: async () => {
       const c = JSON.parse(JSON.stringify(state.lastConfig));
       if (!c.peers) return;
       const i = c.peers.findIndex((p) => p.name === peerName);
       if (i < 0) return;
+      const depNow = dependentRoutesForPeer(c, c.peers[i]);
+      disableDependentRoutes(c, depNow);
       c.peers.splice(i, 1);
       try {
         await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
         state.lastConfig = c;
-        setPeersMsg("Peer removed from config. Apply on Pending changes when ready.");
+        setPeersMsg(
+          deps.length
+            ? "Peer removed and dependent routes disabled in config. Apply on Pending changes when ready."
+            : "Peer removed from config. Apply on Pending changes when ready."
+        );
         renderPeersTable(c);
         setApiStatus(true);
         refreshPendingBadge();

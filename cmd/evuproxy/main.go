@@ -38,6 +38,7 @@ func main() {
 		cmdUpdateGeo(),
 		cmdStatus(),
 		cmdEnsureWgNetworkd(),
+		cmdDiagnostics(),
 		cmdServe(),
 		cmdBackup(),
 		cmdRestore(),
@@ -106,6 +107,34 @@ func cmdEnsureWgNetworkd() *cobra.Command {
 			return apply.EnsureWireGuardUnmanagedFromConfig(cfgPath)
 		},
 	}
+}
+
+func cmdDiagnostics() *cobra.Command {
+	var outPath string
+	c := &cobra.Command{
+		Use:   "diagnostics",
+		Short: "Write a Markdown host diagnostics report (also available via GET /api/v1/diagnostics.md)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			md, filename, err := apply.BuildDiagnosticsMarkdown(cmd.Context(), cfgPath, apply.DiagnosticsMeta{
+				Version: version,
+			})
+			if err != nil {
+				return err
+			}
+			path := strings.TrimSpace(outPath)
+			if path == "" {
+				_, err := fmt.Fprint(cmd.OutOrStdout(), string(md))
+				return err
+			}
+			if err := os.WriteFile(path, md, 0o600); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s (%s)\n", path, filename)
+			return nil
+		},
+	}
+	c.Flags().StringVarP(&outPath, "output", "o", "", "write report to file (default: stdout)")
+	return c
 }
 
 func cmdServe() *cobra.Command {

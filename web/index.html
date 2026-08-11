@@ -207,6 +207,7 @@
                 </div>
                 <p class="hint meta hint--tight">Public <code class="inline">host:port</code> peers dial to reach this VPN. Pre-filled in the peer form.</p>
                 <input type="text" id="settings-wg-endpoint" placeholder="vpn.example.com:51830" autocomplete="off" />
+                <p id="settings-wg-endpoint-warn" class="msg err is-hidden" role="status" aria-live="polite"></p>
               </div>
               <div class="field">
                 <div class="field-label-row">
@@ -339,10 +340,23 @@
             </div>
           </div>
           <div class="evu-card card">
-            <h3>Diagnostics</h3>
-            <p class="hint">Raw status from the host (WireGuard + nftables table).</p>
+            <div class="toolbar">
+              <h3>Diagnostics</h3>
+              <button
+                type="button"
+                class="btn-help-trigger btn-help-trigger--compact"
+                aria-label="More about diagnostics download"
+                data-help-title="Download diagnostics"
+                data-help-template="help-diagnostics-download"
+              >
+                ?
+              </button>
+            </div>
+            <p class="hint">Host status preview, or download a Markdown support bundle (WG, routes, logs, networkd).</p>
+            <p id="settings-diagnostics-msg" class="msg" aria-live="polite"></p>
             <div class="btn-row">
               <button type="button" class="evu-btn evu-btn--outline" id="btn-status">Fetch status</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="btn-diagnostics-download">Download diagnostics</button>
             </div>
             <pre id="settings-status-out" class="code-block is-collapsed"></pre>
           </div>
@@ -1716,6 +1730,11 @@
           create a peer.
         </p>
         <p>The port can be omitted if it matches the server listen port, once you have refreshed server details on Overview.</p>
+        <p>
+          Use an address peers can reach with <strong>UDP</strong> on the WireGuard listen port. Do not put a Cloudflare
+          <strong>orange-cloud</strong> (proxied) hostname here — DNS will resolve to Cloudflare anycast instead of this VPS, and clients will show
+          <code class="inline">0 B received</code>. Prefer the VPS public IP or a grey-cloud / DNS-only name.
+        </p>
       </div>
     </template>
 
@@ -1793,6 +1812,22 @@
           Optional: set env <code class="inline">EVUPROXY_GEOLITE_MMDB</code> on the host to the path of a MaxMind GeoLite2 Country <code class="inline">.mmdb</code> file so SRC/DST
           columns resolve to country codes/flags where possible.
         </p>
+      </div>
+    </template>
+
+    <template id="help-diagnostics-download">
+      <div class="help-modal-body">
+        <p>
+          <strong>Download diagnostics</strong> builds a Markdown support bundle on the host via
+          <code class="inline">GET /api/v1/diagnostics.md</code>: WireGuard, addressing/routes, listen sockets,
+          systemd-networkd drop-ins, unit/kernel logs, nftables snapshot, sanitized config, and version/UI Docker identity.
+        </p>
+        <p>
+          <strong>Secrets are redacted</strong> (API token and private keys are not included). Public IPs, peer public keys,
+          and endpoints may still appear — share carefully. Peer-client <code class="inline">wg show</code> is not included;
+          attach that separately when debugging handshakes.
+        </p>
+        <p>CLI equivalent: <code class="inline">evuproxy diagnostics -o report.md</code>.</p>
       </div>
     </template>
 
