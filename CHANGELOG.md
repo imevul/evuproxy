@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/imevul/evuproxy/compare/v0.15.1...v0.16.0) (2026-08-11)
+
+
+### Features
+
+* guard WireGuard iface from networkd/netplan address wipe ([10edd8e](https://github.com/imevul/evuproxy/commit/10edd8e6eba83a0c691f3d1144f41601d5c73d5e))
+
 ## [0.15.1](https://github.com/imevul/evuproxy/compare/v0.15.0...v0.15.1) (2026-08-09)
 
 
