@@ -9,10 +9,14 @@ import {
   applyPeersRoutesTableFilter,
   writeRateLimitFields,
   readRateLimitFromForm,
-  markFieldInvalid,
-  clearFieldInvalid,
+  setEditorMsg,
+  setRowError,
+  clearRowError,
+  rowErrorHtml,
+  restoreRowSwitchFocus,
 } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { showToast } from "../core/toast.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
 import { setRouteEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
 import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
@@ -133,12 +137,11 @@ function runRouteProbe(index) {
 }
 
 /* ——— Routes ——— */
-function setRoutesMsg(text, isErr, field) {
+function setRoutesMsg(text, isErr) {
   const el = $("routes-msg");
   el.textContent = text;
   el.classList.toggle("err", !!isErr);
-  if (isErr && field) markFieldInvalid(el, field);
-  else clearFieldInvalid(el);
+  if (!text) clearRowError("data-route-disabled");
 }
 
 function peerTunnelIPv4Options(cfg) {
@@ -233,9 +236,10 @@ function renderRoutesTable(cfg) {
             "</span> <span class=\"meta\">CIDR</span></td>"
           : '<td><span class="meta">any</span></td>';
       return (
-        `<tr data-filter="${escapeHtml(f)}"><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
+        `<tr data-filter="${escapeHtml(f)}"${r.disabled ? ' class="is-row-disabled"' : ""}><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
         monoIpCopyCellHtml(r.target_ip, targetPeerName) +
-        `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-test="${i}">Test</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-del="${i}">Remove</button></td></tr>`
+        `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-test="${i}">Test</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-del="${i}">Remove</button></td></tr>` +
+        rowErrorHtml("data-route-disabled", i, 6)
       );
     })
     .join("");
@@ -254,6 +258,7 @@ function renderRoutesTable(cfg) {
     inp.addEventListener("click", (ev) => ev.stopPropagation());
     inp.addEventListener("change", async () => {
       const idx = +inp.getAttribute("data-route-disabled");
+      clearRowError("data-route-disabled");
       await patchRouteDisabled(idx, !inp.checked);
     });
   });
@@ -265,6 +270,7 @@ function openRouteEditor(index) {
   if (!cfg) return;
   if (!cfg.forwarding.routes) cfg.forwarding.routes = [];
   peerTunnelIPv4Options(cfg);
+  setEditorMsg("route-editor-msg", "");
   const dis = $("route-f-disabled");
   if (dis) dis.checked = true;
   if (index === -1) {
@@ -424,10 +430,12 @@ async function patchRouteDisabled(index, disabled) {
     setApiStatus(true);
     refreshPendingBadge();
     renderRoutesTable(cfg);
+    showToast(disabled ? "Route disabled" : "Route enabled");
   } catch (e) {
-    setRoutesMsg(String(e.message || e), true);
+    setRowError("data-route-disabled", index, String(e.message || e));
     renderRoutesTable(state.lastConfig);
   }
+  restoreRowSwitchFocus($("routes-table-wrap"), "data-route-disabled", index);
 }
 
 async function saveRouteEditor() {
@@ -438,15 +446,15 @@ async function saveRouteEditor() {
   const ports = parsePortsList($("route-f-ports").value);
   const target = $("route-f-target").value.trim();
   if (!proto) {
-    setRoutesMsg("Select at least one protocol (TCP and/or UDP).", true, $("route-f-proto-tcp"));
+    setEditorMsg("route-editor-msg", "Select at least one protocol (TCP and/or UDP).", $("route-f-proto-tcp"));
     return;
   }
   if (!ports.length) {
-    setRoutesMsg("Ports are required.", true, $("route-f-ports"));
+    setEditorMsg("route-editor-msg", "Ports are required.", $("route-f-ports"));
     return;
   }
   if (!target) {
-    setRoutesMsg("Target is required.", true, $("route-f-target"));
+    setEditorMsg("route-editor-msg", "Target is required.", $("route-f-target"));
     return;
   }
   const routeEn = $("route-f-disabled");
@@ -474,18 +482,20 @@ async function saveRouteEditor() {
   if (routeRL) entry.rate_limit = routeRL;
   else delete entry.rate_limit;
   const idxRaw = $("route-edit-index").value;
+  setEditorMsg("route-editor-msg", "");
   if (idxRaw === "") cfg.forwarding.routes.push(entry);
   else cfg.forwarding.routes[+idxRaw] = entry;
   try {
     await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
     state.lastConfig = cfg;
-    setRoutesMsg("Routes saved. Open Pending changes to review nftables, then Apply to host.");
+    setRoutesMsg("");
     closeRouteEditor();
     renderRoutesTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
+    showToast((idxRaw === "" ? "Route added." : "Route saved.") + " Review it on Pending changes, then Apply to host.");
   } catch (e) {
-    setRoutesMsg(String(e.message || e), true);
+    setEditorMsg("route-editor-msg", String(e.message || e));
   }
 }
 
@@ -551,10 +561,11 @@ async function removeRoute(index) {
       try {
         await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
         state.lastConfig = c;
-        setRoutesMsg("Route removed from config. Apply on Pending changes when ready.");
+        setRoutesMsg("");
         renderRoutesTable(c);
         setApiStatus(true);
         refreshPendingBadge();
+        showToast("Route removed. Apply on Pending changes when ready.");
       } catch (e) {
         setRoutesMsg(String(e.message || e), true);
       }

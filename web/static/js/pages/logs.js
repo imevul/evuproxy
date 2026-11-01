@@ -1,6 +1,7 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { showToast } from "../core/toast.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
 import { openConfirmModal } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
@@ -478,10 +479,11 @@ function confirmAddBreakGlass(ip) {
         await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
         state.logsRefreshSeq++;
         state.lastConfig = cfg;
-        setLogsMsg("Added " + cidr + " to break-glass. Review Pending changes, then Apply.");
+        setLogsMsg("");
         setApiStatus(true);
         await refreshPendingBadge();
         renderLogsView();
+        showToast("Added " + cidr + " to break-glass. Review Pending changes, then Apply.");
       } catch (e) {
         setLogsMsg(String(e.message || e), true);
       } finally {

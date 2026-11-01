@@ -474,6 +474,7 @@
                     </label>
                   </div>
                 </div>
+                <p id="peer-editor-msg" class="msg" aria-live="polite"></p>
                 <div class="btn-row">
                   <button type="button" class="evu-btn evu-btn--primary" id="peer-save">Save</button>
                   <button type="button" class="evu-btn evu-btn--outline" id="peer-cancel">Cancel</button>
@@ -811,6 +812,7 @@
                 </section>
               </div>
               <div class="route-editor-actions">
+                <p id="route-editor-msg" class="msg" aria-live="polite"></p>
                 <div class="btn-row">
                   <button type="button" class="evu-btn evu-btn--primary" id="route-save">Save route</button>
                   <button type="button" class="evu-btn evu-btn--outline" id="route-cancel">Cancel</button>
@@ -940,6 +942,7 @@
                   </label>
                 </div>
               </div>
+              <p id="inbound-editor-msg" class="msg" aria-live="polite"></p>
               <div class="btn-row">
                 <button type="button" class="evu-btn evu-btn--primary" id="inbound-save">Save rule</button>
                 <button type="button" class="evu-btn evu-btn--outline" id="inbound-cancel">Cancel</button>
@@ -1528,6 +1531,8 @@
     </main>
     </div>
   </div>
+
+  <div id="toaster" class="evu-toaster" role="status"></div>
 
     <template id="help-peers-intro">
       <div class="help-modal-body">

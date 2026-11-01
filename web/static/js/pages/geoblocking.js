@@ -8,6 +8,7 @@ import {
   readRateLimitFromForm,
 } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { showToast } from "../core/toast.js";
 import { parseSourceAllowListInput } from "../core/net.js";
 import { setGeoEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
 import { openModal, closeModal } from "../core/modal.js";
@@ -408,10 +409,11 @@ async function saveGeoblocking() {
   try {
     await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
     state.lastConfig = cfg;
-    setGeoMsg("Saved. Review Pending changes, then Apply to host.");
+    setGeoMsg("");
     setApiStatus(true);
     refreshPendingBadge();
     syncGeoUnsavedIndicator();
+    showToast("Geoblocking saved. Review it on Pending changes, then Apply to host.");
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
   }
@@ -548,10 +550,11 @@ async function geoUpdateLists() {
   setGeoMsg("…");
   try {
     await api("/v1/update-geo", { method: "POST" });
-    setGeoMsg("Geo lists updated on host.");
+    setGeoMsg("");
     setApiStatus(true);
     // The Zone files tab is where an operator confirms the update landed.
     void refreshGeoZonesTable();
+    showToast("Geo lists updated on host");
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
   }

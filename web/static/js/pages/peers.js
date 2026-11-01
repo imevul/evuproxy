@@ -9,10 +9,14 @@ import {
   bindTunnelIpCopyButtons,
   applyPeersRoutesTableFilter,
   downloadTextFile,
-  markFieldInvalid,
-  clearFieldInvalid,
+  setEditorMsg,
+  setRowError,
+  clearRowError,
+  rowErrorHtml,
+  restoreRowSwitchFocus,
 } from "../core/dom.js";
 import { api, apiBlob } from "../core/api.js";
+import { showToast } from "../core/toast.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
 import {
   PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC,
@@ -69,12 +73,11 @@ function suggestedPeerTunnelIP(cfg) {
 }
 
 /* ——— Peers ——— */
-function setPeersMsg(text, isErr, field) {
+function setPeersMsg(text, isErr) {
   const el = $("peers-msg");
   el.textContent = text;
   el.classList.toggle("err", !!isErr);
-  if (isErr && field) markFieldInvalid(el, field);
-  else clearFieldInvalid(el);
+  if (!text) clearRowError("data-peer-disabled");
 }
 
 export function stopPeersPingPolling() {
@@ -160,9 +163,10 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       const f = [p.name, p.tunnel_ip, p.public_key].join(" ").toLowerCase();
       const pingCell = peerPingMsCell(p, pingByTunnel);
       return (
-        `<tr data-filter="${escapeHtml(f)}"><td>${escapeHtml(p.name)}</td>` +
+        `<tr data-filter="${escapeHtml(f)}"${p.disabled ? ' class="is-row-disabled"' : ""}><td>${escapeHtml(p.name)}</td>` +
         monoIpCopyCellHtml(p.tunnel_ip) +
-        `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>`
+        `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>` +
+        rowErrorHtml("data-peer-disabled", i, pingOn ? 7 : 6)
       );
     })
     .join("");
@@ -178,6 +182,7 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
     inp.addEventListener("click", (ev) => ev.stopPropagation());
     inp.addEventListener("change", async () => {
       const idx = +inp.getAttribute("data-peer-disabled");
+      clearRowError("data-peer-disabled");
       await patchPeerDisabled(idx, !inp.checked);
     });
   });
@@ -231,7 +236,7 @@ async function patchPeerDisabled(index, disabled) {
   const cfg = JSON.parse(JSON.stringify(state.lastConfig));
   if (!cfg.peers || cfg.peers[index] === undefined) return;
   const peer = cfg.peers[index];
-  const finish = async (nextCfg) => {
+  const finish = async (nextCfg, confirmation) => {
     try {
       await api("/v1/config", { method: "PUT", body: JSON.stringify(nextCfg) });
       state.lastConfig = nextCfg;
@@ -239,10 +244,12 @@ async function patchPeerDisabled(index, disabled) {
       setApiStatus(true);
       refreshPendingBadge();
       renderPeersTable(nextCfg, state.lastPeerWgStats);
+      showToast(confirmation);
     } catch (e) {
-      setPeersMsg(String(e.message || e), true);
+      setRowError("data-peer-disabled", index, String(e.message || e));
       renderPeersTable(state.lastConfig, state.lastPeerWgStats);
     }
+    restoreRowSwitchFocus($("peers-table-wrap"), "data-peer-disabled", index);
   };
   if (disabled) {
     const deps = dependentRoutesForPeer(cfg, peer);
@@ -256,17 +263,18 @@ async function patchPeerDisabled(index, disabled) {
           if (!c.peers || c.peers[index] === undefined) return;
           disableDependentRoutes(c, dependentRoutesForPeer(c, c.peers[index]));
           c.peers[index].disabled = true;
-          await finish(c);
+          await finish(c, "Peer and its routes disabled");
         },
         onCancel: () => {
           renderPeersTable(state.lastConfig, state.lastPeerWgStats);
+          restoreRowSwitchFocus($("peers-table-wrap"), "data-peer-disabled", index);
         },
       });
       return;
     }
   }
   cfg.peers[index].disabled = disabled;
-  await finish(cfg);
+  await finish(cfg, disabled ? "Peer disabled" : "Peer enabled");
 }
 
 export async function refreshPeersPage() {
@@ -445,6 +453,7 @@ function resetPeerPrivRevealState() {
 }
 
 function resetPeerOnboardExtras() {
+  setEditorMsg("peer-editor-msg", "");
   state.onboardingUnlockPassStored = "";
   $("onboard-client-priv").value = "";
   resetPeerPrivRevealState();
@@ -477,21 +486,23 @@ async function savePeerEditor() {
     [peer.public_key, "peer-f-pub", "Public key is required."],
   ].find(([value]) => !value);
   if (missing) {
-    setPeersMsg(missing[2], true, $(missing[1]));
+    setEditorMsg("peer-editor-msg", missing[2], $(missing[1]));
     return;
   }
+  setEditorMsg("peer-editor-msg", "");
   if (idxRaw === "") cfg.peers.push(peer);
   else cfg.peers[+idxRaw] = peer;
   try {
     await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
     state.lastConfig = cfg;
-    setPeersMsg("Saved. Open Pending changes to review nftables, then Apply to host.");
+    setPeersMsg("");
     closePeerEditor();
     renderPeersTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
+    showToast((idxRaw === "" ? "Peer added." : "Peer saved.") + " Review it on Pending changes, then Apply to host.");
   } catch (e) {
-    setPeersMsg(String(e.message || e), true);
+    setEditorMsg("peer-editor-msg", String(e.message || e));
   }
 }
 
@@ -525,14 +536,15 @@ async function removePeer(index) {
       try {
         await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
         state.lastConfig = c;
-        setPeersMsg(
-          deps.length
-            ? "Peer removed and dependent routes disabled in config. Apply on Pending changes when ready."
-            : "Peer removed from config. Apply on Pending changes when ready."
-        );
+        setPeersMsg("");
         renderPeersTable(c);
         setApiStatus(true);
         refreshPendingBadge();
+        showToast(
+          deps.length
+            ? "Peer removed and dependent routes disabled. Apply on Pending changes when ready."
+            : "Peer removed. Apply on Pending changes when ready."
+        );
       } catch (e) {
         setPeersMsg(String(e.message || e), true);
       }
