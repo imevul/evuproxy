@@ -1,5 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { tunnelToHost, tunnelHostOnly, routeProtoPlainText } from "../core/net.js";
 import {
@@ -524,9 +525,14 @@ function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
   applyTopologyPanZoomTransform(svg);
 }
 
-export async function refreshTopologyPage() {
+/**
+ * @param {{ background?: boolean }} [opts] `background` for the poll: the graph
+ *   would otherwise read as busy, and dim on a slow link, every few seconds.
+ */
+export async function refreshTopologyPage(opts) {
   if (state.topologyRefreshInFlight) return;
   state.topologyRefreshInFlight = true;
+  const doneLoading = opts && opts.background ? () => {} : beginLoading("topology-graph-wrap");
   const msg = $("topology-msg");
   if (msg) {
     msg.textContent = "";
@@ -566,6 +572,7 @@ export async function refreshTopologyPage() {
     setApiStatus(false, String(e.message || e));
   } finally {
     state.topologyRefreshInFlight = false;
+    doneLoading();
   }
 }
 

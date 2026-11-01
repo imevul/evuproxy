@@ -1404,8 +1404,10 @@
           <!-- Announced separately from the visible count: that updates on every
                keystroke, which is too chatty to be a live region itself. -->
           <p id="logs-count-status" class="evu-sr-only" role="status" aria-live="polite"></p>
-          <div id="logs-table-wrap" class="table-wrap logs-table-wrap" hidden></div>
-          <pre id="logs-pre" class="code-block logs-pre" hidden></pre>
+          <div id="logs-view">
+            <div id="logs-table-wrap" class="table-wrap logs-table-wrap" hidden></div>
+            <pre id="logs-pre" class="code-block logs-pre" hidden></pre>
+          </div>
           <p id="logs-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>

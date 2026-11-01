@@ -1,5 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
 import { fetchUIPrefsFromServer } from "../core/prefs.js";
 import {
@@ -871,13 +872,13 @@ export async function refreshOverviewPage() {
   const msg = $("overview-action-msg");
   const actionsCard = $("overview-actions-card");
   if (!grid) return;
-  grid.innerHTML = "";
   msg.textContent = "";
   if (!token().trim()) {
     if (seq !== state.overviewRefreshSeq) return;
     state.apiConnectionOk = false;
     applyNavRestriction();
     setApiStatus(false, "No API token");
+    grid.innerHTML = "";
     grid.appendChild(
       overviewApiIssueCard({
         message: "There is a problem with the API: no token is configured in this browser.",
@@ -888,6 +889,7 @@ export async function refreshOverviewPage() {
     if (evCard0) evCard0.hidden = true;
     return;
   }
+  const doneLoading = beginLoading("overview-cards");
   try {
     try {
       await fetchUIPrefsFromServer();
@@ -911,6 +913,7 @@ export async function refreshOverviewPage() {
     applyNavRestriction();
     setApiStatus(true);
     if (actionsCard) actionsCard.hidden = false;
+    grid.innerHTML = "";
     grid.appendChild(overviewActivityAttentionCard(evs, buildOverviewAttentionItems(cfg, o, st, met)));
     grid.appendChild(overviewHostGeoCard(o));
     grid.appendChild(overviewLatencyOverviewCard(met));
@@ -922,6 +925,7 @@ export async function refreshOverviewPage() {
     applyNavRestriction();
     setApiStatus(false, errText);
     if (actionsCard) actionsCard.hidden = true;
+    grid.innerHTML = "";
     grid.appendChild(
       overviewApiIssueCard({
         message:
@@ -935,6 +939,8 @@ export async function refreshOverviewPage() {
     if (evUl) evUl.innerHTML = "";
     if (evEmpty) evEmpty.classList.remove("is-hidden");
     if (evCard) evCard.hidden = true;
+  } finally {
+    doneLoading();
   }
 }
 

@@ -7,6 +7,7 @@ import {
   markFieldInvalid,
   clearFieldInvalid,
 } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
@@ -235,6 +236,7 @@ async function removeInboundRule(index) {
 
 export async function refreshInboundPage() {
   setInboundMsg("");
+  const doneLoading = beginLoading("inbound-table-wrap");
   try {
     state.lastConfig = await api("/v1/config");
     setApiStatus(true);
@@ -242,6 +244,8 @@ export async function refreshInboundPage() {
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setInboundMsg(String(e.message || e), true);
+  } finally {
+    doneLoading();
   }
 }
 

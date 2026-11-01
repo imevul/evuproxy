@@ -1,6 +1,8 @@
 import { state } from "./state.js";
 import { $ } from "./dom.js";
-import { ensureApiGate, applyNavRestriction } from "./api.js";
+import { ensureApiGate, applyNavRestriction, token } from "./api.js";
+import { setGeoEditorTab } from "./advanced.js";
+import { beginLoading } from "./loading.js";
 import { ensureUIPrefs } from "./prefs.js";
 import { closeConfirmModal } from "./modal.js";
 import { refreshSidebarAbout } from "./sidebar.js";
@@ -36,28 +38,26 @@ const pages = [
   "logs",
 ];
 
-export async function navigate(name) {
-  if (!pages.includes(name)) name = "overview";
-  state.hashNavParams = parseHashNavParams();
-  closeConfirmModal();
-  if (name !== "routes") {
-    closeRouteProbeModal();
-    closeRouteEditor();
-  }
-  if (name !== "inbound") closeInboundEditor();
-  if (name !== "peers") {
-    stopPeersPingPolling();
-    closePeerEditor();
-  }
-  if (name !== "topology") {
-    stopTopologyPolling();
-  }
-  if (name !== "overview" && name !== "token") {
-    const ok = await ensureApiGate();
-    if (!ok) name = "overview";
-  }
-  applyNavRestriction();
-  await ensureUIPrefs();
+/* What each page refreshes, so it reads as busy from the click, before its own load starts. */
+const pageLoadRegions = {
+  overview: ["overview-cards"],
+  settings: ["settings-tab-prefs-panel", "settings-tab-maint-panel"],
+  peers: ["peers-table-wrap"],
+  routes: ["routes-table-wrap"],
+  topology: ["topology-graph-wrap"],
+  inbound: ["inbound-table-wrap"],
+  geoblocking: ["geo-tab-default-panel", "geo-tab-advanced-panel"],
+  pending: ["pending-diff-panel"],
+  stats: ["stats-wg-wrap", "stats-nft-wrap"],
+  logs: ["logs-view"],
+};
+
+/* Bumped by every navigate(), so a slower earlier one stops once it wakes up. */
+let navSeq = 0;
+/* The hash navigate() just set itself: its hashchange must not load the page a second time. */
+let selfSetHash = null;
+
+function showPage(name) {
   document.querySelectorAll(".page").forEach((p) => {
     p.hidden = true;
   });
@@ -75,46 +75,86 @@ export async function navigate(name) {
   const hqi = hraw.indexOf("?");
   const curPath = (hqi >= 0 ? hraw.slice(0, hqi) : hraw).replace(/^\//, "").split("/")[0] || "overview";
   if (curPath !== name) {
-    location.hash = "#/" + name;
+    selfSetHash = "#/" + name;
+    location.hash = selfSetHash;
   }
-  if (name === "overview") {
-    await refreshOverviewPage();
-    restartOverviewEventsPolling();
-    restartOverviewLatencyPolling();
-  } else {
+  state.hashNavParams = parseHashNavParams();
+}
+
+export async function navigate(name) {
+  if (!pages.includes(name)) name = "overview";
+  const seq = ++navSeq;
+  // No token means the gate cannot pass and needs no request to say so.
+  if (name !== "overview" && name !== "token" && !token().trim()) name = "overview";
+  closeConfirmModal();
+  if (name !== "routes") {
+    closeRouteProbeModal();
+    closeRouteEditor();
+  }
+  if (name !== "inbound") closeInboundEditor();
+  if (name !== "peers") {
+    stopPeersPingPolling();
+    closePeerEditor();
+  }
+  stopTopologyPolling();
+  if (name !== "overview") {
     stopOverviewEventsPolling();
     stopOverviewLatencyPolling();
   }
-  if (name === "settings") {
-    await refreshSettingsPage();
-    setSettingsEditorTab("prefs");
-  }
-  if (name === "token") {
-    refreshTokenPage();
-    await ensureApiGate();
-  }
-  if (name === "peers") {
-    await refreshPeersPage();
-    applyHashPeerRouteHighlight();
-  }
-  if (name === "routes") {
-    await refreshRoutesPage();
-    applyHashPeerRouteHighlight();
-  }
-  if (name === "topology") {
-    state.topologyPrevPeerBytes = new Map();
-    void refreshTopologyPage();
-    state.topologyPollTimer = setInterval(() => {
+  // Everything up to the first await runs on the click; the network comes after.
+  showPage(name);
+  if (name === "settings") setSettingsEditorTab("prefs");
+  if (name === "geoblocking") setGeoEditorTab("default");
+  const doneLoading = beginLoading(...(pageLoadRegions[name] || []));
+  try {
+    if (name !== "overview" && name !== "token") {
+      const ok = await ensureApiGate();
+      if (seq !== navSeq) return;
+      if (!ok) {
+        void navigate("overview");
+        return;
+      }
+    }
+    applyNavRestriction();
+    await ensureUIPrefs();
+    if (seq !== navSeq) return;
+    if (name === "overview") {
+      await refreshOverviewPage();
+      if (seq !== navSeq) return;
+      restartOverviewEventsPolling();
+      restartOverviewLatencyPolling();
+    }
+    if (name === "settings") await refreshSettingsPage();
+    if (name === "token") {
+      refreshTokenPage();
+      await ensureApiGate();
+    }
+    if (name === "peers") {
+      await refreshPeersPage();
+      if (seq === navSeq) applyHashPeerRouteHighlight();
+    }
+    if (name === "routes") {
+      await refreshRoutesPage();
+      if (seq === navSeq) applyHashPeerRouteHighlight();
+    }
+    if (name === "topology") {
+      state.topologyPrevPeerBytes = new Map();
       void refreshTopologyPage();
-    }, 4000);
+      state.topologyPollTimer = setInterval(() => {
+        void refreshTopologyPage({ background: true });
+      }, 4000);
+    }
+    if (name === "inbound") refreshInboundPage();
+    if (name === "geoblocking") await refreshGeoblockingPage();
+    if (name === "pending") refreshPendingPage();
+    if (name === "stats") refreshStatsPage();
+    if (name === "logs") refreshLogsPage();
+    if (seq !== navSeq) return;
+    refreshPendingBadge();
+    void refreshSidebarAbout();
+  } finally {
+    doneLoading();
   }
-  if (name === "inbound") refreshInboundPage();
-  if (name === "geoblocking") await refreshGeoblockingPage({ resetTab: true });
-  if (name === "pending") refreshPendingPage();
-  if (name === "stats") refreshStatsPage();
-  if (name === "logs") refreshLogsPage();
-  refreshPendingBadge();
-  void refreshSidebarAbout();
 }
 
 function applyHashPeerRouteHighlight() {
@@ -148,6 +188,10 @@ function applyHashPeerRouteHighlight() {
 }
 
 export async function onHash() {
+  if (location.hash === selfSetHash) {
+    selfSetHash = null;
+    return;
+  }
   const raw = (location.hash || "#/overview").replace(/^#/, "");
   const qi = raw.indexOf("?");
   const pathPart = qi >= 0 ? raw.slice(0, qi) : raw;

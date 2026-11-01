@@ -1,5 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
 import { openConfirmModal } from "../core/modal.js";
@@ -389,11 +390,7 @@ export async function refreshLogsPage() {
   const src = $("logs-source");
   const countEl = $("logs-count");
   setLogsMsg("");
-  if (pre) pre.textContent = "";
-  if (wrap) wrap.innerHTML = "";
-  if (countEl) countEl.textContent = "";
-  if (src) src.textContent = "";
-  state.lastFirewallLogEntries = [];
+  const doneLoading = beginLoading("logs-view");
   try {
     // Logs must not depend on /config: a config read failure used to blank the
     // whole page. Break-glass coverage is best-effort from a parallel config fetch.
@@ -440,6 +437,9 @@ export async function refreshLogsPage() {
       pre.hidden = state.logsViewMode !== "raw";
     }
     if (countEl) countEl.textContent = "";
+    if (src) src.textContent = "";
+  } finally {
+    doneLoading();
   }
 }
 

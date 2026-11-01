@@ -1,5 +1,6 @@
 import { state, defaultPeerSubnetCidr, contentWidthKey, contentWidthCssValues } from "../core/state.js";
 import { $, setApiStatus } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api, getApiBase, headersDownload } from "../core/api.js";
 import {
   fetchUIPrefsFromServer,
@@ -77,6 +78,15 @@ function syncContentWidthSelect() {
 }
 
 export async function refreshSettingsPage() {
+  const doneLoading = beginLoading("settings-tab-prefs-panel", "settings-tab-maint-panel");
+  try {
+    await loadSettingsPage();
+  } finally {
+    doneLoading();
+  }
+}
+
+async function loadSettingsPage() {
   const msg = $("settings-prefs-msg");
   if (msg) {
     msg.textContent = "";

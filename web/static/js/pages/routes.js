@@ -12,6 +12,7 @@ import {
   markFieldInvalid,
   clearFieldInvalid,
 } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
 import { setRouteEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
@@ -564,6 +565,7 @@ async function removeRoute(index) {
 
 export async function refreshRoutesPage() {
   setRoutesMsg("");
+  const doneLoading = beginLoading("routes-table-wrap");
   try {
     state.lastConfig = await api("/v1/config");
     setApiStatus(true);
@@ -572,6 +574,8 @@ export async function refreshRoutesPage() {
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setRoutesMsg(String(e.message || e), true);
+  } finally {
+    doneLoading();
   }
 }
 

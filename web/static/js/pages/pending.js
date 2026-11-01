@@ -1,5 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus, clientIPSourceLabel } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { openConfirmModal } from "../core/modal.js";
 import { fetchValidateResult, lockoutRisks, lockoutSignature } from "../core/lockout.js";
@@ -550,6 +551,7 @@ export async function refreshPendingPage() {
   // The config may have changed since the last check (another tab, another
   // page in this one, or an apply that just landed).
   invalidatePendingValidate();
+  const doneLoading = beginLoading("pending-diff-panel");
   try {
     const p = await api("/v1/pending");
     setApiStatus(true);
@@ -581,6 +583,8 @@ export async function refreshPendingPage() {
     panel.innerHTML = "";
     setApiStatus(false, String(e.message || e));
     setPendingMsg(String(e.message || e), true);
+  } finally {
+    doneLoading();
   }
 }
 
