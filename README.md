@@ -12,8 +12,8 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 | Context                     | Requirement                                                                                                                                                                                                                                        |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **VPS (`install.sh`)**      | **Linux** host with **root** (or sudo) for install. The script installs **WireGuard**, **nftables**, **curl**, and **iproute2** via **apt**, **dnf**, or **pacman**. Other distros need those packages installed manually before using `evuproxy`. |
-| **Go (optional)**           | **[Go 1.22+](https://go.dev/dl/)** on your **PATH** if you want `scripts/install.sh` to compile `evuproxy` from this repo. Without Go, place a prebuilt **`evuproxy`** binary at `/usr/local/bin/evuproxy` (or set `PREFIX`) after install.        |
-| **Build from source (dev)** | Go **1.22+** and this repository; run `go build` from the repo root (see [Building from source](#building-from-source)).                                                                                                                           |
+| **Go (optional)**           | **[Go 1.25+](https://go.dev/dl/)** on your **PATH** if you want `scripts/install.sh` to compile `evuproxy` from this repo. Without Go, place a prebuilt **`evuproxy`** binary at `/usr/local/bin/evuproxy` (or set `PREFIX`) after install.        |
+| **Build from source (dev)** | Go **1.25+** and this repository; run `go build` from the repo root (see [Building from source](#building-from-source)).                                                                                                                           |
 | **Web UI**                  | **[Docker](https://docs.docker.com/engine/install/)** and **Docker Compose** (v2 plugin: `docker compose`) to build and run the admin UI container.                                                                                                |
 | **Geo / IP lists**          | Outbound **HTTPS** to [ipdeny.com](https://www.ipdeny.com/ipblocks/data/countries/) (default zone source) for `update-geo` and first-time zone fetch on `reload`. See [docs/third-party-data.md](docs/third-party-data.md) for attribution and limits.                                                                                  |
 
@@ -24,7 +24,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
   ```bash
    ./scripts/install.sh
   ```
-   If **Go 1.22+** is installed, the script builds `evuproxy` into `/usr/local/bin`. Otherwise copy a prebuilt binary to that path (see **Prerequisites**). The **HTTP API** (`evuproxy-api.service`) is optional at install time (interactive prompt, or set **`EVUPROXY_INSTALL_API`** to override); see [docs/http-api.md](docs/http-api.md#install-script-and-optional-api-enable).
+   If **Go 1.25+** is installed, the script builds `evuproxy` into `/usr/local/bin`. Otherwise copy a prebuilt binary to that path (see **Prerequisites**). The **HTTP API** (`evuproxy-api.service`) is optional at install time (interactive prompt, or set **`EVUPROXY_INSTALL_API`** to override); see [docs/http-api.md](docs/http-api.md#install-script-and-optional-api-enable).
 2. Edit `/etc/evuproxy/config.yaml` (seeded from [config/evuproxy.example.yaml](config/evuproxy.example.yaml), full schema in [docs/config.md](docs/config.md)): set `network.public_interface`, add **peers** (public keys, tunnel IPs), then **`forwarding.routes`** (each `target_ip` must match a peer’s tunnel address). Adjust **`input_allows`** if you do not want the default SSH / web / UI ports.
 3. Apply:
   ```bash
@@ -88,7 +88,7 @@ cd /path/to/evuproxy   # repository root
 ./scripts/update.sh
 ```
 
-The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.22+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/`, restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file.
+The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.25+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/`, restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file.
 
 **Limitations**
 
@@ -117,7 +117,7 @@ If forwards suddenly fail with `evuproxy-forward-drop` and `OUT=eth0` while peer
 
 ## Building from source
 
-Requires **Go 1.22 or newer** (see `go.mod`).
+Requires **Go 1.25 or newer** (see `go.mod`).
 
 ```bash
 go build -ldflags "-X main.version=$(git describe --tags --always 2>/dev/null || echo dev)" -o evuproxy ./cmd/evuproxy

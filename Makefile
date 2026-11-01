@@ -2,7 +2,7 @@
 	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
 	check fmt vet test test-race deadcode
 
-# Run from the repository root. Requires Go 1.22+, Docker, and `docker compose` (v2).
+# Run from the repository root. Requires Go 1.25+, Docker, and `docker compose` (v2).
 
 # check runs the same gates as CI: formatting, vet, and the full test suite.
 check: fmt vet test

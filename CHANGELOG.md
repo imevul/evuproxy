@@ -49,10 +49,6 @@
 
 * harden apply/reload path and complete review remediation ([f07b6d2](https://github.com/imevul/evuproxy/commit/f07b6d27e53a949f6f6fec95fcddc2be87b8cda4))
 
-## [Unreleased]
-
-Security and reliability hardening pass (in progress).
-
 ### Security
 
 * **wireguard:** validate `wireguard.address` and peer `public_key` before they are written to `/etc/wireguard/*.conf`, rejecting newlines/control characters. Prevents an authenticated config write from injecting a `PostUp` directive that `wg-quick` would run as root.

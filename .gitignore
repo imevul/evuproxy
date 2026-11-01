@@ -12,6 +12,7 @@ contrib/crowdsec/vendor/
 
 # Private / local-only docs (not published in this repo)
 .cursor/
+.headway/
 local_docs/
 
 # Dev mock API persisted config (docker-compose.dev.yml bind-mount)

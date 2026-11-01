@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build EvuProxy from this repository (requires Go 1.22+ on PATH).
+# Build EvuProxy from this repository (requires Go 1.25+ on PATH).
 # Usage:
 #   ./scripts/rebuild.sh              # writes ./evuproxy in repo root
 #   sudo ./scripts/rebuild.sh --install   # build and install to PREFIX/bin
