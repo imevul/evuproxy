@@ -15,7 +15,7 @@ import {
 import { api } from "../core/api.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
 import { setRouteEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
-import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
+import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 function expandRoutePortTokens(portsArr) {
@@ -595,11 +595,12 @@ export function initRoutesPage() {
   if (routeTabDefault) routeTabDefault.addEventListener("click", () => setRouteEditorTab("default"));
   if (routeTabAdvanced) routeTabAdvanced.addEventListener("click", () => setRouteEditorTab("advanced"));
   $("route-save").addEventListener("click", saveRouteEditor);
-  $("route-cancel").addEventListener("click", closeRouteEditor);
 
   const routeModal = $("route-modal");
+  registerModalForm(routeModal);
+  $("route-cancel").addEventListener("click", () => dismissModal(routeModal));
   const routeBackdrop = routeModal && routeModal.querySelector(".modal-backdrop");
-  if (routeBackdrop) routeBackdrop.addEventListener("click", closeRouteEditor);
+  if (routeBackdrop) routeBackdrop.addEventListener("click", () => dismissModal(routeModal));
   const routeProbeModal = $("route-probe-modal");
   const routeProbeBackdrop = routeProbeModal && routeProbeModal.querySelector(".modal-backdrop");
   if (routeProbeBackdrop) routeProbeBackdrop.addEventListener("click", closeRouteProbeModal);

@@ -19,6 +19,7 @@ import {
   closeConfirmModal,
   registerModalCloser,
 } from "../core/modal.js";
+import { createFormTrackerByIds, registerPageForm } from "../core/dirty.js";
 import { refreshOverviewPage, refreshOverviewEventsList } from "./overview.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -75,6 +76,16 @@ function syncContentWidthSelect() {
   const p = getContentWidthPreset();
   sel.value = Object.prototype.hasOwnProperty.call(contentWidthCssValues, p) ? p : "medium";
 }
+
+const SETTINGS_PREF_FIELDS = [
+  "peer-subnet-cidr",
+  "settings-wg-endpoint",
+  "settings-public-interface",
+  "settings-metrics-collection",
+];
+const SETTINGS_NOTES_FIELDS = ["config-notes-body"];
+/** The fields behind Save buttons. The other Settings controls apply as soon as they change. */
+const settingsForm = createFormTrackerByIds([...SETTINGS_PREF_FIELDS, ...SETTINGS_NOTES_FIELDS]);
 
 export async function refreshSettingsPage() {
   const msg = $("settings-prefs-msg");
@@ -147,6 +158,7 @@ export async function refreshSettingsPage() {
   const rp = $("restore-path-input");
   if (bp && !bp.value.trim()) bp.value = "/var/backups/evuproxy-config.tgz";
   if (rp && !rp.value.trim()) rp.value = "/var/backups/evuproxy-config.tgz";
+  settingsForm.mark();
 }
 
 export function setSettingsEditorTab(which) {
@@ -203,6 +215,7 @@ function closeConfigUploadModal() {
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initSettingsPage() {
+  registerPageForm("settings", settingsForm);
   registerModalCloser($("config-upload-modal"), closeConfigUploadModal);
   const settingsTabPrefs = $("settings-tab-prefs-btn");
   const settingsTabMaint = $("settings-tab-maint-btn");
@@ -321,6 +334,7 @@ export function initSettingsPage() {
           msg.textContent += " Tip: add WireGuard server endpoint (host:port) for client snippets.";
         }
       }
+      settingsForm.mark(SETTINGS_PREF_FIELDS);
       setApiStatus(true);
       await refreshEndpointHostWarning();
     } catch (e) {
@@ -398,6 +412,7 @@ export function initSettingsPage() {
       }
       try {
         await api("/v1/config/notes", { method: "PUT", body: JSON.stringify({ text: body }) });
+        settingsForm.mark(SETTINGS_NOTES_FIELDS);
         if (msg) msg.textContent = "Notes saved.";
         setApiStatus(true);
       } catch (e) {
