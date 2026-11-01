@@ -1,4 +1,4 @@
-import { navigate, onHash } from "./core/router.js";
+import { hasUnsavedEdits, navigate, onHash } from "./core/router.js";
 import { $, applyPeersRoutesTableFilter } from "./core/dom.js";
 import {
   initModals,
@@ -113,6 +113,11 @@ document.querySelectorAll(".nav-link").forEach((a) => {
   });
 });
 window.addEventListener("hashchange", () => void onHash());
+window.addEventListener("beforeunload", (ev) => {
+  if (!hasUnsavedEdits()) return;
+  ev.preventDefault();
+  ev.returnValue = "";
+});
 
 const shellMenuBtn = $("shell-menu-toggle");
 if (shellMenuBtn) {

@@ -87,6 +87,8 @@ export const state = {
   /** @type {Map<string, { code: string, name: string }>} */
   geoCountryByCode: new Map(),
   geoSelectedCodes: [],
+  /** False until the form holds this visit's config; a form still loading is not dirty. */
+  geoFormLoaded: false,
   /** @type {Set<string>} */
   geoModalDraft: new Set(),
 };

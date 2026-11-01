@@ -8,7 +8,7 @@ import {
   clearFieldInvalid,
 } from "../core/dom.js";
 import { api } from "../core/api.js";
-import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
+import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 async function patchInboundDisabled(index, disabled) {
@@ -253,9 +253,10 @@ export function initInboundPage() {
     else openInboundEditor(-1);
   });
   $("inbound-save").addEventListener("click", saveInboundEditor);
-  $("inbound-cancel").addEventListener("click", closeInboundEditor);
 
   const inboundModal = $("inbound-modal");
+  registerModalForm(inboundModal);
+  $("inbound-cancel").addEventListener("click", () => dismissModal(inboundModal));
   const inboundBackdrop = inboundModal && inboundModal.querySelector(".modal-backdrop");
-  if (inboundBackdrop) inboundBackdrop.addEventListener("click", closeInboundEditor);
+  if (inboundBackdrop) inboundBackdrop.addEventListener("click", () => dismissModal(inboundModal));
 }

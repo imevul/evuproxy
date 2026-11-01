@@ -25,6 +25,8 @@ import {
   closeModal,
   openConfirmModal,
   registerModalCloser,
+  registerModalForm,
+  dismissModal,
 } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -908,8 +910,13 @@ function extractOnboardConfFromOutput() {
   return out.slice(idx).trim();
 }
 
+/** A generated keypair is a default, not something the operator would lose. */
+const GENERATED_KEY_FIELDS = ["peer-f-pub", "onboard-client-priv"];
+
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initPeersPage() {
+  const peerModal = $("peer-modal");
+  const peerForm = registerModalForm(peerModal);
   $("peers-refresh").addEventListener("click", refreshPeersPage);
   registerModalCloser($("peer-qr-modal"), closePeerQRModal);
   const peerTabFieldsBtn = $("peer-tab-fields-btn");
@@ -952,6 +959,7 @@ export function initPeersPage() {
       const kp = await generatePeerKeypair();
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
+      peerForm.mark(GENERATED_KEY_FIELDS);
     } catch (e) {
       setPeersMsg(String(e.message || e), true);
     }
@@ -961,7 +969,7 @@ export function initPeersPage() {
     if (first) requestAnimationFrame(() => first.focus());
   });
   $("peer-save").addEventListener("click", savePeerEditor);
-  $("peer-cancel").addEventListener("click", closePeerEditor);
+  $("peer-cancel").addEventListener("click", () => dismissModal(peerModal));
 
   $("onboard-client-priv-toggle").addEventListener("click", () => {
     const inp = $("onboard-client-priv");
@@ -988,6 +996,7 @@ export function initPeersPage() {
       const kp = await generatePeerKeypair();
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
+      peerForm.mark(GENERATED_KEY_FIELDS);
       setOnboardMsg("New keypair generated.");
       void rebuildOnboardingEncryptedBundle(false);
     } catch (e) {
@@ -1100,7 +1109,6 @@ export function initPeersPage() {
   const peerDisabled = $("peer-f-disabled");
   if (peerDisabled) peerDisabled.addEventListener("change", onPeerModalFieldActivity);
 
-  const peerModal = $("peer-modal");
   const peerBackdrop = peerModal && peerModal.querySelector(".modal-backdrop");
-  if (peerBackdrop) peerBackdrop.addEventListener("click", closePeerEditor);
+  if (peerBackdrop) peerBackdrop.addEventListener("click", () => dismissModal(peerModal));
 }
