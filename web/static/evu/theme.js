@@ -122,7 +122,8 @@ export function bindThemeControls(root = document) {
   applyScheme();
   applyPalette();
 
-  const schemeButtons = root.querySelectorAll("[data-evu-scheme]");
+  // button-qualified: applyScheme() also writes data-evu-scheme onto <html>.
+  const schemeButtons = root.querySelectorAll("button[data-evu-scheme]");
   const syncScheme = () => {
     const current = getStoredScheme();
     schemeButtons.forEach((btn) => {

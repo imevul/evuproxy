@@ -14,7 +14,7 @@ Phases 0–7 are shipped and running in production. Next is a second UI pass (Ph
 | [5](#phase-5--forwarding-policy-and-peers) | Forwarding policy and peers | Shipped | 15 | 0 |
 | [6](#phase-6--abuse-resistance-and-observability) | Abuse resistance and observability | Shipped | 9 | 0 |
 | [7](#phase-7--ui-rework-and-diagnostics) | UI rework and diagnostics | Shipped | 11 | 0 |
-| [7.5](#phase-75--ui-second-pass) | UI second pass | **Next** | 0 | 16 |
+| [7.5](#phase-75--ui-second-pass) | UI second pass | **Next** | 1 | 15 |
 | [8](#phase-8--test-automation-and-documentation) | Test automation and documentation | Planned | 5 | 6 |
 | [9](#phase-9--route-runtime-and-traffic-metrics) | Route runtime and traffic metrics | Planned | 0 | 9 |
 | [10](#phase-10--api-security) | API security | Planned | 0 | 5 |

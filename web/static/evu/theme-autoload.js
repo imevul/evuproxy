@@ -76,10 +76,7 @@
     applyScheme();
     applyPalette();
 
-    /* LOCAL PATCH (see VENDOR.md): must be button-qualified like the palette
-       query below. applyScheme() puts data-evu-scheme on <html>, so the bare
-       attribute selector also matched the root element and gave it an
-       aria-pressed it is not allowed to have. */
+    // button-qualified: applyScheme() also writes data-evu-scheme onto <html>.
     var schemeButtons = root.querySelectorAll("button[data-evu-scheme]");
     function syncScheme() {
       var current = getStoredScheme();

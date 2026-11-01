@@ -22,6 +22,8 @@
   --muted-foreground: 220 10% 40%;
   --border: 220 12% 86%;
   --input: 220 12% 86%;
+  /* Border of controls that must stay visible unfilled (3:1 on wells, cards and muted groups) */
+  --control-border: 220 12% 57%;
 
   --destructive: 0 72% 48%;
   --destructive-foreground: 0 0% 100%;
@@ -31,6 +33,12 @@
   --warning-foreground: 0 0% 100%;
 
   --radius: 0.5rem;
+
+  /* Motion: crisp, not bouncy. Press is fastest; never exceed 200ms on controls. */
+  --evu-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --evu-duration-press: 120ms;
+  --evu-duration-fast: 150ms;
+  --evu-duration-enter: 200ms;
 
   /* Sidebar / chrome (neutral — not primary-tinted) */
   --sidebar: 220 14% 97%;
@@ -46,6 +54,7 @@
   --evu-muted: hsl(var(--muted));
   --evu-muted-foreground: hsl(var(--muted-foreground));
   --evu-border: hsl(var(--border));
+  --evu-control-border: hsl(var(--control-border));
   --evu-primary: hsl(var(--primary));
   --evu-primary-foreground: hsl(var(--primary-foreground));
   --evu-secondary: hsl(var(--secondary));
@@ -75,6 +84,7 @@
   --muted-foreground: 220 8% 64%;
   --border: 220 6% 20%;
   --input: 220 6% 20%;
+  --control-border: 220 8% 44%;
 
   --destructive: 0 72% 58%;
   --destructive-foreground: 0 0% 100%;
@@ -95,6 +105,7 @@
   --evu-muted: hsl(var(--muted));
   --evu-muted-foreground: hsl(var(--muted-foreground));
   --evu-border: hsl(var(--border));
+  --evu-control-border: hsl(var(--control-border));
   --evu-primary: hsl(var(--primary));
   --evu-primary-foreground: hsl(var(--primary-foreground));
   --evu-secondary: hsl(var(--secondary));
