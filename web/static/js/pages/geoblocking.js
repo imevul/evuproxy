@@ -8,6 +8,7 @@ import {
   readRateLimitFromForm,
 } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { saveConfigEdit, ConfigMergeError } from "../core/config_save.js";
 import { parseSourceAllowListInput } from "../core/net.js";
 import { setGeoEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
 import { openModal, closeModal } from "../core/modal.js";
@@ -279,7 +280,11 @@ function renderGeoTags() {
   syncGeoUnsavedIndicator();
 }
 
+/** geoFormOwnedJson of the config the form was filled from. */
+let geoFormBase = null;
+
 function geoFormFromConfig(cfg) {
+  geoFormBase = geoFormOwnedJson(cfg);
   const g = (cfg && cfg.geo) || {};
   const en = $("geo-f-enabled");
   const sn = $("geo-f-set-name");
@@ -378,10 +383,26 @@ function renderGeoModalList(filterRaw) {
   });
 }
 
+/** The parts of the config this form overwrites; everything else merges on a conflict. */
+function geoFormOwnedJson(cfg) {
+  const fwd = (cfg && cfg.forwarding) || {};
+  return JSON.stringify([
+    (cfg && cfg.geo) || {},
+    fwd.source_deny_cidrs || [],
+    fwd.rate_limit || {},
+    (cfg && cfg.crowdsec) || {},
+  ]);
+}
+
 /** Config that Save would write — used by Save and by the IP check preview. */
 function geoDraftFromForm() {
   if (!state.lastConfig) return null;
   const cfg = JSON.parse(JSON.stringify(state.lastConfig));
+  applyGeoFormTo(cfg);
+  return cfg;
+}
+
+function applyGeoFormTo(cfg) {
   if (!cfg.geo) cfg.geo = {};
   const g = cfg.geo;
   g.enabled = $("geo-f-enabled") && $("geo-f-enabled").checked;
@@ -399,21 +420,30 @@ function geoDraftFromForm() {
   const csOn = $("geo-f-crowdsec-enabled") && $("geo-f-crowdsec-enabled").checked;
   if (csOn) cfg.crowdsec = { enabled: true };
   else delete cfg.crowdsec;
-  return cfg;
 }
 
 async function saveGeoblocking() {
-  const cfg = geoDraftFromForm();
-  if (!cfg) return;
+  if (!state.lastConfig) return;
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      if (geoFormOwnedJson(c) !== geoFormBase) {
+        // Accept what is there now as the new base, so a second Save is a deliberate overwrite.
+        geoFormBase = geoFormOwnedJson(c);
+        throw new ConfigMergeError(
+          "Geoblocking settings were changed elsewhere, so your changes were not saved. " +
+            "Your values are still in the form: Save again to overwrite the other change, or Refresh to load it."
+        );
+      }
+      applyGeoFormTo(c);
+    });
+    geoFormBase = geoFormOwnedJson(cfg);
     setGeoMsg("Saved. Review Pending changes, then Apply to host.");
     setApiStatus(true);
     refreshPendingBadge();
     syncGeoUnsavedIndicator();
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
+    syncGeoUnsavedIndicator();
   }
 }
 

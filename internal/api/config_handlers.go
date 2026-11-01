@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/imevul/evuproxy/internal/apply"
 	"github.com/imevul/evuproxy/internal/config"
@@ -15,14 +16,53 @@ import (
 // Limits JSON body for PUT /config/notes (text is capped separately in state.SaveConfigNotes).
 const configNotesMaxBody = 264 << 10
 
+// configRevisionMismatchCode is the error_code of a 409 from PUT /config.
+const configRevisionMismatchCode = "config_revision_mismatch"
+
 func (s *Server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
+	// Hash before loading: if the file changes in between, the revision is older than
+	// the body, so a later save gets a spurious 409 instead of overwriting the change.
+	rev, err := state.ConfigFileSHA256(s.Config)
+	if err != nil {
+		s.logErr("config get", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not read configuration")
+		return
+	}
 	c, err := config.Load(s.Config)
 	if err != nil {
 		s.logErr("config get", err)
 		s.jsonErr(w, http.StatusInternalServerError, "could not read configuration")
 		return
 	}
+	w.Header().Set("ETag", `"`+rev+`"`)
+	w.Header().Set("Cache-Control", "no-store")
 	s.jsonOK(w, c)
+}
+
+// parseIfMatch returns the revisions a PUT may overwrite. nil means the save is
+// unconditional: no If-Match header, or "*". A header that names no revision yields
+// an empty list, which matches nothing, so a client bug cannot pass as unconditional.
+func parseIfMatch(h http.Header) []string {
+	values := h.Values("If-Match")
+	if len(values) == 0 {
+		return nil
+	}
+	revisions := []string{}
+	for _, v := range values {
+		for _, tag := range strings.Split(v, ",") {
+			tag = strings.TrimSpace(tag)
+			if tag == "*" {
+				return nil
+			}
+			// Tolerate W/ and missing quotes: proxies weaken ETags, and people type
+			// these by hand. Revisions are content hashes, so neither changes the meaning.
+			tag = strings.Trim(strings.TrimPrefix(tag, "W/"), `"`)
+			if tag != "" {
+				revisions = append(revisions, tag)
+			}
+		}
+	}
+	return revisions
 }
 
 func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +83,13 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		s.jsonErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if err := apply.SaveConfigYAML(s.Config, &c); err != nil {
+	rev, err := apply.SaveConfigYAMLIfMatch(s.Config, &c, parseIfMatch(r.Header))
+	if err != nil {
+		if errors.Is(err, apply.ErrConfigRevisionMismatch) {
+			s.emit(eventlog.Record{Event: "config_put_failed", Detail: "stale revision", ErrorCode: configRevisionMismatchCode})
+			s.jsonAPIError(w, http.StatusConflict, "configuration changed since it was loaded; fetch it again and reapply your change", configRevisionMismatchCode)
+			return
+		}
 		s.logErr("config put save", err)
 		var ve *config.ValidationError
 		if errors.As(err, &ve) {
@@ -56,6 +102,7 @@ func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.emit(eventlog.Record{Event: "config_put_ok", Detail: "config saved"})
+	w.Header().Set("ETag", `"`+rev+`"`)
 	s.jsonOK(w, map[string]string{"result": "saved", "hint": "Review and apply from GET /api/v1/pending or POST /api/v1/reload"})
 }
 
