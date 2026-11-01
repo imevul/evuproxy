@@ -9,7 +9,7 @@ import {
 } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
-import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
+import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 /** JSON of the rule open in the editor, to detect it changing elsewhere before Save. */
@@ -244,9 +244,10 @@ export function initInboundPage() {
     else openInboundEditor(-1);
   });
   $("inbound-save").addEventListener("click", saveInboundEditor);
-  $("inbound-cancel").addEventListener("click", closeInboundEditor);
 
   const inboundModal = $("inbound-modal");
+  registerModalForm(inboundModal);
+  $("inbound-cancel").addEventListener("click", () => dismissModal(inboundModal));
   const inboundBackdrop = inboundModal && inboundModal.querySelector(".modal-backdrop");
-  if (inboundBackdrop) inboundBackdrop.addEventListener("click", closeInboundEditor);
+  if (inboundBackdrop) inboundBackdrop.addEventListener("click", () => dismissModal(inboundModal));
 }
