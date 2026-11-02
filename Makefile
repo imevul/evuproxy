@@ -1,6 +1,6 @@
 .PHONY: all up down dev dev-fresh playwright-deps playwright-visual a11y ui-behavior \
 	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
-	check fmt vet test test-race deadcode
+	check fmt vet test test-race deadcode e2e
 
 # Run from the repository root. Requires Go 1.25+, Docker, and `docker compose` (v2).
 
@@ -32,6 +32,11 @@ test-race:
 # deadcode reports unreachable functions (go install golang.org/x/tools/cmd/deadcode@latest).
 deadcode:
 	deadcode ./...
+
+# Real WireGuard and nftables in a throwaway container. Refuses on an EvuProxy host; never run it
+# against production. See devtools/e2e/README.md.
+e2e:
+	./devtools/e2e/run.sh
 
 CROWDSEC_DIR := contrib/crowdsec
 

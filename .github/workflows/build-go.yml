@@ -48,3 +48,8 @@ jobs:
           # Start at error severity so introducing the check doesn't fail on
           # pre-existing style nits; tighten to warning once scripts are clean.
           severity: error
+      - name: ShellCheck e2e harness
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./devtools/e2e
+          severity: error

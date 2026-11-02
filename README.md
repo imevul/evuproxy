@@ -124,6 +124,8 @@ Requires **Go 1.25 or newer** (see `go.mod`).
 go build -ldflags "-X main.version=$(git describe --tags --always 2>/dev/null || echo dev)" -o evuproxy ./cmd/evuproxy
 ```
 
+`make check` runs the same gates as CI. `make e2e` tests the tunnel, forwards and geo with real WireGuard and nftables in a throwaway container. It changes firewall rules, so never run it against a production host, and it refuses on one. See [devtools/e2e](devtools/e2e/README.md).
+
 ## Releases and versioning
 
 EvuProxy uses **SemVer** **`0.MINOR.PATCH`** while in beta (`0.x`). **Patch** releases cover fixes and small tweaks; **minor** releases cover new features or larger behavior changes. Breaking changes on the `0.x` line are shipped as a **minor** bump (common practice for unstable `0.x` series).
