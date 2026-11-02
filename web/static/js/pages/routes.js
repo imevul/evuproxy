@@ -18,7 +18,7 @@ import {
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
-import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
+import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
 import { setRouteEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
 import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
@@ -429,6 +429,9 @@ async function patchRouteDisabled(index, disabled) {
   const cur = state.lastConfig;
   if (!cur || !cur.forwarding || !cur.forwarding.routes || cur.forwarding.routes[index] === undefined) return;
   const identity = routeIdentity(cur.forwarding.routes[index]);
+  // A save can adopt fresh config even when it fails, so the row may have moved or gone.
+  const currentIndex = () =>
+    resolveListIndex(state.lastConfig.forwarding && state.lastConfig.forwarding.routes, index, identity, routeIdentity);
   try {
     const cfg = await saveConfigEdit((c) => {
       const routes = c.forwarding && c.forwarding.routes;
@@ -441,10 +444,14 @@ async function patchRouteDisabled(index, disabled) {
     renderRoutesTable(cfg);
     showToast(disabled ? "Route disabled" : "Route enabled");
   } catch (e) {
-    setRowError("data-route-disabled", index, String(e.message || e));
+    const at = e instanceof ConfigMergeError ? -1 : currentIndex();
+    setRoutesMsg("");
+    if (at >= 0) setRowError("data-route-disabled", at, String(e.message || e));
+    else setRoutesMsg(String(e.message || e), true);
     renderRoutesTable(state.lastConfig);
   }
-  restoreRowSwitchFocus($("routes-table-wrap"), "data-route-disabled", index);
+  const focusAt = currentIndex();
+  restoreRowSwitchFocus($("routes-table-wrap"), "data-route-disabled", focusAt >= 0 ? focusAt : index);
 }
 
 async function saveRouteEditor() {

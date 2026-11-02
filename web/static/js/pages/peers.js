@@ -18,7 +18,7 @@ import {
 import { beginLoading } from "../core/loading.js";
 import { api, apiBlob } from "../core/api.js";
 import { showToast } from "../core/toast.js";
-import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
+import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
 import {
   PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC,
@@ -246,6 +246,8 @@ async function patchPeerDisabled(index, disabled) {
   if (!cfg || !cfg.peers || cfg.peers[index] === undefined) return;
   const peer = cfg.peers[index];
   const identity = peerIdentity(peer);
+  // A save can adopt fresh config even when it fails, so the row may have moved or gone.
+  const currentIndex = () => resolveListIndex(state.lastConfig.peers, index, identity, peerIdentity);
   const finish = async (edit, confirmation) => {
     try {
       const nextCfg = await saveConfigEdit(edit);
@@ -255,10 +257,14 @@ async function patchPeerDisabled(index, disabled) {
       renderPeersTable(nextCfg, state.lastPeerWgStats);
       showToast(confirmation);
     } catch (e) {
-      setRowError("data-peer-disabled", index, String(e.message || e));
+      const at = e instanceof ConfigMergeError ? -1 : currentIndex();
+      setPeersMsg("");
+      if (at >= 0) setRowError("data-peer-disabled", at, String(e.message || e));
+      else setPeersMsg(String(e.message || e), true);
       renderPeersTable(state.lastConfig, state.lastPeerWgStats);
     }
-    restoreRowSwitchFocus($("peers-table-wrap"), "data-peer-disabled", index);
+    const focusAt = currentIndex();
+    restoreRowSwitchFocus($("peers-table-wrap"), "data-peer-disabled", focusAt >= 0 ? focusAt : index);
   };
   if (disabled) {
     const deps = dependentRoutesForPeer(cfg, peer);

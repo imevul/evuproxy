@@ -132,10 +132,12 @@ export function rowErrorHtml(dataAttr, index, colspan) {
 /**
  * Re-rendering a table destroys the switch that was just used, dropping keyboard
  * users to the top of the document. Skipped if focus has since moved somewhere real.
+ * If that row is gone (it was last, and removed elsewhere), the new last row takes focus.
  */
 export function restoreRowSwitchFocus(wrap, dataAttr, index) {
   if (document.activeElement && document.activeElement !== document.body) return;
-  const inp = wrap && wrap.querySelector(`input[${dataAttr}="${index}"]`);
+  if (!wrap) return;
+  const inp = wrap.querySelector(`input[${dataAttr}="${index}"]`) || [...wrap.querySelectorAll(`input[${dataAttr}]`)].pop();
   if (inp) inp.focus();
 }
 

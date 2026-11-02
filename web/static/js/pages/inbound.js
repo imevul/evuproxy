@@ -13,7 +13,7 @@ import {
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
-import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
+import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
 import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -24,6 +24,8 @@ async function patchInboundDisabled(index, disabled) {
   const cur = state.lastConfig;
   if (!cur || !cur.input_allows || cur.input_allows[index] === undefined) return;
   const identity = inboundRuleIdentity(cur.input_allows[index]);
+  // A save can adopt fresh config even when it fails, so the row may have moved or gone.
+  const currentIndex = () => resolveListIndex(state.lastConfig.input_allows, index, identity, inboundRuleIdentity);
   try {
     const cfg = await saveConfigEdit((c) => {
       const i = findConfigRow(c.input_allows, index, identity, inboundRuleIdentity, "inbound rule");
@@ -35,10 +37,14 @@ async function patchInboundDisabled(index, disabled) {
     renderInboundTable(cfg);
     showToast(disabled ? "Inbound rule disabled" : "Inbound rule enabled");
   } catch (e) {
-    setRowError("data-inbound-disabled", index, String(e.message || e));
+    const at = e instanceof ConfigMergeError ? -1 : currentIndex();
+    setInboundMsg("");
+    if (at >= 0) setRowError("data-inbound-disabled", at, String(e.message || e));
+    else setInboundMsg(String(e.message || e), true);
     renderInboundTable(state.lastConfig);
   }
-  restoreRowSwitchFocus($("inbound-table-wrap"), "data-inbound-disabled", index);
+  const focusAt = currentIndex();
+  restoreRowSwitchFocus($("inbound-table-wrap"), "data-inbound-disabled", focusAt >= 0 ? focusAt : index);
 }
 
 /* ——— Inbound access (input_allows) ——— */
