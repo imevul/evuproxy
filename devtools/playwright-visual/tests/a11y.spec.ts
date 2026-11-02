@@ -110,9 +110,13 @@ test.describe("accessibility (axe-core)", () => {
     test(`a11y danger confirm ${scheme}`, async ({ page, baseURL }) => {
       test.skip(!baseURL, "baseURL unset");
       await seed(page, { scheme });
-      await gotoRoute(page, baseURL!, "routes");
+      await page.route("**/api/v1/pending", async (route) => {
+        const res = await route.fetch();
+        await route.fulfill({ response: res, json: { ...(await res.json()), pending: true, discard_available: true, discard_change_count: 3 } });
+      });
+      await gotoRoute(page, baseURL!, "pending");
       // By keyboard, so no enter transition is mid-fade when axe measures contrast.
-      await page.locator("#routes-table-wrap [data-route-del]").first().focus();
+      await page.locator("#pending-discard").focus();
       await page.keyboard.press("Enter");
       await page.locator("#confirm-modal").waitFor({ state: "visible" });
       await expectNoBlockingViolations(page, `danger confirm (${scheme})`);

@@ -163,12 +163,47 @@ export function rowErrorHtml(dataAttr, index, colspan) {
  * Re-rendering a table destroys the switch that was just used, dropping keyboard
  * users to the top of the document. Skipped if focus has since moved somewhere real.
  * If that row is gone (it was last, and removed elsewhere), the new last row takes focus.
+ * `force` is for Undo, where focus sits wherever the closing toast handed it.
  */
-export function restoreRowSwitchFocus(wrap, dataAttr, index) {
-  if (document.activeElement && document.activeElement !== document.body) return;
+export function restoreRowSwitchFocus(wrap, dataAttr, index, { force = false } = {}) {
+  if (!force && document.activeElement && document.activeElement !== document.body) return;
   if (!wrap) return;
   const inp = wrap.querySelector(`input[${dataAttr}="${index}"]`) || [...wrap.querySelectorAll(`input[${dataAttr}]`)].pop();
   if (inp) inp.focus();
+}
+
+/**
+ * Focus for a row that just changed: row `index`, else the nearest visible row after it,
+ * then before it, else `fallback` (the Add button on an empty or fully filtered list).
+ * The row itself takes focus, not its Remove button, so a held Enter cannot walk down
+ * the list removing every row. `force` as in restoreRowSwitchFocus.
+ */
+export function focusTableRow(wrap, index, fallback, { force = false } = {}) {
+  if (!force && document.activeElement && document.activeElement !== document.body) return;
+  if (!wrap) return;
+  const rows = [...wrap.querySelectorAll("tbody tr[data-row]")].filter((tr) => tr.getClientRects().length > 0);
+  const target =
+    // Exact first: in a sorted table the rows are not drawn in index order.
+    rows.find((tr) => +tr.getAttribute("data-row") === index) ||
+    rows.find((tr) => +tr.getAttribute("data-row") >= index) ||
+    rows.pop() ||
+    wrap.querySelector(".evu-empty button") ||
+    fallback;
+  if (target) target.focus();
+}
+
+/**
+ * The index focusTableRow needs to land beside a removed row: the next row as drawn, else
+ * the previous one, as an index once `removedAt` is gone. Read before the table re-renders.
+ * In a sorted table that row can be anywhere in config, so `removedAt` alone would jump.
+ */
+export function rowIndexAfterRemoval(wrap, row, removedAt) {
+  const rows = [...wrap.querySelectorAll("tbody tr[data-row]")].filter((tr) => tr.getClientRects().length > 0);
+  const at = rows.indexOf(row);
+  const neighbour = at >= 0 ? rows[at + 1] || rows[at - 1] : null;
+  if (!neighbour) return removedAt;
+  const i = +neighbour.getAttribute("data-row");
+  return i > removedAt ? i - 1 : i;
 }
 
 export function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {

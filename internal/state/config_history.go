@@ -132,12 +132,19 @@ func RestorePreviousAppliedConfigYAML(cfgPath string) error {
 
 // RestorePreviousAppliedAvailable reports whether some .bak.N differs from .bak.
 func RestorePreviousAppliedAvailable(cfgPath string) (bool, error) {
+	prev, err := PreviousAppliedConfigYAML(cfgPath)
+	return prev != nil, err
+}
+
+// PreviousAppliedConfigYAML returns what RestorePreviousAppliedConfigYAML would write:
+// the first .bak.N that differs from .bak, or nil when there is none.
+func PreviousAppliedConfigYAML(cfgPath string) ([]byte, error) {
 	bak, err := os.ReadFile(ConfigYAMLBackupPath(cfgPath))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil
+			return nil, nil
 		}
-		return false, err
+		return nil, err
 	}
 	for n := 1; n <= 5; n++ {
 		b, err := os.ReadFile(configYAMLBackupNth(cfgPath, n))
@@ -145,11 +152,11 @@ func RestorePreviousAppliedAvailable(cfgPath string) (bool, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return false, err
+			return nil, err
 		}
 		if !bytes.Equal(b, bak) {
-			return true, nil
+			return b, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }

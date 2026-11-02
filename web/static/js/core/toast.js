@@ -107,10 +107,15 @@ function setToastAction(action) {
     actionEl.type = "button";
     actionEl.className = "evu-btn evu-btn--outline evu-btn--sm";
     actionEl.textContent = action.label;
-    actionEl.addEventListener("click", () => {
-      dismissToast();
-      action.onClick();
-    });
+    // Once: the button stays clickable while the toast fades out, so a double-click lands twice.
+    actionEl.addEventListener(
+      "click",
+      () => {
+        dismissToast();
+        action.onClick();
+      },
+      { once: true }
+    );
     toastEl.insertBefore(actionEl, closeEl);
   }
   // Replacing the button must not drop a keyboard user back to <body>.

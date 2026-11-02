@@ -24,6 +24,10 @@ type PendingInfo struct {
 	DiscardAvailable bool `json:"discard_available"`
 	// RestorePreviousAppliedAvailable is true when some .bak.N differs from .bak.
 	RestorePreviousAppliedAvailable bool `json:"restore_previous_applied_available"`
+	// DiscardChangeCount is how many things discarding would change; 0 when unknown.
+	DiscardChangeCount int `json:"discard_change_count"`
+	// RestorePreviousChangeCount is how many things restoring the previous applied config would change; 0 when unknown.
+	RestorePreviousChangeCount int `json:"restore_previous_change_count"`
 }
 
 // PendingSummary loads the on-disk config, compares its hash to last apply, and renders nftables preview.
@@ -65,6 +69,14 @@ func PendingSummary(cfgPath string) (PendingInfo, error) {
 			slog.Debug("pending: restore-previous check", "err", err)
 		} else {
 			out.RestorePreviousAppliedAvailable = ra
+		}
+		if curBytes, err := os.ReadFile(cfgPath); err != nil {
+			slog.Debug("pending: change counts", "err", err)
+		} else {
+			out.DiscardChangeCount = configChangeCount(curBytes, bakBytes)
+			if prev, err := state.PreviousAppliedConfigYAML(cfgPath); err == nil && prev != nil {
+				out.RestorePreviousChangeCount = configChangeCount(curBytes, prev)
+			}
 		}
 	}
 	return out, nil

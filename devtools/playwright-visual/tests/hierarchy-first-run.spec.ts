@@ -2,8 +2,8 @@
  * Hierarchy, wording, first run, titles and motion (ENG-143).
  *
  * API responses that the mock cannot produce on demand (zero peers, set-style
- * dports, known byte counts) are stubbed per test. Only the row removal test
- * writes config, and it puts the config back.
+ * dports, known byte counts) are stubbed per test. Only the row removal tests
+ * write config, and they put the config back.
  */
 import { expect, test, type Page } from "@playwright/test";
 
@@ -119,15 +119,23 @@ test.describe("connected", () => {
     await expect(page.locator("#topology-refresh")).toHaveCount(0);
   });
 
-  test("confirm dialogs use the danger style, peer names and outcome labels", async ({ page }) => {
+  test("removing a route names the peer in plain language", async ({ page }) => {
     await gotoRoute(page, origin, "routes");
     const peerName = (await page.locator("#routes-table-wrap .route-target-name").first().textContent())!.trim();
     await page.locator("#routes-table-wrap .route-target-name").first().locator("xpath=ancestor::tr").locator("[data-route-del]").click();
-    const dialog = page.locator("#confirm-modal");
-    await expect(dialog).toContainText(`will stop forwarding to ${peerName}`);
-    await expect(dialog).not.toContainText("→");
+    const toast = page.locator("#toaster .evu-toast");
+    await expect(toast).toContainText(`to ${peerName}.`);
+    await expect(toast).not.toContainText("→");
+    await toast.getByRole("button", { name: "Undo" }).click();
+    await expect(toast).toContainText("Restored route");
+  });
+
+  test("confirm dialogs use the danger style and outcome labels", async ({ page }) => {
+    await patchApi(page, "/v1/pending", (body) => ({ ...body, pending: true, discard_available: true, discard_change_count: 2 }));
+    await gotoRoute(page, origin, "pending");
+    await page.locator("#pending-discard").click();
     const ok = page.locator("#confirm-modal-ok");
-    await expect(ok).toHaveText("Remove route");
+    await expect(ok).toHaveText("Discard 2 changes");
     await expect(ok).toHaveClass(/evu-btn--danger/);
     await page.locator("#confirm-modal-cancel").click();
   });
@@ -284,14 +292,11 @@ test.describe("connected", () => {
       expect(before).toBeGreaterThan(1);
 
       await page.locator("#routes-table-wrap [data-route-del]").first().click();
-      await page.locator("#confirm-modal-ok").click();
       await expect(page.locator("#routes-table-wrap tbody tr")).toHaveCount(before - 1);
       expect(await page.evaluate(() => (window as any).sawLeavingRow)).toBe(true);
 
       await page.evaluate(() => { (window as any).sawLeavingRow = false; });
       await page.locator("#routes-table-wrap [data-route-del]").first().focus();
-      await page.keyboard.press("Enter");
-      await page.locator("#confirm-modal-ok").focus();
       await page.keyboard.press("Enter");
       await expect(page.locator("#routes-table-wrap tbody tr")).toHaveCount(before - 2);
       expect(await page.evaluate(() => (window as any).sawLeavingRow)).toBe(false);

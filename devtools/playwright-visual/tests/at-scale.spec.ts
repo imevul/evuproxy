@@ -147,6 +147,32 @@ test.describe("at scale", () => {
     expect(routes[0].ports[0]).toBe("30000");
   });
 
+  test("removing from a sorted table focuses the next row as drawn, and Undo brings it back", async ({ page, request }) => {
+    await gotoRoute(page, origin, "routes");
+    await sortButton(page, "routes-table-wrap", "Ports").click();
+    const ports = await columnText(page, "routes-table-wrap", 3);
+    const removedPort = ports[5];
+    const nextPort = ports[6];
+
+    await routeRows(page).nth(5).locator("[data-route-del]").click();
+    await expect(routeRows(page)).toHaveCount(30);
+    await expect(page.locator("#routes-table-wrap tbody tr:focus td").nth(2)).toHaveText(nextPort);
+    let saved = (await getConfig(request)).forwarding.routes;
+    expect(saved.map((r: any) => r.ports[0])).not.toContain(removedPort);
+
+    await page.locator("#toaster").getByRole("button", { name: "Undo" }).click();
+    await expect(routeRows(page)).toHaveCount(31);
+    expect(await columnText(page, "routes-table-wrap", 3)).toEqual(ports);
+    saved = (await getConfig(request)).forwarding.routes;
+    expect(saved.map((r: any) => r.ports[0])).toContain(removedPort);
+  });
+
+  test("the toast for a removed route leads with its name", async ({ page }) => {
+    await gotoRoute(page, origin, "routes");
+    await routeRows(page).first().locator("[data-route-del]").click();
+    await expect(page.locator("#toaster .evu-toast")).toContainText("Removed route service-31 (tcp 30000 to peer-01)");
+  });
+
   test("the sort and the scroll position survive a save", async ({ page }) => {
     await gotoRoute(page, origin, "routes");
     await sortButton(page, "routes-table-wrap", "Ports").click();
