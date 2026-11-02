@@ -10,6 +10,7 @@ wireguard:
 # The web UI's Apply reverts by itself unless you confirm it in time, so a change that
 # locks you out undoes itself. Needs systemd and a root API. Run `evuproxy reload` once
 # first, so there is a config to go back to. Configs without this keep a one-way Apply.
+# A reboot then applies the last confirmed config too: run `evuproxy reload` to apply edits.
 apply:
   confirm: true
   confirm_timeout_seconds: 60
