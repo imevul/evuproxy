@@ -79,6 +79,17 @@ export function resolveListIndex(list, openIndex, identity, identityOf) {
   return -2; // ambiguous after list churn
 }
 
+/** Routes are found by what they forward, so `disabled` can change without losing the row. */
+export function routeIdentity(r) {
+  return (
+    String(r.proto || "").toLowerCase() +
+    "\0" +
+    (r.ports || []).join(",") +
+    "\0" +
+    String(r.target_ip || "")
+  );
+}
+
 /** Index of the row the user acted on, or ConfigMergeError naming it (what: "route"). */
 export function findConfigRow(list, openIndex, identity, identityOf, what) {
   const i = resolveListIndex(list, openIndex, identity, identityOf);

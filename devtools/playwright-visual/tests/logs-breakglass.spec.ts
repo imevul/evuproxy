@@ -33,15 +33,20 @@ test.describe("logs break-glass affordance", () => {
     await expect(btn).toHaveAttribute("aria-label", /break-glass/i);
   });
 
-  test("confirming adds the /32 and removes the button", async ({ page }) => {
+  test("adds the /32 at once, and Undo takes it off and returns to the button", async ({ page, request }) => {
     await gotoRoute(page, origin, "logs");
-    await page.locator('[data-logs-breakglass="198.51.100.2"]').click();
-    const dialog = page.locator("#confirm-modal");
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText("198.51.100.2/32");
-    await page.locator("#confirm-modal-ok").click();
+    await page.locator('[data-logs-breakglass="198.51.100.2"]').first().click();
+    await expect(page.locator("#confirm-modal")).toBeHidden();
     await expect(page.locator("#toaster")).toContainText(/Added 198\.51\.100\.2\/32/);
     await expect(page.locator('[data-logs-breakglass="198.51.100.2"]')).toHaveCount(0);
+
+    await page.locator("#toaster").getByRole("button", { name: "Undo" }).click();
+    await expect(page.locator("#toaster")).toContainText(/Removed 198\.51\.100\.2\/32/);
+    await expect(page.locator('[data-logs-breakglass="198.51.100.2"]').first()).toBeFocused();
+    const cfg = await (
+      await request.get(origin + "/api/v1/config", { headers: { Authorization: "Bearer " + token() } })
+    ).json();
+    expect(cfg.geo.break_glass_cidrs || []).not.toContain("198.51.100.2/32");
   });
 
   test("a /0 break-glass entry covers every SRC", async ({ page, request }) => {

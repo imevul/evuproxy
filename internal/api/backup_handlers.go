@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/imevul/evuproxy/internal/apply"
@@ -36,6 +37,31 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	s.emit(eventlog.Record{Event: "backup_ok", Detail: eventDetail(path)})
 	s.jsonOK(w, map[string]string{"archive": path})
+}
+
+// handleBackupInfo names an archive and its date, so a restore can be confirmed knowing what it replaces with.
+func (s *Server) handleBackupInfo(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		s.jsonErr(w, http.StatusBadRequest, "path query required")
+		return
+	}
+	path, err := apply.ResolveBackupPath(path)
+	if err != nil {
+		s.logErr("backup info path", err)
+		s.jsonErr(w, http.StatusBadRequest, "invalid or disallowed backup path")
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		s.jsonErr(w, http.StatusNotFound, "archive not found")
+		return
+	}
+	s.jsonOK(w, map[string]any{
+		"archive":    path,
+		"modified":   info.ModTime().UTC().Format(time.RFC3339),
+		"size_bytes": info.Size(),
+	})
 }
 
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {

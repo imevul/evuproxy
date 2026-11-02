@@ -2,10 +2,9 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
-import { showToast } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
-import { openConfirmModal } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 /* ——— Logs ——— */
@@ -448,51 +447,68 @@ export async function refreshLogsPage() {
 /** One break-glass write at a time so overlapping GET→PUT cannot drop a sibling /32. */
 let logsBreakGlassBusy = false;
 
-function confirmAddBreakGlass(ip) {
+async function addBreakGlass(ip, rowIndex) {
   if (logsBreakGlassBusy) return;
+  logsBreakGlassBusy = true;
   const cidr = ip + "/32";
-  openConfirmModal({
-    title: "Add to break-glass?",
-    message:
-      "Add " +
-      cidr +
-      " to the geoblocking break-glass list? That address will bypass country rules after you Apply from Pending changes.",
-    confirmLabel: "Add to break-glass",
-    onConfirm: async () => {
-      if (logsBreakGlassBusy) return;
-      logsBreakGlassBusy = true;
-      // Drop any in-flight Logs refresh so its older config cannot overwrite this write.
-      state.logsRefreshSeq++;
-      setLogsMsg("…");
-      try {
-        state.lastConfig = await api("/v1/config");
-        let alreadyCovered = false;
-        await saveConfigEdit((cfg) => {
-          if (!cfg.geo) cfg.geo = {};
-          const list = Array.isArray(cfg.geo.break_glass_cidrs) ? cfg.geo.break_glass_cidrs.slice() : [];
-          alreadyCovered = ipv4CoveredByCIDRList(ip, list);
-          if (alreadyCovered) return false;
-          list.push(cidr);
-          cfg.geo.break_glass_cidrs = list;
-        });
-        state.logsRefreshSeq++;
-        if (alreadyCovered) {
-          setLogsMsg(ip + " is already covered by the break-glass list.");
-          renderLogsView();
-          return;
-        }
+  // Drop any in-flight Logs refresh so its older config cannot overwrite this write.
+  state.logsRefreshSeq++;
+  setLogsMsg("…");
+  try {
+    state.lastConfig = await api("/v1/config");
+    let alreadyCovered = false;
+    await saveConfigEdit((cfg) => {
+      if (!cfg.geo) cfg.geo = {};
+      const list = Array.isArray(cfg.geo.break_glass_cidrs) ? cfg.geo.break_glass_cidrs.slice() : [];
+      alreadyCovered = ipv4CoveredByCIDRList(ip, list);
+      if (alreadyCovered) return false;
+      list.push(cidr);
+      cfg.geo.break_glass_cidrs = list;
+    });
+    state.logsRefreshSeq++;
+    if (alreadyCovered) {
+      setLogsMsg(ip + " is already covered by the break-glass list.");
+      renderLogsView();
+      return;
+    }
+    setLogsMsg("");
+    setApiStatus(true);
+    await refreshPendingBadge();
+    renderLogsView();
+    focusLogsRow(rowIndex);
+    showUndoToast("Added " + cidr + " to break-glass. It bypasses country rules after you Apply.", {
+      page: "logs",
+      edit: (cfg) => {
+        const list = (cfg.geo && cfg.geo.break_glass_cidrs) || [];
+        // Taken off elsewhere since: nothing to reverse.
+        if (!list.includes(cidr)) return false;
+        cfg.geo.break_glass_cidrs = list.filter((c) => c !== cidr);
+      },
+      afterSave: (_cfg, focus) => {
         setLogsMsg("");
-        setApiStatus(true);
-        await refreshPendingBadge();
+        refreshPendingBadge();
         renderLogsView();
-        showToast("Added " + cidr + " to break-glass. Review Pending changes, then Apply.");
-      } catch (e) {
-        setLogsMsg(String(e.message || e), true);
-      } finally {
-        logsBreakGlassBusy = false;
-      }
-    },
-  });
+        if (focus) {
+          const btn = $("logs-table-wrap").querySelector('[data-logs-breakglass="' + ip + '"]');
+          if (btn) btn.focus();
+        }
+      },
+      message: () => "Removed " + cidr + " from break-glass.",
+    });
+  } catch (e) {
+    setLogsMsg(String(e.message || e), true);
+  } finally {
+    logsBreakGlassBusy = false;
+  }
+}
+
+/** Keeps focus on the row whose add button just went away, unless the user has moved on. */
+function focusLogsRow(rowIndex) {
+  if (document.activeElement && document.activeElement !== document.body) return;
+  const row = $("logs-table-wrap").querySelectorAll("tbody tr")[rowIndex];
+  if (!row) return;
+  row.tabIndex = -1;
+  row.focus();
 }
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
@@ -504,7 +520,7 @@ export function initLogsPage() {
       const btn = ev.target.closest("[data-logs-breakglass]");
       if (!btn || !tableWrap.contains(btn)) return;
       const ip = btn.getAttribute("data-logs-breakglass");
-      if (ip) confirmAddBreakGlass(ip);
+      if (ip) addBreakGlass(ip, [...tableWrap.querySelectorAll("tbody tr")].indexOf(btn.closest("tr")));
     });
   }
   const logsFilterType = $("logs-filter-type");

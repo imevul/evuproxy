@@ -14,11 +14,13 @@ import {
   clearRowError,
   rowErrorHtml,
   restoreRowSwitchFocus,
+  focusTableRow,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, apiBlob } from "../core/api.js";
 import { showToast } from "../core/toast.js";
-import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
+import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
 import {
   PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC,
@@ -29,7 +31,6 @@ import {
 import {
   openModal,
   closeModal,
-  openConfirmModal,
   registerModalCloser,
   registerModalForm,
   dismissModal,
@@ -167,7 +168,7 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       const f = [p.name, p.tunnel_ip, p.public_key].join(" ").toLowerCase();
       const pingCell = peerPingMsCell(p, pingByTunnel);
       return (
-        `<tr data-filter="${escapeHtml(f)}"${p.disabled ? ' class="is-row-disabled"' : ""}><td>${escapeHtml(p.name)}</td>` +
+        `<tr data-row="${i}" tabindex="-1" data-filter="${escapeHtml(f)}"${p.disabled ? ' class="is-row-disabled"' : ""}><td>${escapeHtml(p.name)}</td>` +
         monoIpCopyCellHtml(p.tunnel_ip) +
         `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>` +
         rowErrorHtml("data-peer-disabled", i, pingOn ? 7 : 6)
@@ -180,7 +181,10 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
     b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
   });
   wrap.querySelectorAll("[data-peer-del]").forEach((b) => {
-    b.addEventListener("click", () => removePeer(+b.getAttribute("data-peer-del")));
+    b.addEventListener("click", (ev) => {
+      // The next row slides under the pointer, so a double-click must not remove it too.
+      if (ev.detail <= 1) removePeer(+b.getAttribute("data-peer-del"));
+    });
   });
   wrap.querySelectorAll("input[data-peer-disabled]").forEach((inp) => {
     inp.addEventListener("click", (ev) => ev.stopPropagation());
@@ -211,29 +215,37 @@ function dependentRoutesForPeer(cfg, peer) {
   return out;
 }
 
-function dependentRoutesConfirmMessage(peerName, deps) {
-  const labels = deps.map(({ route: r }) => {
-    const ports = (r.ports || []).join(", ") || "?";
-    const proto = String(r.proto || "").toLowerCase() || "?";
-    return proto + " " + ports + " → " + String(r.target_ip || "");
+/** Disables the peer's enabled routes in `cfg`, returning what Undo needs to find them again. */
+function disableDependentRoutes(cfg, peer) {
+  return dependentRoutesForPeer(cfg, peer).map(({ index, route }) => {
+    route.disabled = true;
+    return { index, identity: routeIdentity(route) };
   });
-  const list = labels.map((l) => "• " + l).join("\n");
-  return (
-    "Peer \"" +
-    peerName +
-    "\" still has " +
-    deps.length +
-    " enabled route(s):\n\n" +
-    list +
-    "\n\nDisable those routes in this save so the config stays valid?"
-  );
 }
 
-function disableDependentRoutes(cfg, deps) {
-  if (!cfg.forwarding || !cfg.forwarding.routes) return;
-  for (const { index } of deps) {
-    if (cfg.forwarding.routes[index]) cfg.forwarding.routes[index].disabled = true;
+/**
+ * Re-enables routes a cascade disabled, as far as they still exist as they were.
+ * Returns how many could not be found, so the confirmation can say so.
+ */
+function reenableRoutes(cfg, disabledRoutes) {
+  const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
+  let missing = 0;
+  for (const { index, identity } of disabledRoutes) {
+    const i = resolveListIndex(routes, index, identity, routeIdentity);
+    if (i >= 0) routes[i].disabled = false;
+    else missing++;
   }
+  return missing;
+}
+
+function routeCount(n) {
+  return n === 1 ? "1 route" : n + " routes";
+}
+
+/** Undo's confirmation: `done` plus any cascaded route it could no longer find. */
+function undoneMessage(done, missing) {
+  if (!missing) return done + ".";
+  return done + ". " + routeCount(missing) + " changed elsewhere and stayed disabled.";
 }
 
 /** Peers are found by key, so a rename elsewhere does not stop an edit from applying. */
@@ -244,54 +256,59 @@ function peerIdentity(p) {
 async function patchPeerDisabled(index, disabled) {
   const cfg = state.lastConfig;
   if (!cfg || !cfg.peers || cfg.peers[index] === undefined) return;
-  const peer = cfg.peers[index];
-  const identity = peerIdentity(peer);
+  const identity = peerIdentity(cfg.peers[index]);
+  const wrap = $("peers-table-wrap");
   // A save can adopt fresh config even when it fails, so the row may have moved or gone.
   const currentIndex = () => resolveListIndex(state.lastConfig.peers, index, identity, peerIdentity);
-  const finish = async (edit, confirmation) => {
-    try {
-      const nextCfg = await saveConfigEdit(edit);
-      setPeersMsg("");
-      setApiStatus(true);
-      refreshPendingBadge();
-      renderPeersTable(nextCfg, state.lastPeerWgStats);
-      showToast(confirmation);
-    } catch (e) {
-      const at = e instanceof ConfigMergeError ? -1 : currentIndex();
-      setPeersMsg("");
-      if (at >= 0) setRowError("data-peer-disabled", at, String(e.message || e));
-      else setPeersMsg(String(e.message || e), true);
-      renderPeersTable(state.lastConfig, state.lastPeerWgStats);
-    }
-    const focusAt = currentIndex();
-    restoreRowSwitchFocus($("peers-table-wrap"), "data-peer-disabled", focusAt >= 0 ? focusAt : index);
-  };
-  if (disabled) {
-    const deps = dependentRoutesForPeer(cfg, peer);
-    if (deps.length) {
-      openConfirmModal({
-        title: "Disable peer and routes?",
-        message: dependentRoutesConfirmMessage(peer.name || "peer", deps),
-        confirmLabel: "Disable peer and routes",
-        onConfirm: async () => {
-          await finish((c) => {
-            const i = findConfigRow(c.peers, index, identity, peerIdentity, "peer");
-            disableDependentRoutes(c, dependentRoutesForPeer(c, c.peers[i]));
-            c.peers[i].disabled = true;
-          }, "Peer and its routes disabled");
-        },
-        onCancel: () => {
-          renderPeersTable(state.lastConfig, state.lastPeerWgStats);
-          restoreRowSwitchFocus($("peers-table-wrap"), "data-peer-disabled", index);
-        },
-      });
-      return;
-    }
-  }
-  await finish((c) => {
+  /** Turning a peer off takes its enabled routes with it, or the config would not validate. */
+  const setDisabled = (c, off) => {
     const i = findConfigRow(c.peers, index, identity, peerIdentity, "peer");
-    c.peers[i].disabled = disabled;
-  }, disabled ? "Peer disabled" : "Peer enabled");
+    const cascaded = off ? disableDependentRoutes(c, c.peers[i]) : [];
+    c.peers[i].disabled = off;
+    return { peer: c.peers[i], cascaded };
+  };
+  try {
+    let result = null;
+    const nextCfg = await saveConfigEdit((c) => {
+      result = setDisabled(c, disabled);
+    });
+    setPeersMsg("");
+    setApiStatus(true);
+    refreshPendingBadge();
+    renderPeersTable(nextCfg, state.lastPeerWgStats);
+    const name = result.peer.name || "peer";
+    const label = (off, routes) => {
+      if (routes.length) return "Disabled " + name + " and " + routeCount(routes.length) + ".";
+      return off ? "Peer disabled" : "Peer enabled";
+    };
+    const cascaded = result.cascaded;
+    let undone = "";
+    showUndoToast(label(disabled, cascaded), {
+      page: "peers",
+      edit: (c) => {
+        const reversed = setDisabled(c, !disabled);
+        const missing = reenableRoutes(c, cascaded);
+        undone = cascaded.length
+          ? undoneMessage("Enabled " + name + " and its routes", missing)
+          : label(!disabled, reversed.cascaded);
+      },
+      afterSave: (next, focus) => {
+        setPeersMsg("");
+        refreshPendingBadge();
+        renderPeersTable(next, state.lastPeerWgStats);
+        if (focus) restoreRowSwitchFocus(wrap, "data-peer-disabled", currentIndex(), { force: true });
+      },
+      message: () => undone,
+    });
+  } catch (e) {
+    const at = e instanceof ConfigMergeError ? -1 : currentIndex();
+    setPeersMsg("");
+    if (at >= 0) setRowError("data-peer-disabled", at, String(e.message || e));
+    else setPeersMsg(String(e.message || e), true);
+    renderPeersTable(state.lastConfig, state.lastPeerWgStats);
+  }
+  const focusAt = currentIndex();
+  restoreRowSwitchFocus(wrap, "data-peer-disabled", focusAt >= 0 ? focusAt : index);
 }
 
 export async function refreshPeersPage() {
@@ -543,48 +560,63 @@ async function savePeerEditor() {
   }
 }
 
+/** One removal at a time: a second click on the same row would fail as "removed elsewhere". */
+let peerRemoveBusy = false;
+
 async function removePeer(index) {
   const cfg = state.lastConfig;
-  if (!cfg || !cfg.peers || !cfg.peers[index]) return;
-  const peer = cfg.peers[index];
-  const peerName = peer.name;
-  const identity = peerIdentity(peer);
-  const deps = dependentRoutesForPeer(cfg, peer);
-  const baseMsg =
-    "Remove \"" +
-    peerName +
-    "\" from the saved config? The host is not updated until you apply on Pending changes.";
-  const message = deps.length
-    ? dependentRoutesConfirmMessage(peerName || "peer", deps) +
-      "\n\nThe peer will then be removed from the saved config. " +
-      "The host is not updated until you apply on Pending changes."
-    : baseMsg;
-  openConfirmModal({
-    title: deps.length ? "Remove peer and disable routes?" : "Remove peer?",
-    message,
-    confirmLabel: deps.length ? "Disable routes and remove" : "Remove",
-    onConfirm: async () => {
-      try {
-        const c = await saveConfigEdit((draft) => {
-          const i = findConfigRow(draft.peers, index, identity, peerIdentity, "peer");
-          disableDependentRoutes(draft, dependentRoutesForPeer(draft, draft.peers[i]));
-          draft.peers.splice(i, 1);
-        });
-        setPeersMsg("");
-        renderPeersTable(c);
-        setApiStatus(true);
-        refreshPendingBadge();
-        showToast(
-          deps.length
-            ? "Peer removed and dependent routes disabled. Apply on Pending changes when ready."
-            : "Peer removed. Apply on Pending changes when ready."
-        );
-      } catch (e) {
-        setPeersMsg(String(e.message || e), true);
-        renderPeersTable(state.lastConfig);
+  if (peerRemoveBusy || !cfg || !cfg.peers || !cfg.peers[index]) return;
+  const identity = peerIdentity(cfg.peers[index]);
+  const wrap = $("peers-table-wrap");
+  peerRemoveBusy = true;
+  try {
+    let removed = null;
+    let removedAt = index;
+    let cascaded = [];
+    const c = await saveConfigEdit((draft) => {
+      removedAt = findConfigRow(draft.peers, index, identity, peerIdentity, "peer");
+      cascaded = disableDependentRoutes(draft, draft.peers[removedAt]);
+      [removed] = draft.peers.splice(removedAt, 1);
+    });
+    setPeersMsg("");
+    renderPeersTable(c);
+    setApiStatus(true);
+    refreshPendingBadge();
+    focusTableRow(wrap, removedAt, $("peers-add-start"));
+    const name = removed.name || "peer";
+    let undone = "";
+    showUndoToast(
+      cascaded.length ? "Removed " + name + " and disabled " + routeCount(cascaded.length) + "." : "Removed " + name + ".",
+      {
+        page: "peers",
+        edit: (draft) => {
+          if (!draft.peers) draft.peers = [];
+          // The key came back (saved elsewhere since): restoring would duplicate it.
+          if (draft.peers.some((p) => peerIdentity(p) === identity)) {
+            throw new ConfigMergeError(name + " is already back in the config, so nothing was restored.");
+          }
+          draft.peers.splice(Math.min(removedAt, draft.peers.length), 0, removed);
+          const missing = reenableRoutes(draft, cascaded);
+          undone = undoneMessage(cascaded.length ? "Restored " + name + " and its routes" : "Restored " + name, missing);
+        },
+        afterSave: (next, focus) => {
+          setPeersMsg("");
+          refreshPendingBadge();
+          renderPeersTable(next);
+          if (focus) {
+            const at = resolveListIndex(next.peers, removedAt, identity, peerIdentity);
+            focusTableRow(wrap, Math.max(at, 0), $("peers-add-start"), { force: true });
+          }
+        },
+        message: () => undone,
       }
-    },
-  });
+    );
+  } catch (e) {
+    setPeersMsg(String(e.message || e), true);
+    renderPeersTable(state.lastConfig);
+  } finally {
+    peerRemoveBusy = false;
+  }
 }
 
 /* ——— Onboarding (keys + YAML) ——— */

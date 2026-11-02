@@ -7,6 +7,7 @@ import { ensureUIPrefs } from "./prefs.js";
 import { anyOpenModalDirty, closeAllModals, closeConfirmModal, confirmDiscard } from "./modal.js";
 import { pageForm } from "./dirty.js";
 import { refreshSidebarAbout } from "./sidebar.js";
+import { setUndoPageRefresh } from "./undo.js";
 import {
   refreshOverviewPage,
   restartOverviewEventsPolling,
@@ -109,6 +110,11 @@ function showPage(name) {
   state.hashNavParams = parseHashNavParams();
   committedHash = location.hash;
 }
+
+setUndoPageRefresh(() => {
+  // Reloading would lose an open form's edits; that form's own save handles the conflict.
+  if (currentRoute && !hasUnsavedEdits(currentRoute)) void navigate(currentRoute);
+});
 
 /** @param {{ discard?: boolean }} [opts] `discard` once the operator has agreed to lose edits. */
 export async function navigate(name, opts) {

@@ -256,9 +256,44 @@ export function closeConfirmModal(opts) {
   const confirmed = !!(opts && opts.confirmed);
   state.confirmModalCallback = null;
   state.confirmModalCancelCallback = null;
+  confirmModalExtraRun = null;
+  const okBtn = $("confirm-modal-ok");
+  if (okBtn) okBtn.disabled = false;
   const m = $("confirm-modal");
   if (m) closeModal(m);
   if (!confirmed && cancelFn) cancelFn();
+}
+
+let confirmModalExtraRun = null;
+
+function setConfirmModalStatus(text, isErr) {
+  const el = $("confirm-modal-status");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("err", !!isErr);
+}
+
+async function runConfirmModalExtra() {
+  const run = confirmModalExtraRun;
+  const extraBtn = $("confirm-modal-extra");
+  const okBtn = $("confirm-modal-ok");
+  if (!run) return;
+  // The confirm waits too: the API takes one host-changing request at a time.
+  extraBtn.disabled = okBtn.disabled = true;
+  setConfirmModalStatus("…");
+  try {
+    const done = await run();
+    if (confirmModalExtraRun !== run) return;
+    setConfirmModalStatus(done);
+    okBtn.disabled = false;
+    // Disabling the button dropped focus; the next step is this one.
+    okBtn.focus();
+  } catch (e) {
+    if (confirmModalExtraRun !== run) return;
+    setConfirmModalStatus(String(e.message || e), true);
+    extraBtn.disabled = okBtn.disabled = false;
+    extraBtn.focus();
+  }
 }
 
 export function openConfirmModal(opts) {
@@ -274,6 +309,16 @@ export function openConfirmModal(opts) {
   if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || "Cancel";
   state.confirmModalCallback = opts.onConfirm || null;
   state.confirmModalCancelCallback = opts.onCancel || null;
+  // Optional third button: `extraAction` ({ label, run }) does something first and stays in
+  // the dialog. `run` resolves to a line to show here, or throws to show the failure.
+  confirmModalExtraRun = opts.extraAction ? opts.extraAction.run : null;
+  const extraBtn = $("confirm-modal-extra");
+  if (extraBtn) {
+    extraBtn.textContent = opts.extraAction ? opts.extraAction.label : "";
+    extraBtn.classList.toggle("is-hidden", !opts.extraAction);
+    extraBtn.disabled = false;
+  }
+  setConfirmModalStatus("");
   openModal(modal);
   if (cancelBtn) requestAnimationFrame(() => cancelBtn.focus());
 }
@@ -286,6 +331,7 @@ export function initModals() {
   const confirmBackdrop = confirmModal && confirmModal.querySelector(".modal-backdrop");
   if (confirmBackdrop) confirmBackdrop.addEventListener("click", () => closeConfirmModal());
   $("confirm-modal-cancel").addEventListener("click", () => closeConfirmModal());
+  $("confirm-modal-extra").addEventListener("click", runConfirmModalExtra);
   $("confirm-modal-ok").addEventListener("click", async () => {
     const fn = state.confirmModalCallback;
     closeConfirmModal({ confirmed: true });

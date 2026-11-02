@@ -37,6 +37,16 @@ tr.is-filter-hidden {
   color: var(--evu-muted-foreground);
 }
 
+/* Rows take focus from script after a removal or Undo, not from Tab. */
+.data tbody tr[tabindex="-1"]:focus {
+  outline: none;
+}
+
+.data tbody tr[tabindex="-1"]:focus-visible {
+  outline: 2px solid var(--evu-ring);
+  outline-offset: -2px;
+}
+
 .data tr.row-error > td {
   padding-block-start: 0;
 }

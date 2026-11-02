@@ -517,6 +517,19 @@ function renderPendingDiffPanel() {
   }
 }
 
+function changeCount(n) {
+  return n === 1 ? "1 change" : n + " changes";
+}
+
+/** Counts for a confirmation, fresh because the page may be stale. The dialog can go without them. */
+async function fetchPendingCounts() {
+  try {
+    return await api("/v1/pending");
+  } catch {
+    return {};
+  }
+}
+
 export async function refreshPendingBadge() {
   const dot = $("nav-pending-dot");
   if (!dot) return;
@@ -660,12 +673,14 @@ export function initPendingPage() {
 
   const pendingDiscard = $("pending-discard");
   if (pendingDiscard) {
-    pendingDiscard.addEventListener("click", () => {
+    pendingDiscard.addEventListener("click", async () => {
+      const changes = (await fetchPendingCounts()).discard_change_count;
+      const what = changes ? changeCount(changes) : "pending changes";
       openConfirmModal({
-        title: "Discard pending?",
+        title: "Discard " + what + "?",
         message:
           "Replace the saved config.yaml with config.yaml.bak (the last applied snapshot). Unsaved edits that differ from that snapshot are lost. The host is not updated until you apply or reload.",
-        confirmLabel: "Discard pending",
+        confirmLabel: "Discard " + what,
         onConfirm: async () => {
           setPendingMsg("…");
           try {
@@ -685,12 +700,14 @@ export function initPendingPage() {
 
   const pendingRestore = $("pending-restore-previous");
   if (pendingRestore) {
-    pendingRestore.addEventListener("click", () => {
+    pendingRestore.addEventListener("click", async () => {
+      const changes = (await fetchPendingCounts()).restore_previous_change_count;
       openConfirmModal({
         title: "Restore previous applied?",
         message:
+          (changes ? "This changes " + changeCount(changes) + " in the saved config. " : "") +
           "Replace config.yaml with the first older snapshot in config.yaml.bak.1 … .bak.5 that differs from config.yaml.bak. Any current config.yaml content is overwritten (including edits not yet applied to the host). The host is not updated until you apply or reload.",
-        confirmLabel: "Restore",
+        confirmLabel: changes ? "Restore and change " + changeCount(changes) : "Restore",
         onConfirm: async () => {
           setPendingMsg("…");
           try {

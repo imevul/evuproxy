@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/imevul/evuproxy/internal/apply"
 )
@@ -193,6 +194,49 @@ func TestHandleBackup_successAndPathValidation(t *testing.T) {
 	resp = doAuthed(t, http.MethodPost, ts.URL+"/api/v1/backup?path=/etc/evil.tgz", "")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status %d", resp.StatusCode)
+	}
+}
+
+func TestHandleBackupInfo(t *testing.T) {
+	backupDir := t.TempDir()
+	t.Setenv("EVUPROXY_BACKUP_DIR", backupDir)
+	ts, _ := newMutationTestServer(t, stubRunner{})
+
+	archive := filepath.Join(backupDir, "b.tgz")
+	if err := os.WriteFile(archive, []byte("tgz"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	when := time.Date(2026, 10, 31, 12, 30, 0, 0, time.UTC)
+	if err := os.Chtimes(archive, when, when); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := doAuthed(t, http.MethodGet, ts.URL+"/api/v1/backup/info?path="+archive, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	m := decodeJSONMap(t, resp)
+	if m["archive"] != archive || m["modified"] != "2026-10-31T12:30:00Z" || m["size_bytes"] != float64(3) {
+		t.Fatalf("body %v", m)
+	}
+
+	cases := []struct {
+		name  string
+		query string
+		want  int
+	}{
+		{"missing path", "", http.StatusBadRequest},
+		{"outside the allowlist", "?path=/etc/passwd", http.StatusBadRequest},
+		{"no such archive", "?path=" + filepath.Join(backupDir, "none.tgz"), http.StatusNotFound},
+		{"directory", "?path=" + backupDir, http.StatusNotFound},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp := doAuthed(t, http.MethodGet, ts.URL+"/api/v1/backup/info"+c.query, "")
+			if resp.StatusCode != c.want {
+				t.Fatalf("status %d, want %d", resp.StatusCode, c.want)
+			}
+		})
 	}
 }
 
