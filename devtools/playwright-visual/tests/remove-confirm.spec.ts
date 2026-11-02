@@ -54,7 +54,7 @@ test.describe("remove confirmations", () => {
       await page.locator("#confirm-modal-ok").click();
       await expect(dialog).toBeHidden();
       await expect(page.locator("#inbound-table-wrap tbody tr")).toHaveCount(rowsBefore - 1);
-      await expect(page.locator("#inbound-msg")).toContainText(/removed/i);
+      await expect(page.locator("#toaster")).toContainText(/removed/i);
     } finally {
       await putConfig(request, snapshot);
     }

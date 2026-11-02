@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
+import { showToast } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
 import { fetchUIPrefsFromServer } from "../core/prefs.js";
 import {
@@ -971,12 +972,13 @@ export function initOverviewPage() {
           if (!cfg.forwarding) cfg.forwarding = {};
           cfg.forwarding.maintenance_mode = overviewMaint.checked;
         });
-        setOverviewMsg(
+        setOverviewMsg("");
+        refreshPendingBadge();
+        showToast(
           overviewMaint.checked
             ? "Maintenance mode saved. Reload to apply."
             : "Maintenance mode off. Reload to restore forwards."
         );
-        refreshPendingBadge();
       } catch (e) {
         overviewMaint.checked = !!(state.lastConfig.forwarding && state.lastConfig.forwarding.maintenance_mode);
         setOverviewMsg(String(e.message || e), true);
@@ -1045,9 +1047,10 @@ export function initOverviewPage() {
     setOverviewMsg("…");
     try {
       await api("/v1/reload", { method: "POST" });
-      setOverviewMsg("Reload OK.");
+      setOverviewMsg("");
       await refreshOverviewPage();
       refreshPendingBadge();
+      showToast("Config reloaded on host");
     } catch (e) {
       setOverviewMsg(String(e.message || e), true);
     }
@@ -1066,7 +1069,8 @@ export function initOverviewPage() {
     setOverviewMsg("…");
     try {
       await api("/v1/update-geo", { method: "POST" });
-      setOverviewMsg("Geo update OK.");
+      setOverviewMsg("");
+      showToast("Geo lists updated on host");
     } catch (e) {
       setOverviewMsg(String(e.message || e), true);
     }

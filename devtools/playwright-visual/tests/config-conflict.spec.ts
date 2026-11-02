@@ -105,7 +105,7 @@ test.describe("conflicting config saves", () => {
     });
     await page.locator("#routes-table-wrap [data-route-del]").first().click();
     await page.locator("#confirm-modal-ok").click();
-    await expect(page.locator("#routes-msg")).toContainText(/removed/i);
+    await expect(page.locator("#toaster")).toContainText(/removed/i);
 
     const { cfg } = await getConfig(request);
     expect(cfg.peers[0].name).toBe("saved-elsewhere");
@@ -123,8 +123,58 @@ test.describe("conflicting config saves", () => {
     await page.locator("#routes-table-wrap .evu-switch").first().click();
 
     await expect(page.locator("#routes-msg")).toContainText(/changed or removed elsewhere/);
+    await expect(page.locator("#routes-table-wrap tr.row-error")).toHaveCount(0);
     await expect(page.locator("#routes-table-wrap tbody tr")).toHaveCount(expected.forwarding.routes.length);
     expect((await getConfig(request)).cfg).toEqual(expected);
+  });
+
+  for (const row of [
+    { page: "routes", input: "input[data-route-disabled]", msg: "#routes-msg", drop: (c: any) => c.forwarding.routes.pop() },
+    { page: "peers", input: "input[data-peer-disabled]", msg: "#peers-msg", drop: (c: any) => c.peers.pop() },
+    { page: "inbound", input: "input[data-inbound-disabled]", msg: "#inbound-msg", drop: (c: any) => c.input_allows.pop() },
+  ]) {
+    test(`toggling the last ${row.page} row removed elsewhere still reports it`, async ({ page, request }) => {
+      await gotoRoute(page, origin, row.page);
+      const wrap = page.locator(`#${row.page}-table-wrap`);
+      await expect(wrap.locator(row.input).first()).toBeAttached();
+      await saveElsewhere(request, (c) => {
+        row.drop(c);
+      });
+      const expected = (await getConfig(request)).cfg;
+
+      await wrap.locator(`label.evu-switch:has(${row.input})`).last().click();
+      // The stale page may still see enabled routes on this peer and ask first.
+      const dialogOk = page.locator("#confirm-modal-ok");
+      if (await dialogOk.isVisible()) await dialogOk.click();
+
+      await expect(page.locator(row.msg)).toContainText(/changed or removed elsewhere/);
+      await expect(page.locator(row.msg)).toHaveClass(/err/);
+      await expect(wrap.locator("tr.row-error")).toHaveCount(0);
+      await expect(page.locator("#toaster .evu-toast")).toHaveCount(0);
+      expect((await getConfig(request)).cfg).toEqual(expected);
+      await expect(page.locator(`${row.input}:focus`)).toHaveCount(1);
+    });
+  }
+
+  test("a save failing after its retry moved the rows reports under the row that moved", async ({ page, request }) => {
+    await gotoRoute(page, origin, "routes");
+    const target = (await getConfig(request)).cfg.forwarding.routes[0];
+    await saveElsewhere(request, (c) => {
+      c.forwarding.routes.reverse();
+    });
+    // The first PUT reaches the server and gets its 409; the retry then fails.
+    let puts = 0;
+    await page.route("**/api/v1/config", (route) => {
+      if (route.request().method() !== "PUT" || ++puts === 1) return route.fallback();
+      return route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"disk full"}' });
+    });
+
+    await page.locator("#routes-table-wrap .evu-switch").first().click();
+
+    const err = page.locator("#routes-table-wrap tr.row-error");
+    await expect(err).toHaveText(/disk full/);
+    await expect(page.locator("#routes-table-wrap tbody tr:has(+ tr.row-error)")).toContainText(target.ports[0]);
+    await expect(page.locator("#routes-msg")).toHaveText("");
   });
 
   test("editing a route changed elsewhere keeps the form open with the user's values", async ({ page, request }) => {
@@ -185,7 +235,7 @@ test.describe("conflicting config saves", () => {
       c.peers[0].name = "saved-elsewhere";
     });
     await page.locator("#geo-save").click();
-    await expect(page.locator("#geo-msg")).toContainText(/^Saved/);
+    await expect(page.locator("#toaster")).toContainText(/Geoblocking saved/);
     expect((await getConfig(request)).cfg.peers[0].name).toBe("saved-elsewhere");
 
     await saveElsewhere(request, (c) => {
@@ -196,6 +246,6 @@ test.describe("conflicting config saves", () => {
     expect((await getConfig(request)).cfg.geo.break_glass_cidrs).toEqual(["203.0.113.9/32"]);
 
     await page.locator("#geo-save").click();
-    await expect(page.locator("#geo-msg")).toContainText(/^Saved/);
+    await expect(page.locator("#toaster")).toContainText(/Geoblocking saved/);
   });
 });

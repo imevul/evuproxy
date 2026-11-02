@@ -75,9 +75,9 @@ test.describe("validation", () => {
 
     const dport = page.locator("#inbound-f-dport");
     await expect(dport).toHaveAttribute("aria-invalid", "true");
-    await expect(dport).toHaveAttribute("aria-describedby", /inbound-msg/);
+    await expect(dport).toHaveAttribute("aria-describedby", /inbound-editor-msg/);
     await expect(dport).toBeFocused();
-    await expect(page.locator("#inbound-msg")).toHaveText(/Destination port is required/);
+    await expect(page.locator("#inbound-editor-msg")).toHaveText(/Destination port is required/);
   });
 });
 

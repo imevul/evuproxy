@@ -27,6 +27,28 @@ tr.is-filter-hidden {
   white-space: nowrap;
 }
 
+/*
+ * Disabled rows read as dimmed. Text colour rather than opacity, so the row keeps
+ * AA contrast; the switch and row actions stay at full strength, being how the row
+ * gets enabled again.
+ */
+.data tr.is-row-disabled > td:not(.cell-disabled-toggle, .row-actions),
+.data tr.is-row-disabled > td:not(.cell-disabled-toggle, .row-actions) :not(button, button *) {
+  color: var(--evu-muted-foreground);
+}
+
+.data tr.row-error > td {
+  padding-block-start: 0;
+}
+
+.data tr.row-error .msg {
+  margin: 0;
+}
+
+.evu-toast[data-error] {
+  border-color: var(--evuproxy-danger-text);
+}
+
 .card-grid {
   display: grid;
   gap: 0.75rem;

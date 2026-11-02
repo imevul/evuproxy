@@ -2,6 +2,7 @@ import { state, defaultPeerSubnetCidr, contentWidthKey, contentWidthCssValues } 
 import { $, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, getApiBase, headersDownload, responseEtag } from "../core/api.js";
+import { showToast } from "../core/toast.js";
 import { saveConfigEdit, putConfigAtRevision, isConfigRevisionMismatch } from "../core/config_save.js";
 import {
   fetchUIPrefsFromServer,
@@ -321,7 +322,8 @@ export function initSettingsPage() {
         wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
         metrics_collection_enabled: !!p.metrics_collection_enabled,
       };
-      let statusParts = ["Preferences saved on server."];
+      let confirmation = "Preferences saved.";
+      let note = "";
       if (configSaveRequested) {
         let cfg = state.lastConfig;
         if (!cfg) cfg = await api("/v1/config");
@@ -333,19 +335,16 @@ export function initSettingsPage() {
             cfgOut.network.public_interface = pubIfValid;
           });
           state.settingsPublicInterfaceLoaded = pubIfValid;
-          statusParts.push("Public interface saved — reload to apply nftables.");
+          confirmation += " Public interface saved — reload to apply nftables.";
           refreshPendingBadge();
         }
       } else {
-        statusParts.push("Public interface not updated (config could not be loaded).");
+        note = "Public interface not updated (config could not be loaded).";
       }
-      if (msg) {
-        msg.textContent = statusParts.join(" ");
-        if (statusParts.length === 1 && !epRaw) {
-          msg.textContent += " Tip: add WireGuard server endpoint (host:port) for client snippets.";
-        }
-      }
+      if (!note && !epRaw) note = "Tip: add WireGuard server endpoint (host:port) for client snippets.";
+      if (msg) msg.textContent = note;
       settingsForm.mark(SETTINGS_PREF_FIELDS);
+      showToast(confirmation);
       setApiStatus(true);
       await refreshEndpointHostWarning();
     } catch (e) {
@@ -424,7 +423,7 @@ export function initSettingsPage() {
       try {
         await api("/v1/config/notes", { method: "PUT", body: JSON.stringify({ text: body }) });
         settingsForm.mark(SETTINGS_NOTES_FIELDS);
-        if (msg) msg.textContent = "Notes saved.";
+        showToast("Notes saved");
         setApiStatus(true);
       } catch (e) {
         if (msg) {
@@ -448,7 +447,7 @@ export function initSettingsPage() {
       try {
         const q = "?path=" + encodeURIComponent(path);
         await api("/v1/backup" + q, { method: "POST" });
-        if (msg) msg.textContent = "Backup created: " + path;
+        showToast("Backup created: " + path);
         setApiStatus(true);
         void refreshOverviewEventsList();
       } catch (e) {
@@ -486,7 +485,7 @@ export function initSettingsPage() {
           try {
             const q = "?path=" + encodeURIComponent(path);
             await api("/v1/restore" + q, { method: "POST" });
-            if (msg) msg.textContent = "Restore finished. Review config and use Reload if needed.";
+            showToast("Restore finished. Review config and use Reload if needed.");
             setApiStatus(true);
             invalidateUIPrefsCache();
             state.lastConfig = await api("/v1/config");
@@ -588,11 +587,9 @@ export function initSettingsPage() {
       }
       try {
         await putConfigAtRevision(state.configUploadDraft, configUploadRevision);
-        if (am) am.textContent = "Saved. Check Pending changes / Reload.";
         closeConfigUploadModal();
-        const um = $("config-upload-msg");
-        if (um) um.textContent = "Config updated on server.";
         refreshPendingBadge();
+        showToast("Config replaced on server. Check Pending changes / Reload.");
       } catch (e) {
         let text = String(e.message || e);
         if (isConfigRevisionMismatch(e)) {

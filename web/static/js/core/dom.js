@@ -98,6 +98,49 @@ export function applyPeersRoutesTableFilter() {
   });
 }
 
+/** Message inside an editor dialog; the page's own message sits behind the backdrop. */
+export function setEditorMsg(id, text, field) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("err", !!text);
+  if (field) markFieldInvalid(el, field);
+  else clearFieldInvalid(el);
+}
+
+/*
+ * A failed row switch reports under its own row. The tables re-render from config
+ * (the peers table on every ping poll), so the error lives here rather than in the
+ * DOM, or the next render would dismiss it.
+ */
+const rowErrors = new Map();
+
+export function setRowError(dataAttr, index, message) {
+  rowErrors.set(dataAttr, { index, message });
+}
+
+export function clearRowError(dataAttr) {
+  rowErrors.delete(dataAttr);
+}
+
+export function rowErrorHtml(dataAttr, index, colspan) {
+  const err = rowErrors.get(dataAttr);
+  if (!err || err.index !== index) return "";
+  return `<tr class="row-error"><td colspan="${colspan}"><div class="msg err" role="alert">${escapeHtml(err.message)}</div></td></tr>`;
+}
+
+/**
+ * Re-rendering a table destroys the switch that was just used, dropping keyboard
+ * users to the top of the document. Skipped if focus has since moved somewhere real.
+ * If that row is gone (it was last, and removed elsewhere), the new last row takes focus.
+ */
+export function restoreRowSwitchFocus(wrap, dataAttr, index) {
+  if (document.activeElement && document.activeElement !== document.body) return;
+  if (!wrap) return;
+  const inp = wrap.querySelector(`input[${dataAttr}="${index}"]`) || [...wrap.querySelectorAll(`input[${dataAttr}]`)].pop();
+  if (inp) inp.focus();
+}
+
 export function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {
   const ch = disabled ? "" : " checked";
   return (

@@ -40,7 +40,7 @@ test.describe("logs break-glass affordance", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("198.51.100.2/32");
     await page.locator("#confirm-modal-ok").click();
-    await expect(page.locator("#logs-msg")).toContainText(/Added 198\.51\.100\.2\/32/);
+    await expect(page.locator("#toaster")).toContainText(/Added 198\.51\.100\.2\/32/);
     await expect(page.locator('[data-logs-breakglass="198.51.100.2"]')).toHaveCount(0);
   });
 

@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus, clientIPSourceLabel } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { showToast } from "../core/toast.js";
 import { openConfirmModal } from "../core/modal.js";
 import { fetchValidateResult, lockoutRisks, lockoutSignature } from "../core/lockout.js";
 
@@ -644,10 +645,11 @@ export function initPendingPage() {
       setPendingMsg("…");
       try {
         await api("/v1/reload", { method: "POST" });
-        setPendingMsg("Applied to host.");
+        setPendingMsg("");
         await refreshPendingPage();
         await refreshPendingBadge();
         setApiStatus(true);
+        showToast("Applied to host");
       } catch (e) {
         setPendingMsg(String(e.message || e), true);
       }
@@ -668,10 +670,11 @@ export function initPendingPage() {
           setPendingMsg("…");
           try {
             await api("/v1/config/discard", { method: "POST" });
-            setPendingMsg("Pending changes discarded. Apply or reload when ready.");
+            setPendingMsg("");
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);
+            showToast("Pending changes discarded. Apply or reload when ready.");
           } catch (e) {
             setPendingMsg(String(e.message || e), true);
           }
@@ -692,10 +695,11 @@ export function initPendingPage() {
           setPendingMsg("…");
           try {
             await api("/v1/config/restore-previous-applied", { method: "POST" });
-            setPendingMsg("Restored previous applied config. Apply or reload when ready.");
+            setPendingMsg("");
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);
+            showToast("Previous applied config restored. Apply or reload when ready.");
           } catch (e) {
             setPendingMsg(String(e.message || e), true);
           }

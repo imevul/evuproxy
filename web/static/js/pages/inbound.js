@@ -4,12 +4,16 @@ import {
   escapeHtml,
   setApiStatus,
   tableDisabledToggleCell,
-  markFieldInvalid,
-  clearFieldInvalid,
+  setEditorMsg,
+  setRowError,
+  clearRowError,
+  rowErrorHtml,
+  restoreRowSwitchFocus,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
-import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
+import { showToast } from "../core/toast.js";
+import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
 import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -20,6 +24,8 @@ async function patchInboundDisabled(index, disabled) {
   const cur = state.lastConfig;
   if (!cur || !cur.input_allows || cur.input_allows[index] === undefined) return;
   const identity = inboundRuleIdentity(cur.input_allows[index]);
+  // A save can adopt fresh config even when it fails, so the row may have moved or gone.
+  const currentIndex = () => resolveListIndex(state.lastConfig.input_allows, index, identity, inboundRuleIdentity);
   try {
     const cfg = await saveConfigEdit((c) => {
       const i = findConfigRow(c.input_allows, index, identity, inboundRuleIdentity, "inbound rule");
@@ -29,20 +35,25 @@ async function patchInboundDisabled(index, disabled) {
     setApiStatus(true);
     refreshPendingBadge();
     renderInboundTable(cfg);
+    showToast(disabled ? "Inbound rule disabled" : "Inbound rule enabled");
   } catch (e) {
-    setInboundMsg(String(e.message || e), true);
+    const at = e instanceof ConfigMergeError ? -1 : currentIndex();
+    setInboundMsg("");
+    if (at >= 0) setRowError("data-inbound-disabled", at, String(e.message || e));
+    else setInboundMsg(String(e.message || e), true);
     renderInboundTable(state.lastConfig);
   }
+  const focusAt = currentIndex();
+  restoreRowSwitchFocus($("inbound-table-wrap"), "data-inbound-disabled", focusAt >= 0 ? focusAt : index);
 }
 
 /* ——— Inbound access (input_allows) ——— */
-function setInboundMsg(text, isErr, field) {
+function setInboundMsg(text, isErr) {
   const el = $("inbound-msg");
   if (!el) return;
   el.textContent = text;
   el.classList.toggle("err", !!isErr);
-  if (isErr && field) markFieldInvalid(el, field);
-  else clearFieldInvalid(el);
+  if (!text) clearRowError("data-inbound-disabled");
 }
 
 function renderInboundTable(cfg) {
@@ -65,7 +76,8 @@ function renderInboundTable(cfg) {
         " " +
         String(r.dport || r.note || "#" + i);
       return (
-        `<tr><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>`
+        `<tr${r.disabled ? ' class="is-row-disabled"' : ""}><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>` +
+        rowErrorHtml("data-inbound-disabled", i, 5)
       );
     })
     .join("");
@@ -81,11 +93,13 @@ function renderInboundTable(cfg) {
     inp.addEventListener("change", async () => {
       const idx = +inp.getAttribute("data-inbound-disabled");
       const wantEnabled = inp.checked;
+      clearRowError("data-inbound-disabled");
       if (wantEnabled) {
         const r = (state.lastConfig.input_allows || [])[idx];
         if (!r || !String(r.dport || "").trim()) {
-          setInboundMsg("Add a destination port in Edit before enabling this rule.", true);
-          inp.checked = false;
+          setRowError("data-inbound-disabled", idx, "Add a destination port in Edit before enabling this rule.");
+          renderInboundTable(state.lastConfig);
+          restoreRowSwitchFocus(wrap, "data-inbound-disabled", idx);
           return;
         }
       }
@@ -98,12 +112,12 @@ function openInboundEditor(index) {
   const cfg = state.lastConfig;
   if (!cfg) return;
   if (!cfg.input_allows) cfg.input_allows = [];
+  setEditorMsg("inbound-editor-msg", "");
   const protoSel = $("inbound-f-proto");
   const dport = $("inbound-f-dport");
   const note = $("inbound-f-note");
   if (!protoSel || !dport || !note) return;
 
-  $("inbound-editor-msg").textContent = "";
   const disInp = $("inbound-f-disabled");
   if (index === -1) {
     $("inbound-edit-index").value = "";
@@ -141,13 +155,13 @@ async function saveInboundEditor() {
   const dport = $("inbound-f-dport").value.trim();
   const note = $("inbound-f-note").value.trim();
   if (proto !== "tcp" && proto !== "udp") {
-    setInboundMsg("Protocol must be tcp or udp.", true, $("inbound-f-proto"));
+    setEditorMsg("inbound-editor-msg", "Protocol must be tcp or udp.", $("inbound-f-proto"));
     return;
   }
   const disEl = $("inbound-f-disabled");
   const enabled = disEl && disEl.checked;
   if (enabled && !dport) {
-    setInboundMsg("Destination port is required.", true, $("inbound-f-dport"));
+    setEditorMsg("inbound-editor-msg", "Destination port is required.", $("inbound-f-dport"));
     return;
   }
   const entry = { proto };
@@ -155,6 +169,7 @@ async function saveInboundEditor() {
   if (note) entry.note = note;
   entry.disabled = !enabled;
   const idxRaw = $("inbound-edit-index").value;
+  setEditorMsg("inbound-editor-msg", "");
   const base = inboundEditBase;
   try {
     const cfg = await saveConfigEdit((c) => {
@@ -163,18 +178,21 @@ async function saveInboundEditor() {
       // The form replaces the whole row, so only a row still as it was when opened is safe to overwrite.
       else c.input_allows[findConfigRow(c.input_allows, +idxRaw, base, JSON.stringify, "inbound rule")] = entry;
     });
-    setInboundMsg("Saved. Open Pending changes to review nftables, then Apply to host.");
+    setInboundMsg("");
     closeInboundEditor();
     renderInboundTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
+    showToast((idxRaw === "" ? "Inbound rule added." : "Inbound rule saved.") + " Review it on Pending changes, then Apply to host.");
   } catch (e) {
     if (e instanceof ConfigMergeError) {
-      $("inbound-editor-msg").textContent =
-        e.message + " Your values are still in this form: note them, press Cancel, and edit the latest version.";
+      setEditorMsg(
+        "inbound-editor-msg",
+        e.message + " Your values are still in this form: note them, press Cancel, and edit the latest version."
+      );
       renderInboundTable(state.lastConfig);
     } else {
-      setInboundMsg(String(e.message || e), true);
+      setEditorMsg("inbound-editor-msg", String(e.message || e));
     }
   }
 }
@@ -213,10 +231,11 @@ async function removeInboundRule(index) {
           const i = findConfigRow(draft.input_allows, openIndex, identity, inboundRuleIdentity, "inbound rule");
           draft.input_allows.splice(i, 1);
         });
-        setInboundMsg("Rule removed. Apply on Pending changes when ready.");
+        setInboundMsg("");
         renderInboundTable(c);
         setApiStatus(true);
         refreshPendingBadge();
+        showToast("Inbound rule removed. Apply on Pending changes when ready.");
       } catch (e) {
         setInboundMsg(String(e.message || e), true);
         renderInboundTable(state.lastConfig);
