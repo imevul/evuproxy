@@ -44,6 +44,8 @@ case $status in
 0) echo "e2e: passed" ;;
 124 | 137) echo "e2e: hit the ${DEADLINE_SECONDS}s deadline" >&2; status=100 ;;
 100) echo "e2e: could not run, see above" >&2 ;;
+# Docker's and timeout's own errors, such as an image that can't be pulled. Not failed checks.
+125 | 126 | 127) echo "e2e: could not start the container ($status)" >&2; status=100 ;;
 *) echo "e2e: FAILED ($status)" >&2 ;;
 esac
 exit "$status"

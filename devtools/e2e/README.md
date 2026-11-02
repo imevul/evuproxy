@@ -56,11 +56,9 @@ Each `scenarios/<name>.sh` gets a fresh topology and is picked up automatically.
 | `reaches "<text>" tcp_reply ...`, `blocked tcp_reply ...` | Assert on a reply, or on no reply |
 | `in_ns <ns> <command>`, `wg_bytes <ns> <iface>` | Run something in a namespace, or read tunnel traffic |
 
-Add more client addresses to `wan` with `in_ns wan ip addr add <ip>/32 dev lo`. `scenarios/smoke.sh` is the worked example:
+Add more client addresses to `wan` with `in_ns wan ip addr add <ip>/32 dev lo`. `scenarios/smoke.sh` is the worked example. The order matters: the proxy's interface doesn't exist until the first `apply_config`, so bring the peer up after it and wait for the handshake before probing.
 
 ```bash
-peer_up "$TUNNEL_SUBNET"
-serve_tcp peer "$PEER_TUNNEL_IP" 18080
 apply_config <<EOF
 forwarding:
   routes:
@@ -71,6 +69,9 @@ geo:
   enabled: false
 input_allows: []
 EOF
+peer_up "$TUNNEL_SUBNET"
+check "WireGuard handshake" wait_for_handshake
+serve_tcp peer "$PEER_TUNNEL_IP" 18080
 check "the forward answers" reaches "tcp-ok" tcp_reply wan "$CLIENT_IN_ZONE" "$PROXY_PUBLIC_IP" 18080
 ```
 

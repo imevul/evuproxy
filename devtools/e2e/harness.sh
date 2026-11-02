@@ -38,7 +38,7 @@ die() {
 	log "SETUP FAILED: $*"
 	exit 100
 }
-# Prints a refusal and stops. Runs before anything is installed or changed.
+# Prints a refusal and stops. Runs before any namespace or scenario exists.
 refuse() {
 	echo "e2e: REFUSING TO RUN: $*" >&2
 	exit 100
