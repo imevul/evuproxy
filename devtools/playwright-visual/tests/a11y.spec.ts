@@ -58,6 +58,21 @@ async function expectNoBlockingViolations(page: Page, label: string): Promise<vo
   expect(ids, `blocking a11y violations on ${label}:\n${format(blocking)}`).toEqual([]);
 }
 
+test.describe("accessibility on a phone (axe-core)", () => {
+  test.use({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true });
+
+  for (const scheme of SCHEMES) {
+    for (const route of ROUTES) {
+      test(`a11y phone ${route} ${scheme}`, async ({ page, baseURL }) => {
+        test.skip(!baseURL, "baseURL unset");
+        await seed(page, { scheme });
+        await gotoRoute(page, baseURL!, route);
+        await expectNoBlockingViolations(page, `phone ${route} (${scheme})`);
+      });
+    }
+  }
+});
+
 test.describe("accessibility (axe-core)", () => {
   for (const scheme of SCHEMES) {
     for (const route of ROUTES) {

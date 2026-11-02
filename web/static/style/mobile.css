@@ -1,0 +1,270 @@
+/**
+ * EvuProxy — Phone layout. Loaded last. Every rule sits inside the theme's sidebar
+ * breakpoint, so screens from 768px up never see this file.
+ */
+
+@media (max-width: 767px) {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* One header: menu, brand and API status on a single row. */
+  body.app .evu-app-header {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  body.app .evu-app-header .evu-brand {
+    flex: 1;
+  }
+
+  body.app .evu-app-header .evu-brand__tag {
+    display: none;
+  }
+
+  body.app .evu-app-header__meta {
+    flex-shrink: 0;
+  }
+
+  /*
+   * The theme gives the drawer its shadow while closed too, and that bleeds over the
+   * left edge. Hiding it closed also keeps its links out of the Tab order; the delay
+   * lets the slide finish first.
+   */
+  body.app .evu-sidebar {
+    visibility: hidden;
+    box-shadow: none;
+    transition:
+      transform 0.2s ease,
+      visibility 0s linear 0.2s;
+  }
+
+  body.app.is-nav-open .evu-sidebar {
+    visibility: visible;
+    box-shadow: 8px 0 32px hsl(220 10% 4% / 0.35);
+    transition: transform 0.2s ease;
+  }
+
+  /* 44px targets. Controls with room simply grow. */
+  body.app .evu-shell__menu-btn {
+    flex-shrink: 0;
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  body.app .evu-btn,
+  body.app .evu-tabs__tab,
+  body.app .evu-check,
+  body.app .nav-link,
+  body.app .geo-mode-btn,
+  body.app .table-sort {
+    min-height: 2.75rem;
+  }
+
+  body.app .evu-btn,
+  body.app .evu-tabs__tab {
+    min-width: 2.75rem;
+    touch-action: manipulation;
+  }
+
+  /*
+   * The copy button gets a real 44px box, drawn as a bare icon. An invisible extension
+   * would overlap the next one, on a peer card's Tunnel IP and Public key rows.
+   */
+  body.app table.data .btn-tunnel-ip-copy {
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-block: -0.25rem;
+    display: inline-flex;
+    box-shadow: none;
+  }
+
+  body.app table.data .btn-tunnel-ip-copy:not(.is-copied) {
+    border-color: transparent;
+    background: none;
+  }
+
+  /* Small controls that sit inside text keep their size and extend an invisible area. */
+  body.app .btn-help-trigger,
+  body.app .geo-tag-remove,
+  body.app .evu-switch {
+    position: relative;
+  }
+
+  body.app .btn-help-trigger::after,
+  body.app .geo-tag-remove::after,
+  body.app .evu-switch::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 2.75rem;
+    height: 2.75rem;
+    transform: translate(-50%, -50%);
+  }
+
+  /* Below 16px, iOS zooms the page when a field takes focus and never zooms back out. */
+  body.app input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]),
+  body.app select,
+  body.app textarea,
+  body.app .logs-field select,
+  body.app .logs-search-input,
+  body.app .logs-datetime-input {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+
+  body.app input.table-filter[type="search"] {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+    font-size: 1rem;
+  }
+
+  /*
+   * An absolutely positioned child escapes overflow unless the scroller is its containing
+   * block. The visually hidden "Actions" header did, which widened the whole page.
+   */
+  .table-wrap {
+    position: relative;
+  }
+
+  /* The page scrolls here; a scroller inside a scroller traps the thumb. */
+  .table-wrap--sticky,
+  .logs-table-wrap {
+    max-height: none;
+    overflow: visible;
+  }
+
+  /* Rows as cards. Sort buttons stay, as a row of their own above the cards. */
+  table.data[data-cards],
+  table.data[data-cards] thead,
+  table.data[data-cards] tbody {
+    display: block;
+  }
+
+  table.data[data-cards] thead:not(:has(.table-sort)) {
+    display: none;
+  }
+
+  table.data[data-cards] thead tr {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.875rem;
+  }
+
+  .table-wrap--sticky table.data[data-cards] th {
+    position: static;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  table.data[data-cards] th:not(:has(.table-sort)) {
+    display: none;
+  }
+
+  table.data[data-cards] tbody tr:not(.is-filter-hidden) {
+    display: block;
+    margin-top: 0.625rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--evu-border);
+    border-radius: calc(var(--evu-radius) - 2px);
+  }
+
+  /* A row's error belongs to the card above it. */
+  table.data[data-cards] tbody tr.row-error:not(.is-filter-hidden) {
+    margin-top: 0.25rem;
+    padding: 0;
+    border: 0;
+  }
+
+  table.data[data-cards] td {
+    position: relative;
+    display: block;
+    padding: 0.25rem 0;
+    border: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  table.data[data-cards] td[data-label] {
+    padding-left: 5.5rem;
+  }
+
+  table.data[data-cards] td[data-label]::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    width: 5rem;
+    color: var(--evu-muted-foreground);
+    font-family: "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    overflow-wrap: normal;
+  }
+
+  table.data[data-cards] .public-key-text,
+  table.data[data-cards] .logs-col-ip,
+  table.data[data-cards] .logs-col-type {
+    white-space: normal;
+  }
+
+  /* Switch on the right of its label, across the card. */
+  table.data[data-cards] td.cell-disabled-toggle[data-label] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 2.75rem;
+    padding-left: 0;
+  }
+
+  table.data[data-cards] td.cell-disabled-toggle::before {
+    position: static;
+  }
+
+  /* Actions fill the card's foot and need no label of their own. */
+  table.data[data-cards] td.row-actions[data-label] {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 0 0.25rem;
+    white-space: normal;
+  }
+
+  table.data[data-cards] td.row-actions::before {
+    content: none;
+  }
+
+  table.data[data-cards] td.row-actions .evu-btn {
+    flex: 1;
+  }
+
+  /* Eleven columns: label over value, in two columns, so a log line stays compact. */
+  table.data.logs-data[data-cards] tbody tr:not(.is-filter-hidden) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 0.75rem;
+  }
+
+  table.data.logs-data[data-cards] td[data-label] {
+    padding-left: 0;
+  }
+
+  table.data.logs-data[data-cards] td[data-label]::before {
+    position: static;
+    display: block;
+    width: auto;
+  }
+
+  table.data.logs-data[data-cards] td:nth-child(1),
+  table.data.logs-data[data-cards] td:nth-child(3),
+  table.data.logs-data[data-cards] td:nth-child(4),
+  table.data.logs-data[data-cards] td:nth-child(11) {
+    grid-column: 1 / -1;
+  }
+}

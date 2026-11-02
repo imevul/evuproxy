@@ -3,6 +3,7 @@ import { $, escapeHtml, trunc, setApiStatus, downloadTextFile, metricsPeersToCsv
 import { beginLoading } from "../core/loading.js";
 import { formatBytes, formatCount, timeHtml } from "../core/format.js";
 import { api } from "../core/api.js";
+import { prepareTableCards } from "../core/table_sort.js";
 
 /* ——— Stats ——— */
 function setStatsMsg(text, isErr) {
@@ -59,6 +60,7 @@ export async function refreshStatsPage() {
         )
         .join("");
       wgW.innerHTML = `<table class="data"><thead><tr><th scope="col">Peer</th><th scope="col">Public key</th><th scope="col">Endpoint</th><th scope="col">Handshake</th><th scope="col">RX / TX</th></tr></thead><tbody>${rows}</tbody></table>`;
+      prepareTableCards(wgW);
     } else {
       wgW.innerHTML =
         "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No peers on this interface</p><p>WireGuard responded, but the tunnel has no peers yet.</p></div>";
@@ -71,6 +73,7 @@ export async function refreshStatsPage() {
         )
         .join("");
       nftW.innerHTML = `<table class="data"><thead><tr><th scope="col">Family</th><th scope="col">Table</th><th scope="col">Packets</th><th scope="col">Bytes</th><th scope="col">Rule</th></tr></thead><tbody>${rows}</tbody></table>`;
+      prepareTableCards(nftW);
     } else {
       nftW.innerHTML =
         "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No counters to show</p><p>The generated ruleset has no counter lines, or <code>nft</code> is unavailable on this host.</p></div>";
