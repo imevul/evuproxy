@@ -149,7 +149,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | Field | Type | Description |
 |-------|------|-------------|
 | `tcp_syn_per_second` | int (optional) | Drop excess **new** TCP SYNs per **source IP** to published ports (1–10000). |
-| `max_conn_per_ip` | int (optional) | Drop when a **source IP** exceeds **N** concurrent flows to the port (inline `ct count over (N-1)` — nft **`over`** is strictly greater than the threshold, so `max_conn_per_ip: 3` emits `over 2`; 1–65535). Not a sticky ban — when connections close, new ones are allowed again. |
+| `max_conn_per_ip` | int (optional) | Drop when a **source IP** exceeds **N** concurrent flows to the route, counted separately for TCP and UDP (`ct count over N` in a per-source set; 1–65535). Not a sticky ban — when connections close, new ones are allowed again. |
 | `udp_per_second` | int (optional) | Drop excess UDP packets per **source IP** (1–100000); meters **every datagram**, not only the first packet of a flow; can affect bursty game traffic. |
 
 Drops are logged with prefix `evuproxy-ratelimit` and appear in **Logs** when enabled (not in **Stats** nftables counters — see [Web UI — Stats page](web-ui.md#stats-page)).
@@ -158,7 +158,7 @@ Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel path), n
 
 **Forward path (primary enforcement):** on **inet forward**, per-source rate limits are evaluated **before** the blanket `ct state established,related accept`, so max-conn and UDP pps limits apply to forwarded game/service traffic. **INPUT** still has an early established accept at the top of the chain, so those same rules on INPUT are best treated as defense-in-depth.
 
-**Sets vs inline drops:** only **`tcp_syn_per_second`** and **`udp_per_second`** use dynamic nft sets (`ratelimit_syn_*`, `ratelimit_udp_*`). **`max_conn_per_ip`** uses inline **`ct count`** drop rules (no `ratelimit_conn_*` set).
+**Sets:** all three limits use dynamic nft sets keyed by source IP. **`tcp_syn_per_second`** and **`udp_per_second`** use `ratelimit_syn_*` and `ratelimit_udp_*`, and allow at most rate × time + burst (burst is twice the rate, or the rate itself above 50/s). **`max_conn_per_ip`** always uses one set per route and protocol, `ratelimit_conn_rN_tcp` and `ratelimit_conn_rN_udp`, even when the limit is global. A reload starts the rate meters and connection counts again from zero.
 
 **Global vs per-route sets:** Fields set under **`forwarding.rate_limit`** use shared nft sets (`ratelimit_syn_v4`, `ratelimit_udp_v4`) on every route that does not override that field. A per-route **`rate_limit`** override uses route-scoped sets (`ratelimit_syn_rN`, `ratelimit_udp_rN`) so limits apply only to that route’s published ports. Example: global `tcp_syn_per_second: 10` on all routes, but route 0 overrides to `100` — route 0 uses its own meter; other routes share the global 10/s cap per source IP.
 

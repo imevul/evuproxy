@@ -2,7 +2,8 @@
 # Runs the end-to-end scenarios in a throwaway container: real WireGuard and nftables, each
 # "host" in its own network namespace inside that container. See README.md.
 #
-#   devtools/e2e/run.sh [scenario...]     no arguments runs every scenario
+#   devtools/e2e/run.sh [scenario...]     no arguments runs everything in scenarios/, and
+#                                         on-demand/ only runs when named
 #
 # Exits with the number of failed checks (at most 99), or 100 if it could not run at all.
 set -uo pipefail
@@ -29,7 +30,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 100
 
 bin_dir=$(mktemp -d) || exit 100
 trap 'rm -rf "$bin_dir"' EXIT
-CGO_ENABLED=0 go build -trimpath -o "$bin_dir/evuproxy" ./cmd/evuproxy || { echo "e2e: go build failed" >&2; exit 100; }
+CGO_ENABLED=0 go build -trimpath -o "$bin_dir/" ./cmd/evuproxy ./devtools/e2e/loadgen || { echo "e2e: go build failed" >&2; exit 100; }
 
 # NET_ADMIN and SYS_ADMIN apply to the container's own namespaces: creating more of them,
 # mounting inside them, and loading rules into them. AppArmor's Docker profile denies mounts,
