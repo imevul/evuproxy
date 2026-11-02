@@ -24,7 +24,8 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	// not updated). The per-command 60s timeout still bounds individual hangs.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
 	defer cancel()
-	if err := apply.Reload(ctx, s.Config); err != nil {
+	defer s.reloadStep.Store("")
+	if err := apply.ReloadWithProgress(ctx, s.Config, func(step string) { s.reloadStep.Store(step) }); err != nil {
 		s.logErr("reload", err)
 		s.emit(eventlog.Record{Event: "reload_failed", Detail: eventDetail(err.Error()), ErrorCode: "reload_error"})
 		s.jsonErr(w, http.StatusInternalServerError, "reload failed")
@@ -33,6 +34,13 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	apply.InvalidateGeoSummaryCache()
 	s.emit(eventlog.Record{Event: "reload_ok", Detail: "reload"})
 	s.jsonOK(w, map[string]string{"result": "reloaded"})
+}
+
+// handleReloadProgress reports the stage of a running POST /reload, which only
+// answers once it has finished. It takes no lock: that reload is holding it.
+func (s *Server) handleReloadProgress(w http.ResponseWriter, r *http.Request) {
+	step, _ := s.reloadStep.Load().(string)
+	s.jsonOK(w, map[string]string{"step": step})
 }
 
 func (s *Server) handleUpdateGeo(w http.ResponseWriter, r *http.Request) {

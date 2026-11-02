@@ -18,7 +18,9 @@ The sidebar has a **color scheme** menu (**Light**, **Dark**, or **System**, the
 
 **Replace config (upload):** Settings can upload a config **JSON** file; a modal shows the **current vs. uploaded** config side by side before anything is written. Saving replaces `config.yaml` on disk via `PUT /api/v1/config` (YAML comments are not preserved); the host keeps running the previously applied rules until you apply.
 
-**Pending changes:** the Pending page lists each difference from the last applied config in plain language, such as "Removed route UDP 53 → laptop". **Revert** on a row takes that one change back out of the saved config and leaves the others in place; it has no time limit, unlike the Undo on a toast. The generated nftables **diff** (unified or split view) stays available in a collapsed section, and opens by itself when the applied config is not available to compare. The page also has **Apply**, **Discard pending**, and **Restore previous applied** actions.
+**Pending changes:** the Pending page lists each difference from the last applied config in plain language, such as "Removed route UDP 53 → laptop". **Revert** on a row takes that one change back out of the saved config and leaves the others in place; it has no time limit, unlike the Undo on a toast. The generated nftables **diff** (unified or split view) stays available in a collapsed section, and opens by itself when the applied config is not available to compare. The page also has **Check config**, **Discard pending**, and **Restore previous applied** actions, and an **Apply** for re-applying when nothing is waiting.
+
+**Applying:** while changes are waiting, a bar above every page says how many, with **Review** and **Apply**; the Pending changes link in the sidebar shows the same count. **Apply** always checks first and shows named steps as it runs: Validating, Applying firewall, Applying WireGuard, Done. A failed check stops it. The result is pinned under the bar and stays through navigation until the config changes or you dismiss it. If the check finds a lockout risk, Apply also stops until you tick the acknowledgement and press it again; that re-runs the check, and a different set of warnings clears the tick. **Check config** on Pending changes runs only the check.
 
 ## Save, Apply and Refresh
 
@@ -30,7 +32,7 @@ The UI uses one word for each operation:
 | **Apply** | Changes the host: regenerates WireGuard and nftables from the saved config. | `POST /api/v1/reload` | `evuproxy reload` |
 | **Refresh** | Re-reads what's on screen from the API. Nothing is written. | `GET` endpoints | |
 
-**Apply** in the UI and `reload` in the API and CLI are the same operation. **Overview** and **Pending changes** both offer **Apply**, and both run the lockout check first. **Recent activity** on Overview shows Apply events as **Apply started**, **Applied config** and **Apply failed**. The stored events and the CSV export keep the API's codes (`reload_started`, `reload_ok`, `reload_failed`), and a failed Apply also shows its `reload_error` code. The API's `reload failed` error reads **Apply failed**, and a `geo_last_success_source` of `reload` reads **Source: Apply** in Overview's geo freshness.
+**Apply** in the UI and `reload` in the API and CLI are the same operation. **Recent activity** on Overview shows Apply events as **Apply started**, **Applied config** and **Apply failed**. The stored events and the CSV export keep the API's codes (`reload_started`, `reload_ok`, `reload_failed`), and a failed Apply also shows its `reload_error` code. The API's `reload failed` error reads **Apply failed**, and a `geo_last_success_source` of `reload` reads **Source: Apply** in Overview's geo freshness.
 
 ## Saving
 

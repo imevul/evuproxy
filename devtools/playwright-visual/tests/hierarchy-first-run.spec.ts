@@ -231,6 +231,7 @@ test.describe("connected", () => {
     await patchApi(page, "/v1/pending", (p) => ({
       ...p,
       pending: true,
+      applied_config: null,
       nftables_baseline: "a\nkeep\nb\nkeep\nc",
       nftables: "A\nkeep\nB\nkeep\nC",
     }));

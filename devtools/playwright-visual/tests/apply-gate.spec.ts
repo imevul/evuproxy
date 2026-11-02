@@ -1,5 +1,5 @@
 /**
- * The pre-apply lockout gate on Pending changes.
+ * The pre-apply lockout gate.
  *
  * Applying a config can cut the operator's own access to the host (SSH or this
  * admin UI). The backend reports that as `lockout_risk_*` warnings from
@@ -10,6 +10,11 @@ import { expect, test } from "@playwright/test";
 import { gotoRoute, seed, token } from "./helpers";
 
 const origin = process.env.PW_BASE_URL?.trim() || "http://127.0.0.1:9080";
+
+/** Holds the Apply bar on screen, whatever earlier specs left in the mock. */
+async function stubPending(page: import("@playwright/test").Page, pending: boolean) {
+  await page.route("**/api/v1/pending", (route) => route.fulfill({ json: { pending } }));
+}
 
 /** Replaces /validate so each test controls the risk the UI is reacting to. */
 async function stubValidate(
@@ -52,6 +57,7 @@ const BROKEN = {
 test.describe("pre-apply check", () => {
   test.beforeEach(async ({ page }) => {
     await seed(page, { scheme: "light" });
+    await stubPending(page, true);
   });
 
   test("Check config reports the detected client IP and a clean result", async ({ page }) => {
@@ -78,19 +84,19 @@ test.describe("pre-apply check", () => {
     });
 
     // Straight to Apply without checking first: the gate must still engage.
-    await page.locator("#pending-apply").click();
+    await page.locator("#apply-bar-apply").click();
     await expect(page.locator("#pending-validate-panel")).toHaveClass(/evu-alert--warning/);
     await expect(page.locator("#pending-lockout-ack-wrap")).not.toHaveClass(/is-hidden/);
-    await expect(page.locator("#pending-msg")).toContainText(/may lock you out/i);
+    await expect(page.locator("#apply-msg")).toContainText(/may lock you out/i);
     expect(applied, "apply must not reach the host before acknowledgement").toBe(false);
 
     // Still blocked while the acknowledgement is unticked.
-    await page.locator("#pending-apply").click();
+    await page.locator("#apply-bar-apply").click();
     expect(applied).toBe(false);
-    await expect(page.locator("#pending-msg")).toContainText(/tick the box/i);
+    await expect(page.locator("#apply-msg")).toContainText(/tick the box/i);
 
     await page.locator("#pending-lockout-ack").check();
-    await page.locator("#pending-apply").click();
+    await page.locator("#apply-bar-apply").click();
     await expect.poll(() => applied).toBe(true);
   });
 
@@ -104,7 +110,7 @@ test.describe("pre-apply check", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#pending-apply").click();
+    await page.locator("#apply-bar-apply").click();
     await expect(page.locator("#pending-validate-panel")).toHaveClass(/evu-alert--danger/);
     await expect(page.locator("#pending-validate-warnings")).toContainText("nft -c rejected");
     expect(applied).toBe(false);
@@ -122,7 +128,7 @@ test.describe("pre-apply check", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#pending-apply").click();
+    await page.locator("#apply-bar-apply").click();
     await expect.poll(() => applied).toBe(true);
   });
 
@@ -142,8 +148,8 @@ test.describe("pre-apply check", () => {
     // Ask for the check first, then apply: the ordering that used to set the
     // flag and let every later gate be skipped.
     await page.locator("#pending-check-config").click();
-    await page.locator("#pending-apply").click();
-    await expect(page.locator("#pending-msg")).toContainText(/unexpected response/i);
+    await page.locator("#apply-bar-apply").click();
+    await expect(page.locator("#apply-msg")).toContainText(/unexpected response/i);
     expect(applied).toBe(false);
   });
 
@@ -165,7 +171,7 @@ test.describe("pre-apply check", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#pending-apply").click();
+    await page.locator("#apply-bar-apply").click();
     const list = page.locator("#pending-validate-warnings");
     await expect(list).toContainText("nft -c rejected");
     await expect(list).toContainText("source allowlist");
@@ -198,7 +204,7 @@ test.describe("pre-apply check", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#pending-apply").click();
+    await page.locator("#apply-bar-apply").click();
     await expect(page.locator("#pending-validate-warnings")).toContainText("Geoblocking");
     await expect(page.locator("#pending-lockout-ack")).not.toBeChecked();
     expect(applied, "the earlier tick must not authorise the new risk").toBe(false);
@@ -221,7 +227,7 @@ test.describe("pre-apply check", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#pending-apply").click();
+    await page.locator("#apply-bar-apply").click();
     await expect(page.locator("#pending-lockout-ack")).not.toBeChecked();
     expect(applied).toBe(false);
   });
@@ -235,6 +241,7 @@ test.describe("pre-apply check", () => {
 test.describe("inbound rule lockout risk", () => {
   test.beforeEach(async ({ page }) => {
     await seed(page, { scheme: "light" });
+    await stubPending(page, true);
   });
 
   type InboundRule = { dport: string; disabled?: boolean };
@@ -274,14 +281,14 @@ test.describe("inbound rule lockout risk", () => {
         return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
       });
 
-      await page.locator("#pending-apply").click();
+      await page.locator("#apply-bar-apply").click();
       await expect(page.locator("#pending-validate-panel")).toHaveClass(/evu-alert--warning/);
       await expect(page.locator("#pending-validate-warnings")).toContainText("TCP port 22 (SSH)");
       await expect(page.locator("#pending-lockout-ack-wrap")).not.toHaveClass(/is-hidden/);
       expect(applied, "apply must not reach the host before acknowledgement").toBe(false);
 
       await page.locator("#pending-lockout-ack").check();
-      await page.locator("#pending-apply").click();
+      await page.locator("#apply-bar-apply").click();
       await expect.poll(() => applied).toBe(true);
     });
   }
@@ -300,17 +307,17 @@ test.describe("inbound rule lockout risk", () => {
 });
 
 /*
- * Overview's Apply posts to the same /reload endpoint as the one on Pending
- * changes, so it needs the same gate. It used to have none — and the maintenance-mode copy right
- * next to it tells the operator to press it, while maintenance mode is itself one
- * of the lockout risks.
+ * The bar's Apply and the one on Pending are two buttons on one /reload endpoint,
+ * so both need the gate, on any page. Overview matters most: the maintenance-mode
+ * copy there tells the operator to Apply, and maintenance mode is itself a lockout risk.
  */
-test.describe("Overview Apply", () => {
+test.describe("Apply away from Pending changes", () => {
   test.beforeEach(async ({ page }) => {
     await seed(page, { scheme: "light" });
+    await stubPending(page, true);
   });
 
-  test("a lockout risk requires confirmation before applying", async ({ page }) => {
+  test("a lockout risk requires acknowledgement before applying", async ({ page }) => {
     await stubValidate(page, RISKY);
     await gotoRoute(page, origin, "overview");
 
@@ -320,22 +327,19 @@ test.describe("Overview Apply", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#btn-apply").click();
-    const dialog = page.locator("#confirm-modal");
-    await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText(/lock you out/i);
-    await expect(dialog).toContainText("source allowlist");
-    expect(applied, "apply must wait for confirmation").toBe(false);
+    await page.locator("#apply-bar-apply").click();
+    const result = page.locator("#apply-region");
+    await expect(result).toContainText(/lock you out/i);
+    await expect(result).toContainText("source allowlist");
+    await expect(page.locator("#pending-lockout-ack")).toBeFocused();
+    expect(applied, "apply must wait for acknowledgement").toBe(false);
 
-    await page.locator("#confirm-modal-cancel").click();
-    expect(applied).toBe(false);
-
-    await page.locator("#btn-apply").click();
-    await page.locator("#confirm-modal-ok").click();
+    await page.locator("#pending-lockout-ack").check();
+    await page.locator("#apply-bar-apply").click();
     await expect.poll(() => applied).toBe(true);
   });
 
-  test("a config change while the dialog is open revokes the confirmation", async ({ page }) => {
+  test("a config change after the tick revokes the acknowledgement", async ({ page }) => {
     await stubValidate(page, RISKY);
     await gotoRoute(page, origin, "overview");
 
@@ -345,11 +349,11 @@ test.describe("Overview Apply", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#btn-apply").click();
-    await expect(page.locator("#confirm-modal")).toBeVisible();
+    await page.locator("#apply-bar-apply").click();
+    await page.locator("#pending-lockout-ack").check();
 
     // Someone else saved a config carrying a different risk while the operator
-    // was reading the dialog.
+    // was reading the warnings.
     await stubValidate(page, {
       ok: true,
       warnings: [{ code: "lockout_risk_geo", message: "Geoblocking may block your address." }],
@@ -357,8 +361,9 @@ test.describe("Overview Apply", () => {
       ip_detection_source: "direct",
     });
 
-    await page.locator("#confirm-modal-ok").click();
-    await expect(page.locator("#overview-action-msg")).toContainText(/config changed since you confirmed/i);
+    await page.locator("#apply-bar-apply").click();
+    await expect(page.locator("#pending-validate-warnings")).toContainText("Geoblocking");
+    await expect(page.locator("#pending-lockout-ack")).not.toBeChecked();
     expect(applied).toBe(false);
   });
 
@@ -372,9 +377,9 @@ test.describe("Overview Apply", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#btn-apply").click();
+    await page.locator("#apply-bar-apply").click();
     await expect.poll(() => applied).toBe(true);
-    await expect(page.locator("#confirm-modal")).toBeHidden();
+    await expect(page.locator("#pending-lockout-ack-wrap")).toHaveClass(/is-hidden/);
   });
 
   test("a failed check blocks the apply", async ({ page }) => {
@@ -387,8 +392,50 @@ test.describe("Overview Apply", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#btn-apply").click();
-    await expect(page.locator("#overview-action-msg")).toContainText(/Config check failed/i);
+    await page.locator("#apply-bar-apply").click();
+    await expect(page.locator("#apply-msg")).toContainText(/Config check failed/i);
+    expect(applied).toBe(false);
+  });
+});
+
+/* With nothing waiting there is no bar, and Pending's own Apply takes its place. */
+test.describe("re-applying with nothing pending", () => {
+  test.beforeEach(async ({ page }) => {
+    await seed(page, { scheme: "light" });
+    await stubPending(page, false);
+  });
+
+  test("a lockout risk blocks it until acknowledged", async ({ page }) => {
+    await stubValidate(page, RISKY);
+    await gotoRoute(page, origin, "pending");
+
+    let applied = false;
+    await page.route("**/api/v1/reload", (route) => {
+      applied = true;
+      return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    await page.locator("#pending-apply").click();
+    await expect(page.locator("#apply-msg")).toContainText(/may lock you out/i);
+    expect(applied).toBe(false);
+
+    await page.locator("#pending-lockout-ack").check();
+    await page.locator("#pending-apply").click();
+    await expect.poll(() => applied).toBe(true);
+  });
+
+  test("a failed check blocks it", async ({ page }) => {
+    await stubValidate(page, BROKEN);
+    await gotoRoute(page, origin, "pending");
+
+    let applied = false;
+    await page.route("**/api/v1/reload", (route) => {
+      applied = true;
+      return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    });
+
+    await page.locator("#pending-apply").click();
+    await expect(page.locator("#pending-validate-panel")).toHaveClass(/evu-alert--danger/);
     expect(applied).toBe(false);
   });
 });

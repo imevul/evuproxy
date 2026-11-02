@@ -164,6 +164,47 @@ func TestHandleReload_busyIs503(t *testing.T) {
 	}
 }
 
+func TestHandleReloadProgress_namesEachStageThenClears(t *testing.T) {
+	var seen []string
+	var ts *httptest.Server
+	stepNow := func() string {
+		resp := doAuthed(t, http.MethodGet, ts.URL+"/api/v1/reload/progress", "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("progress status %d", resp.StatusCode)
+		}
+		step, _ := decodeJSONMap(t, resp)["step"].(string)
+		return step
+	}
+	run := stubRunner{handler: func(name string, args []string) ([]byte, error) {
+		if name == "nft" && len(args) > 0 && args[0] == "-j" {
+			return nil, fmt.Errorf("no such set")
+		}
+		// Asked while the reload is running, from inside the commands it runs.
+		if name == "nft" && len(args) > 0 && args[0] == "-c" {
+			seen = append(seen, stepNow())
+		}
+		if name == "wg-quick" {
+			seen = append(seen, stepNow())
+		}
+		return nil, nil
+	}}
+	ts, _ = newMutationTestServer(t, run)
+
+	if step := stepNow(); step != "" {
+		t.Fatalf("step before any reload %q", step)
+	}
+	resp := doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if len(seen) < 2 || seen[0] != apply.ReloadStepFirewall || seen[len(seen)-1] != apply.ReloadStepWireGuard {
+		t.Fatalf("steps seen %v", seen)
+	}
+	if step := stepNow(); step != "" {
+		t.Fatalf("step after reload %q", step)
+	}
+}
+
 func TestHandleUpdateGeo_disabledIs500(t *testing.T) {
 	ts, _ := newMutationTestServer(t, stubRunner{})
 
