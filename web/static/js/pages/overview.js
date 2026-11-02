@@ -1,5 +1,6 @@
 import { state } from "../core/state.js";
-import { $, escapeHtml, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
+import { $, escapeHtml, setApiNotConnected, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
+import { eventLabel, timeHtml } from "../core/format.js";
 import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
 import { showToast } from "../core/toast.js";
@@ -112,11 +113,11 @@ export async function refreshOverviewEventsList() {
     ul.innerHTML = evs
       .map(
         (e) =>
-          "<li><span class=\"overview-ev-ts\">" +
-          escapeHtml(e.ts || "") +
-          "</span> <strong>" +
-          escapeHtml(e.event || "") +
-          "</strong>" +
+          "<li><strong>" +
+          escapeHtml(eventLabel(e.event)) +
+          "</strong> · <span class=\"overview-ev-ts\">" +
+          timeHtml(e.ts) +
+          "</span>" +
           (e.detail ? " — " + escapeHtml(e.detail) : "") +
           (e.error_code ? " <code class=\"inline\">" + escapeHtml(e.error_code) + "</code>" : "") +
           "</li>"
@@ -151,29 +152,6 @@ function overviewApiIssueCard(opts) {
     wrap.appendChild(d);
   }
   return wrap;
-}
-
-function formatGeoAge(isoUtc) {
-  const d = Date.parse(isoUtc);
-  if (isNaN(d)) return "";
-  const days = Math.floor((Date.now() - d) / (24 * 60 * 60 * 1000));
-  if (days <= 0) return "today";
-  if (days === 1) return "1 day ago";
-  return days + " days ago";
-}
-
-/** Split RFC3339 / ISO UTC instant for stacked overview labels (avoids wrapping mid-clock). */
-function geoSuccessUtcParts(iso) {
-  const d = Date.parse(iso);
-  if (isNaN(d)) return null;
-  const t = new Date(d);
-  function pad(x) {
-    return String(x).padStart(2, "0");
-  }
-  return {
-    date: t.getUTCFullYear() + "-" + pad(t.getUTCMonth() + 1) + "-" + pad(t.getUTCDate()),
-    clock: pad(t.getUTCHours()) + ":" + pad(t.getUTCMinutes()) + ":" + pad(t.getUTCSeconds()) + " UTC",
-  };
 }
 
 function pingSeriesFromDashboard(met) {
@@ -623,7 +601,6 @@ function overviewHostGeoCard(o) {
 
     const d = Date.parse(iso);
     const stale = !isNaN(d) && Date.now() - d > GEO_STALE_MS;
-    const age = formatGeoAge(iso);
     const src = String((geo && geo.geo_last_success_source) || "").trim();
 
     const tag = document.createElement("span");
@@ -634,7 +611,7 @@ function overviewHostGeoCard(o) {
 
     const ageLine = document.createElement("span");
     ageLine.className = "overview-geo-fresh-age";
-    ageLine.textContent = age ? "Loaded " + age : "Loaded";
+    ageLine.innerHTML = "Loaded " + timeHtml(iso);
 
     const head = document.createElement("div");
     head.className = "overview-geo-fresh-head";
@@ -649,24 +626,6 @@ function overviewHostGeoCard(o) {
       srcSpan.textContent = "Source: " + src;
       meta.appendChild(srcSpan);
     }
-
-    const tsWrap = document.createElement("div");
-    tsWrap.className = "overview-geo-fresh-ts";
-    tsWrap.setAttribute("title", iso);
-    const utcParts = geoSuccessUtcParts(iso);
-    if (utcParts) {
-      const ds = document.createElement("span");
-      ds.className = "overview-geo-fresh-ts-date";
-      ds.textContent = utcParts.date;
-      const cs = document.createElement("span");
-      cs.className = "overview-geo-fresh-ts-clock";
-      cs.textContent = utcParts.clock;
-      tsWrap.appendChild(ds);
-      tsWrap.appendChild(cs);
-    } else {
-      tsWrap.textContent = iso;
-    }
-    meta.appendChild(tsWrap);
 
     root.appendChild(head);
     root.appendChild(meta);
@@ -721,8 +680,12 @@ function overviewHostGeoCard(o) {
   return wrap;
 }
 
-function overviewApplySummaryLine(evs) {
-  let line = "No recent reload or geo events in the last fetch.";
+/** The newest apply-related event as "Applied config · 2h ago", with any detail below it. */
+function appendApplySummary(root, evs) {
+  const line = document.createElement("p");
+  line.className = "meta";
+  line.textContent = "No recent reload or geo events in the last fetch.";
+  root.appendChild(line);
   const list = evs || [];
   for (const e of list) {
     const ev = (e && e.event) || "";
@@ -734,11 +697,16 @@ function overviewApplySummaryLine(evs) {
       ev === "backup_ok" ||
       ev === "restore_ok"
     ) {
-      line = (e.ts || "") + " — " + ev + (e.detail ? " — " + e.detail : "");
+      line.innerHTML = escapeHtml(eventLabel(ev)) + " · " + timeHtml(e.ts);
+      if (e.detail) {
+        const detail = document.createElement("p");
+        detail.className = "meta";
+        detail.textContent = e.detail;
+        root.appendChild(detail);
+      }
       break;
     }
   }
-  return line;
 }
 
 /** Theme panel used for the two groups nested inside the activity card. */
@@ -766,10 +734,7 @@ function overviewActivityAttentionCard(evs, items) {
   inner.className = "overview-activity-merge-inner";
 
   const left = activityPane("Last apply activity");
-  const p1 = document.createElement("p");
-  p1.className = "meta";
-  p1.textContent = overviewApplySummaryLine(evs);
-  left.body.appendChild(p1);
+  appendApplySummary(left.body, evs);
 
   const right = activityPane(items.length ? "Needs attention" : "Status");
   if (!items.length) {
@@ -791,6 +756,58 @@ function overviewActivityAttentionCard(evs, items) {
   inner.appendChild(left.root);
   inner.appendChild(right.root);
   wrap.appendChild(inner);
+  return wrap;
+}
+
+const FIRST_RUN_KEY = "evuproxy_first_run";
+
+/**
+ * Setup checklist. It appears while there are no peers and stays through the
+ * route and apply steps, until a peer exists and nothing is left to apply. An
+ * established host that later gains a pending edit never sees it.
+ */
+function firstRunChecklistCard(cfg, pending) {
+  const peers = (cfg.peers || []).length;
+  const routes = ((cfg.forwarding && cfg.forwarding.routes) || []).length;
+  if (!peers) localStorage.setItem(FIRST_RUN_KEY, "1");
+  else if (pending && !pending.pending) localStorage.removeItem(FIRST_RUN_KEY);
+  if (!localStorage.getItem(FIRST_RUN_KEY)) return null;
+
+  const endpoint = String((state.lastUIPrefs && state.lastUIPrefs.wireguard_server_endpoint) || "").trim();
+  const steps = [
+    { title: "Set the server endpoint", hint: "The public host:port that clients connect to.", href: "#/settings", done: !!endpoint },
+    { title: "Add a peer", hint: "A machine on the tunnel that will receive traffic.", href: "#/peers", done: peers > 0 },
+    { title: "Add a route", hint: "Forward a public port to that peer.", href: "#/routes", done: routes > 0 },
+    { title: "Apply", hint: "Saved changes reach the host only when you apply them.", href: "#/pending", done: false },
+  ];
+
+  const wrap = document.createElement("div");
+  wrap.className = "evu-card card overview-dash-card overview-first-run";
+  const h = document.createElement("h3");
+  h.textContent = "Get started";
+  wrap.appendChild(h);
+  const ol = document.createElement("ol");
+  ol.className = "first-run-steps";
+  for (const step of steps) {
+    const li = document.createElement("li");
+    li.className = step.done ? "first-run-step is-done" : "first-run-step";
+    const a = document.createElement("a");
+    a.href = step.href;
+    a.textContent = step.title;
+    li.appendChild(a);
+    if (step.done) {
+      const sr = document.createElement("span");
+      sr.className = "evu-sr-only";
+      sr.textContent = " (done)";
+      li.appendChild(sr);
+    }
+    const hint = document.createElement("p");
+    hint.className = "meta";
+    hint.textContent = step.hint;
+    li.appendChild(hint);
+    ol.appendChild(li);
+  }
+  wrap.appendChild(ol);
   return wrap;
 }
 
@@ -879,11 +896,11 @@ export async function refreshOverviewPage() {
     if (seq !== state.overviewRefreshSeq) return;
     state.apiConnectionOk = false;
     applyNavRestriction();
-    setApiStatus(false, "No API token");
+    setApiNotConnected();
     grid.innerHTML = "";
     grid.appendChild(
       overviewApiIssueCard({
-        message: "There is a problem with the API: no token is configured in this browser.",
+        message: "Not connected: this browser has no API token yet.",
       })
     );
     if (actionsCard) actionsCard.hidden = true;
@@ -898,12 +915,13 @@ export async function refreshOverviewPage() {
     } catch (e) {
       /* keep state.lastUIPrefs; overview still useful */
     }
-    const [o, met, cfg, st, evPack] = await Promise.all([
+    const [o, met, cfg, st, evPack, pending] = await Promise.all([
       api("/v1/overview"),
       api("/v1/metrics/peers").catch(() => null),
       api("/v1/config").catch(() => null),
       api("/v1/stats").catch(() => null),
       api("/v1/events?limit=40").catch(() => ({ events: [] })),
+      api("/v1/pending").catch(() => null),
     ]);
     const evs = (evPack && evPack.events) || [];
     if (seq !== state.overviewRefreshSeq) return;
@@ -916,6 +934,8 @@ export async function refreshOverviewPage() {
     setApiStatus(true);
     if (actionsCard) actionsCard.hidden = false;
     grid.innerHTML = "";
+    const checklist = cfg && firstRunChecklistCard(cfg, pending);
+    if (checklist) grid.appendChild(checklist);
     grid.appendChild(overviewActivityAttentionCard(evs, buildOverviewAttentionItems(cfg, o, st, met)));
     grid.appendChild(overviewHostGeoCard(o));
     grid.appendChild(overviewLatencyOverviewCard(met));

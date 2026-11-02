@@ -29,6 +29,12 @@ chips do — they land between 2.7:1 and 4.1:1 in light mode. The app defines
 overrides the label colour rather than editing the vendored file. If upstream
 ever ships text-safe status tokens, drop the app tokens in favour of those.
 
+### Danger button contrast in dark mode (worked around in app CSS, not patched here)
+
+White on the dark `--destructive` is 4.04:1, under the 4.5:1 that `.evu-btn--danger`
+text needs. The app darkens the fill with `--evuproxy-danger-fill` in
+[`../style/tokens.css`](../style/tokens.css). Drop it if upstream fixes the token.
+
 ## Sync notes (f3739a5)
 
 - New `--control-border` / `--evu-control-border` token, and motion tokens (`--evu-ease-out`, `--evu-duration-press`, `--evu-duration-fast`, `--evu-duration-enter`).

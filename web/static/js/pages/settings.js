@@ -499,7 +499,7 @@ export function initSettingsPage() {
         title: "Restore from backup?",
         message:
           "This replaces files under /etc/evuproxy from the archive. Reload the host if needed. Path: " + path,
-        confirmLabel: "Restore",
+        confirmLabel: "Replace host files",
         onConfirm: async () => {
           closeConfirmModal();
           if (msg) {

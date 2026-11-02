@@ -13,9 +13,16 @@ function setAuthMsg(text, isErr) {
   el.classList.toggle("err", !!isErr);
 }
 
+function setNotConnectedNotice(visible) {
+  const el = $("token-not-connected");
+  if (el) el.classList.toggle("is-hidden", !visible);
+}
+
 export function refreshTokenPage() {
   const el = $("token");
-  if (el) el.value = sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey) || "";
+  const saved = sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey) || "";
+  if (el) el.value = saved;
+  setNotConnectedNotice(!saved);
   const ab = $("api-base");
   if (ab) {
     const saved = sessionStorage.getItem(apiBaseKey) || localStorage.getItem(apiBaseKey);
@@ -35,6 +42,7 @@ export function initTokenPage() {
   }
 
   $("token-connect").addEventListener("click", async () => {
+    const wasConnected = state.apiConnectionOk;
     const t = $("token").value.trim();
     if (!t) {
       setAuthMsg("Enter an API token to connect.", true);
@@ -70,6 +78,10 @@ export function initTokenPage() {
       setAuthMsg("Could not connect: " + String(e.message || e), true);
     }
     applyNavRestriction();
+    setNotConnectedNotice(false);
+    const connected = state.apiConnectionOk;
     void refreshOverviewPage();
+    // First connection: the setup checklist on Overview is the next step.
+    if (connected && !wasConnected) location.hash = "#/overview";
   });
 }

@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { $ } from "./dom.js";
+import { $, lastInputWasKeyboard } from "./dom.js";
 import { createFormTracker } from "./dirty.js";
 
 /*
@@ -181,6 +181,7 @@ function focusModalPanel(modal) {
 export function openModal(modal) {
   if (!modal) return;
   const alreadyOpen = openModalStack.some((e) => e.modal === modal);
+  modal.classList.toggle("modal--instant", lastInputWasKeyboard());
   modal.classList.remove("is-hidden");
   if (alreadyOpen) return;
   const form = modalForms.get(modal);
@@ -201,6 +202,7 @@ export function openModal(modal) {
 /** Hide a modal and restore focus to the element focused before it opened. */
 export function closeModal(modal) {
   if (!modal) return;
+  modal.classList.toggle("modal--instant", lastInputWasKeyboard());
   modal.classList.add("is-hidden");
   // The baseline can hold key material (the peer editor), so do not keep it.
   const form = modalForms.get(modal);

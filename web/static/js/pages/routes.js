@@ -6,7 +6,8 @@ import {
   tableDisabledToggleCell,
   monoIpCopyCellHtml,
   bindTunnelIpCopyButtons,
-  applyPeersRoutesTableFilter,
+  applyTableFilter,
+  fadeOutRow,
   writeRateLimitFields,
   readRateLimitFromForm,
   setEditorMsg,
@@ -264,7 +265,7 @@ function renderRoutesTable(cfg) {
       await patchRouteDisabled(idx, !inp.checked);
     });
   });
-  applyPeersRoutesTableFilter();
+  applyTableFilter("routes-table-wrap");
 }
 
 /** JSON of the route open in the editor, to detect it changing elsewhere before Save. */
@@ -541,28 +542,32 @@ async function removeRoute(index) {
   const route = cfg.forwarding.routes[index];
   const identity = routeIdentity(route);
   const openIndex = index;
-  const ports = (route.ports || []).join(", ") || "—";
-  const proto = routeProtoPlainText(route.proto);
-  const target = String(route.target_ip || "—");
+  const portList = route.ports || [];
+  const ports = portList.join(", ") || "—";
+  const proto = routeProtoPlainText(route.proto).toUpperCase();
+  const targetHost = String(route.target_ip || "").trim();
+  const target = peerNameForTargetHost(cfg, targetHost) || targetHost || "its target";
   openConfirmModal({
     title: "Remove route?",
     message:
-      "Remove " +
       proto +
-      " " +
+      (portList.length > 1 ? " ports " : " port ") +
       ports +
-      " → " +
+      " will stop forwarding to " +
       target +
-      " from the saved config? The host is not updated until you apply on Pending changes.",
-    confirmLabel: "Remove",
+      ". The host is not updated until you apply on Pending changes.",
+    confirmLabel: "Remove route",
     onConfirm: async () => {
       try {
+        const removeBtn = document.querySelector(`#routes-table-wrap [data-route-del="${openIndex}"]`);
+        const row = removeBtn && removeBtn.closest("tr");
         // Re-resolve in the edit: the list may have changed while the dialog was open, or since this tab loaded.
         const c = await saveConfigEdit((draft) => {
           const routes = draft.forwarding && draft.forwarding.routes;
           const i = findConfigRow(routes, openIndex, identity, routeIdentity, "route");
           routes.splice(i, 1);
         });
+        await fadeOutRow(row);
         setRoutesMsg("");
         renderRoutesTable(c);
         setApiStatus(true);

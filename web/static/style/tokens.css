@@ -44,4 +44,7 @@
   --evuproxy-warning-text: var(--evu-warning);
   --evuproxy-danger-text: hsl(0 72% 60%);
   --evuproxy-secondary-text: var(--evu-secondary);
+
+  /* The opposite nudge for the fill: white on the theme's dark destructive is 4.04:1. */
+  --evuproxy-danger-fill: hsl(0 72% 48%);
 }

@@ -3,6 +3,7 @@ import { $, escapeHtml, setApiStatus, clientIPSourceLabel } from "../core/dom.js
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
+import { setTitlePendingCount } from "../core/title.js";
 import { openConfirmModal } from "../core/modal.js";
 import { fetchValidateResult, lockoutRisks, lockoutSignature } from "../core/lockout.js";
 
@@ -517,6 +518,24 @@ function renderPendingDiffPanel() {
   }
 }
 
+/**
+ * How many separate places the ruleset changes in, for the tab title. The API
+ * only says whether anything is pending, so this is an estimate. A pending edit
+ * that leaves the ruleset alone (a note, say) still counts as one.
+ */
+function pendingChangeCount(p) {
+  const ops = computeLineDiff(splitLines(String(p.nftables_baseline ?? "")), splitLines(String(p.nftables ?? "")));
+  if (!ops) return 1;
+  let count = 0;
+  let inChange = false;
+  for (const op of ops) {
+    const changed = op.type !== "equal";
+    if (changed && !inChange) count++;
+    inChange = changed;
+  }
+  return Math.max(count, 1);
+}
+
 export async function refreshPendingBadge() {
   const dot = $("nav-pending-dot");
   if (!dot) return;
@@ -531,8 +550,10 @@ export async function refreshPendingBadge() {
   try {
     const p = await api("/v1/pending");
     setPending(!!p.pending);
+    setTitlePendingCount(p.pending ? pendingChangeCount(p) : 0);
   } catch {
     setPending(false);
+    setTitlePendingCount(0);
   }
 }
 
@@ -665,7 +686,7 @@ export function initPendingPage() {
         title: "Discard pending?",
         message:
           "Replace the saved config.yaml with config.yaml.bak (the last applied snapshot). Unsaved edits that differ from that snapshot are lost. The host is not updated until you apply or reload.",
-        confirmLabel: "Discard pending",
+        confirmLabel: "Discard changes",
         onConfirm: async () => {
           setPendingMsg("…");
           try {
@@ -690,7 +711,7 @@ export function initPendingPage() {
         title: "Restore previous applied?",
         message:
           "Replace config.yaml with the first older snapshot in config.yaml.bak.1 … .bak.5 that differs from config.yaml.bak. Any current config.yaml content is overwritten (including edits not yet applied to the host). The host is not updated until you apply or reload.",
-        confirmLabel: "Restore",
+        confirmLabel: "Restore previous config",
         onConfirm: async () => {
           setPendingMsg("…");
           try {
