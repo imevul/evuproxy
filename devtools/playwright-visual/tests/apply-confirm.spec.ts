@@ -79,7 +79,7 @@ test("Apply asks for confirmation and counts down, with focus on Keep", async ({
   await expect(page.locator("#apply-session-keep")).toBeFocused();
   await expect(page.locator("#apply-session-status")).toContainText("Keep these changes?");
   await expect(page.locator("#apply-session-check")).toContainText("Keep opens a new connection");
-  await expect(page.locator("#apply-session-check")).toContainText("SSH tunnel or a proxy");
+  await expect(page.locator("#apply-session-check")).toContainText("SSH tunnel or a proxy on this host");
   await expect(page.locator("#apply-session-keep")).toHaveAttribute("aria-describedby", "apply-session-check");
   expect(JSON.parse(host.reloadBodies[0])).toEqual({ confirm_timeout_seconds: 60 });
 });
@@ -254,6 +254,80 @@ test("a Keep that gets no answer says so, stops waiting and keeps the countdown"
   // The hung re-read must not replace the message with the milder one when it gives up too.
   await page.waitForTimeout(16000);
   await expect(note).toContainText("No answer from the host over a new connection");
+});
+
+test("a Retry revert that gets no answer doesn't promise a timer", async ({ page }) => {
+  test.setTimeout(60000);
+  await stubHost(page, CLEAN, {
+    session: { ...activeSession(0), phase: "failed", failure: "nft load: exit 1" },
+  });
+  await gotoRoute(page, origin, "overview");
+  await expect(page.locator("#apply-session-revert")).toHaveText("Retry revert");
+  await page.route("**/api/v1/apply/revert", () => {});
+  await page.locator("#apply-session-revert").click();
+  const note = page.locator("#apply-session-note");
+  await expect(note).toContainText("No answer from the host over a new connection", { timeout: 20000 });
+  await expect(note).toContainText("no timer left");
+  await expect(note).not.toContainText("reverts by itself");
+});
+
+test("a Keep's no-answer note goes when the host reverts", async ({ page }) => {
+  test.setTimeout(60000);
+  const host = await stubHost(page, CLEAN, { session: activeSession(45) });
+  await gotoRoute(page, origin, "overview");
+  await page.route("**/api/v1/apply/confirm", () => {});
+  await page.locator("#apply-session-keep").click();
+  const note = page.locator("#apply-session-note");
+  await expect(note).toContainText("No answer from the host", { timeout: 20000 });
+  host.status.session = null;
+  host.status.last_revert = { at: "2026-11-02T08:01:00Z", reason: "timeout", config_available: true };
+  await expect(panel(page)).toContainText("Reverted to the last confirmed config.", { timeout: 8000 });
+  await expect(note).toBeEmpty();
+});
+
+test("a Keep's no-answer note doesn't carry into the next session", async ({ page }) => {
+  test.setTimeout(60000);
+  const host = await stubHost(page, CLEAN, { session: activeSession(45) });
+  await gotoRoute(page, origin, "overview");
+  await page.route("**/api/v1/apply/confirm", () => {});
+  await page.locator("#apply-session-keep").click();
+  const note = page.locator("#apply-session-note");
+  await expect(note).toContainText("No answer from the host", { timeout: 20000 });
+  // Only the deadline tells this session from the last one.
+  host.status.session = activeSession(30);
+  await expect(note).toBeEmpty({ timeout: 8000 });
+  await expect(panel(page)).toContainText("Keep these changes?");
+});
+
+test("a Keep the host accepted is reported as kept, even if the re-read gets no answer", async ({ page }) => {
+  test.setTimeout(60000);
+  const host = await stubHost(page, CLEAN, { session: activeSession(45) });
+  await gotoRoute(page, origin, "overview");
+  await expect(panel(page)).toContainText("Keep these changes?");
+  await page.route("**/api/v1/apply/session", () => {});
+  await page.locator("#apply-session-keep").click();
+  await expect(page.getByText("Changes kept")).toBeVisible();
+  await expect(panel(page)).toBeHidden({ timeout: 20000 });
+  await expect(page.locator("#apply-session-note")).toBeEmpty();
+  expect(host.posts).toEqual(["confirm"]);
+});
+
+test("a Revert slower than the limit shows as reverting, not as a lost connection", async ({ page }) => {
+  test.setTimeout(60000);
+  const host = await stubHost(page, CLEAN, { session: activeSession(45) });
+  await gotoRoute(page, origin, "overview");
+  await expect(panel(page)).toContainText("Keep these changes?");
+  await page.route("**/api/v1/apply/revert", () => {
+    host.status.session = { ...host.status.session, phase: "rolling_back" };
+  });
+  await page.locator("#apply-session-revert").click();
+  await expect(panel(page)).toContainText("Reverting to the last confirmed config…", { timeout: 20000 });
+  const note = page.locator("#apply-session-note");
+  await expect(note).toBeEmpty();
+  host.status.session = null;
+  host.status.last_revert = { at: "2026-11-02T08:01:00Z", reason: "manual", config_available: true };
+  await expect(panel(page)).toContainText("Reverted to the last confirmed config.", { timeout: 8000 });
+  await expect(note).toBeEmpty();
 });
 
 test("polling that gets no answer gives up and says the host reverts by itself", async ({ page }) => {

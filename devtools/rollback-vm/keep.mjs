@@ -60,5 +60,6 @@ if (!result.kept) {
 }
 await until("finish");
 result.afterRevert = (await page.locator("#apply-session-title").textContent()) || "";
+result.afterRevertNote = (await note.textContent()) || "";
 save();
 await browser.close();

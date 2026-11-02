@@ -19,10 +19,12 @@ const TICK_MS = 250;
  * nginx closes every connection after one response, so each request here opens a new one,
  * and a firewall that blocks new connections drops it without an answer. Without a limit
  * the browser keeps retrying for minutes, and those retries get through once the firewall
- * has reverted, so a late Keep could land after the session it was meant for.
+ * has reverted, so a late Keep could land after the session it was meant for. A slow
+ * revert can pass the limit too and carries on regardless: the session read still answers
+ * during one, so the re-read after the limit shows it reverting.
  */
 const REQUEST_TIMEOUT_MS = 15000;
-const NO_ANSWER = "No answer from the host over a new connection. If this change locked you out, the host reverts by itself when the time runs out.";
+const NO_ANSWER = "No answer from the host over a new connection.";
 /** Screen readers hear the start and this last warning, not every second. */
 const WARN_AT_SECONDS = 10;
 
@@ -49,6 +51,20 @@ function setNote(text, isErr) {
   const note = $("apply-session-note");
   note.textContent = text;
   note.classList.toggle("err", !!isErr);
+}
+
+/** What a button's error is about: it goes when this changes. */
+function noteSubject(s) {
+  if (s && s.session) return s.session.phase + s.session.deadline;
+  return (s && s.last_revert && s.last_revert.at) || "";
+}
+
+/** Only an active session has a timer: a failed revert stopped it, and nothing else is coming. */
+function noAnswerNote() {
+  const phase = status && status.session && status.session.phase;
+  if (phase === "active") return NO_ANSWER + " If this change locked you out, the host reverts by itself when the time runs out.";
+  if (phase === "failed") return NO_ANSWER + " The host has no timer left to revert this, so fix it on the host.";
+  return NO_ANSWER;
 }
 
 function moveFocusOutOf(panel) {
@@ -98,7 +114,7 @@ function render() {
   $("apply-session-restore").hidden = !!session || !revert.config_available;
   $("apply-session-dismiss").hidden = !!session;
   const noteIsErr = $("apply-session-note").classList.contains("err");
-  // A button's error stays: it says what didn't happen, which this note doesn't.
+  // A button's error stays until its session moves on: it says what didn't happen, which this note doesn't.
   if (!busy && active && unreachable && !noteIsErr) {
     setNote("The API isn't answering. If this change locked you out, the host reverts by itself when the time runs out.");
   } else if (!busy && !noteIsErr) {
@@ -121,6 +137,7 @@ function adopt(next) {
   const session = next && next.session;
   const hadSession = lastSeenSession;
   const isNew = !!session && session.phase === "active" && (!status || !status.session || status.session.deadline !== session.deadline);
+  if (!busy && noteSubject(status) !== noteSubject(next)) setNote("");
   status = next;
   unreachable = false;
   if (session) {
@@ -201,21 +218,28 @@ async function act(path, done) {
   setNote("…");
   try {
     await api(path, { method: "POST", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-    setNote("");
-    setApiStatus(true);
-    busy = false;
-    done();
-    moveFocusOutOf($("apply-session"));
-    // Settled just below, so the re-read doesn't report it as ending by itself.
-    lastSeenSession = false;
-    adopt(await fetchStatus());
-    await onSettled();
   } catch (e) {
     busy = false;
     // Only an HTTP answer has a status: anything else is a request that got no answer.
-    setNote(e.status ? String(e.message || e) : NO_ANSWER, true);
+    setNote(e.status ? String(e.message || e) : noAnswerNote(), true);
     await poll();
+    return;
   }
+  setNote("");
+  setApiStatus(true);
+  done();
+  moveFocusOutOf($("apply-session"));
+  // Settled just below, so the re-read doesn't report it as ending by itself.
+  lastSeenSession = false;
+  try {
+    adopt(await fetchStatus());
+  } catch {
+    // The host said yes, so this session is over even if the page can't read what's next.
+    // Polling brings back anything left to show, such as the revert.
+    adopt({ ...status, session: null, last_revert: null });
+  }
+  busy = false;
+  await onSettled();
 }
 
 /** @param {{ onSettled: () => Promise<void> }} opts `onSettled` runs when a session ends. */

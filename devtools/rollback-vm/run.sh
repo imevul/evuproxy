@@ -632,6 +632,7 @@ t1=$(now)
 log "SSH was back $((t1 - t0))s after the Apply started"
 finish_panel
 check "the page reports the revert" bash -c "jq -e '.afterRevert | test(\"Reverted to the last confirmed config\")' /vm/browser/shipped.json >/dev/null"
+check "and no longer says the host will revert" test "$(outcome shipped afterRevertNote)" = ""
 check "config.yaml is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
 check "the rejected config was kept" test "$(vm tail -1 /etc/evuproxy/config.yaml.reverted)" = "# locked-out"
 # QEMU's user-mode networking accepts for the guest and may still be holding the request the
