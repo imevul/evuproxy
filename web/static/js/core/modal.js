@@ -1,5 +1,6 @@
 import { state } from "./state.js";
 import { $ } from "./dom.js";
+import { createFormTracker } from "./dirty.js";
 
 /*
  * Shared modal helpers. All modals in index.html use `.modal` + `.is-hidden`
@@ -35,16 +36,75 @@ export function registerModalCloser(modal, close) {
   if (modal && typeof close === "function") modalClosers.set(modal, close);
 }
 
+/*
+ * Dialogs holding edits the operator could lose. Registered closers stay
+ * unguarded because Save uses them too; only `dismissModal` (Escape, backdrop,
+ * Cancel) asks first.
+ */
+const modalForms = new WeakMap();
+
 /**
- * Dismisses the topmost open modal, if any. Returns whether one was closed so
- * callers can decide if the key press was handled.
+ * Marks `modal` as an editor. It is dirty while its controls differ from how
+ * they were when it opened, or while `isDirty` says so for a draft kept outside
+ * the DOM. Returns the tracker, for openers that fill fields in after opening.
+ */
+export function registerModalForm(modal, isDirty) {
+  const form = isDirty
+    ? { mark() {}, clear() {}, isDirty }
+    : createFormTracker(() => modalPanel(modal).querySelectorAll("input, select, textarea"));
+  modalForms.set(modal, form);
+  return form;
+}
+
+function runModalCloser(modal) {
+  const close = modalClosers.get(modal);
+  if (close) close();
+  else closeModal(modal);
+}
+
+function isModalDirty(modal) {
+  const form = modalForms.get(modal);
+  return !!form && form.isDirty();
+}
+
+/** Whether any open dialog, on top or underneath, holds unsaved edits. */
+export function anyOpenModalDirty() {
+  return openModalStack.some((e) => isModalDirty(e.modal));
+}
+
+/** Runs every open dialog's closer, topmost first, without asking. */
+export function closeAllModals() {
+  while (openModalStack.length) {
+    runModalCloser(openModalStack[openModalStack.length - 1].modal);
+  }
+}
+
+/** Asks before edits are thrown away. Opens over whatever is on top of the stack. */
+export function confirmDiscard(onConfirm, onCancel) {
+  openConfirmModal({
+    title: "Discard unsaved changes?",
+    message: "Your edits have not been saved and will be lost.",
+    confirmLabel: "Discard changes",
+    cancelLabel: "Keep editing",
+    onConfirm,
+    onCancel,
+  });
+}
+
+/** Closes `modal` the way the operator asked to: a dirty editor warns first. */
+export function dismissModal(modal) {
+  if (isModalDirty(modal)) confirmDiscard(() => runModalCloser(modal));
+  else runModalCloser(modal);
+}
+
+/**
+ * Dismisses the topmost open modal, if any. Returns whether the key press was
+ * handled, which includes a dirty editor answering with a discard prompt.
  */
 export function closeTopModal() {
   const top = openModalStack[openModalStack.length - 1];
   if (!top) return false;
-  const close = modalClosers.get(top.modal);
-  if (close) close();
-  else closeModal(top.modal);
+  dismissModal(top.modal);
   return true;
 }
 
@@ -123,6 +183,8 @@ export function openModal(modal) {
   const alreadyOpen = openModalStack.some((e) => e.modal === modal);
   modal.classList.remove("is-hidden");
   if (alreadyOpen) return;
+  const form = modalForms.get(modal);
+  if (form) form.mark();
   openModalStack.push({ modal, previouslyFocused: document.activeElement });
   syncBackground();
   /* rAF so open paths that focus a specific field afterwards win (they also use rAF, queued later). */
@@ -140,6 +202,9 @@ export function openModal(modal) {
 export function closeModal(modal) {
   if (!modal) return;
   modal.classList.add("is-hidden");
+  // The baseline can hold key material (the peer editor), so do not keep it.
+  const form = modalForms.get(modal);
+  if (form) form.clear();
   const i = openModalStack.findIndex((e) => e.modal === modal);
   if (i < 0) return;
   const wasTopmost = i === openModalStack.length - 1;
@@ -205,10 +270,11 @@ export function openConfirmModal(opts) {
   titleEl.textContent = opts.title || "Confirm";
   descEl.textContent = opts.message || "";
   okBtn.textContent = opts.confirmLabel || "OK";
+  const cancelBtn = $("confirm-modal-cancel");
+  if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || "Cancel";
   state.confirmModalCallback = opts.onConfirm || null;
   state.confirmModalCancelCallback = opts.onCancel || null;
   openModal(modal);
-  const cancelBtn = $("confirm-modal-cancel");
   if (cancelBtn) requestAnimationFrame(() => cancelBtn.focus());
 }
 

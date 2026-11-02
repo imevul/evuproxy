@@ -1,7 +1,10 @@
 import { $ } from "../core/dom.js";
 import { tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
 import { invalidateUIPrefsCache } from "../core/prefs.js";
+import { createFormTrackerByIds, registerPageForm } from "../core/dirty.js";
 import { refreshOverviewPage } from "./overview.js";
+
+const tokenForm = createFormTrackerByIds(["token", "api-base"]);
 
 function setAuthMsg(text, isErr) {
   const el = $("auth-msg");
@@ -17,10 +20,12 @@ export function refreshTokenPage() {
     const saved = sessionStorage.getItem(apiBaseKey) || localStorage.getItem(apiBaseKey);
     ab.value = saved != null && String(saved).trim() !== "" ? String(saved).trim() : "";
   }
+  tokenForm.mark();
 }
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initTokenPage() {
+  registerPageForm("token", tokenForm);
   const savedTok = localStorage.getItem(tokenKey);
   if (savedTok && $("token")) $("token").value = savedTok;
   const savedApiBase = localStorage.getItem(apiBaseKey);
@@ -48,6 +53,7 @@ export function initTokenPage() {
       }
     }
     invalidateUIPrefsCache();
+    tokenForm.mark();
     setAuthMsg("Saved in browser storage.");
     void refreshOverviewPage();
   });

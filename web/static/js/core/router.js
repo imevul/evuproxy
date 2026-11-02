@@ -4,7 +4,8 @@ import { ensureApiGate, applyNavRestriction, token } from "./api.js";
 import { setGeoEditorTab } from "./advanced.js";
 import { beginLoading } from "./loading.js";
 import { ensureUIPrefs } from "./prefs.js";
-import { closeConfirmModal } from "./modal.js";
+import { anyOpenModalDirty, closeAllModals, closeConfirmModal, confirmDiscard } from "./modal.js";
+import { pageForm } from "./dirty.js";
 import { refreshSidebarAbout } from "./sidebar.js";
 import {
   refreshOverviewPage,
@@ -52,10 +53,37 @@ const pageLoadRegions = {
   logs: ["logs-view"],
 };
 
-/* Bumped by every navigate(), so a slower earlier one stops once it wakes up. */
+/* Bumped by every navigate() past the guard, so a slower earlier one stops once it wakes up. */
 let navSeq = 0;
-/* The hash navigate() just set itself: its hashchange must not load the page a second time. */
+/** The page on screen, once a navigation has got past the unsaved-edits guard. */
+let currentRoute = null;
+/** The hash of `currentRoute`, to put back when the operator stays on the page. */
+let committedHash = "";
+/** A hash `navigate` set itself: its hashchange must not navigate a second time. */
 let selfSetHash = null;
+
+/**
+ * Whether going to `target` would lose edits. With no target (the tab closing),
+ * every open dialog counts. Coming back to the current route keeps its dialogs
+ * open but reloads its page form, so only the form counts then.
+ */
+export function hasUnsavedEdits(target) {
+  const form = pageForm(currentRoute);
+  if (form && form.isDirty()) return true;
+  return target !== currentRoute && anyOpenModalDirty();
+}
+
+function restoreCommittedHash() {
+  if (location.hash === committedHash) return;
+  // replaceState fires no hashchange, so this cannot re-enter navigate.
+  history.replaceState(null, "", location.pathname + location.search + committedHash);
+}
+
+function discardEditsFor(target) {
+  const form = pageForm(currentRoute);
+  if (form) form.clear();
+  if (target !== currentRoute) closeAllModals();
+}
 
 function showPage(name) {
   document.querySelectorAll(".page").forEach((p) => {
@@ -79,10 +107,20 @@ function showPage(name) {
     location.hash = selfSetHash;
   }
   state.hashNavParams = parseHashNavParams();
+  committedHash = location.hash;
 }
 
-export async function navigate(name) {
+/** @param {{ discard?: boolean }} [opts] `discard` once the operator has agreed to lose edits. */
+export async function navigate(name, opts) {
   if (!pages.includes(name)) name = "overview";
+  if (!(opts && opts.discard) && hasUnsavedEdits(name)) {
+    const target = name;
+    confirmDiscard(() => {
+      discardEditsFor(target);
+      return navigate(target, { discard: true });
+    }, restoreCommittedHash);
+    return;
+  }
   const seq = ++navSeq;
   // No token means the gate cannot pass and needs no request to say so.
   if (name !== "overview" && name !== "token" && !token().trim()) name = "overview";
@@ -97,6 +135,13 @@ export async function navigate(name) {
     closePeerEditor();
   }
   stopTopologyPolling();
+  if (name !== currentRoute) {
+    // The form stays filled in while hidden, so it must not read as dirty until
+    // the page has reloaded it on the next visit.
+    const leaving = pageForm(currentRoute);
+    if (leaving) leaving.clear();
+    currentRoute = name;
+  }
   if (name !== "overview") {
     stopOverviewEventsPolling();
     stopOverviewLatencyPolling();
@@ -111,7 +156,7 @@ export async function navigate(name) {
       const ok = await ensureApiGate();
       if (seq !== navSeq) return;
       if (!ok) {
-        void navigate("overview");
+        void navigate("overview", { discard: true });
         return;
       }
     }
@@ -188,10 +233,11 @@ function applyHashPeerRouteHighlight() {
 }
 
 export async function onHash() {
-  if (location.hash === selfSetHash) {
-    selfSetHash = null;
-    return;
-  }
+  const isOwnHash = selfSetHash !== null && location.hash === selfSetHash;
+  selfSetHash = null;
+  // This page is already loading. A second load could land after the operator
+  // starts typing and overwrite their edits.
+  if (isOwnHash) return;
   const raw = (location.hash || "#/overview").replace(/^#/, "");
   const qi = raw.indexOf("?");
   const pathPart = qi >= 0 ? raw.slice(0, qi) : raw;

@@ -85,6 +85,14 @@ export async function ensureApiGate() {
   }
 }
 
+// ETag per parsed response body, so a revision cannot drift from the data it came with.
+const responseEtags = new WeakMap();
+
+/** The ETag sent with a body returned by api(), or "" if there was none. */
+export function responseEtag(body) {
+  return responseEtags.get(body) || "";
+}
+
 export async function api(path, opts = {}) {
   const r = await fetch(getApiBase() + path, {
     ...opts,
@@ -117,6 +125,8 @@ export async function api(path, opts = {}) {
     ex.body = body;
     throw ex;
   }
+  const etag = r.headers.get("ETag");
+  if (etag && body && typeof body === "object") responseEtags.set(body, etag);
   return body;
 }
 

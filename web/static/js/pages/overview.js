@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
+import { saveConfigEdit } from "../core/config_save.js";
 import { fetchUIPrefsFromServer } from "../core/prefs.js";
 import {
   wgPeerPubKeyMap,
@@ -964,13 +965,12 @@ export function initOverviewPage() {
         overviewMaint.checked = false;
         return;
       }
-      const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-      if (!cfg.forwarding) cfg.forwarding = {};
-      cfg.forwarding.maintenance_mode = overviewMaint.checked;
       setOverviewMsg("…");
       try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-        state.lastConfig = cfg;
+        await saveConfigEdit((cfg) => {
+          if (!cfg.forwarding) cfg.forwarding = {};
+          cfg.forwarding.maintenance_mode = overviewMaint.checked;
+        });
         setOverviewMsg(
           overviewMaint.checked
             ? "Maintenance mode saved. Reload to apply."
@@ -978,7 +978,7 @@ export function initOverviewPage() {
         );
         refreshPendingBadge();
       } catch (e) {
-        overviewMaint.checked = !!state.lastConfig.forwarding.maintenance_mode;
+        overviewMaint.checked = !!(state.lastConfig.forwarding && state.lastConfig.forwarding.maintenance_mode);
         setOverviewMsg(String(e.message || e), true);
       }
     });
