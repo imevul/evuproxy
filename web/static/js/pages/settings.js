@@ -2,7 +2,7 @@ import { state, defaultPeerSubnetCidr, contentWidthKey, contentWidthCssValues } 
 import { $, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, getApiBase, headersDownload, responseEtag } from "../core/api.js";
-import { showToast } from "../core/toast.js";
+import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit, putConfigAtRevision, isConfigRevisionMismatch } from "../core/config_save.js";
 import {
   fetchUIPrefsFromServer,
@@ -106,8 +106,13 @@ function adoptUIPrefs(p) {
   };
 }
 
+/** A write is in flight: a second flip would race it, and could land first. */
+let metricsSwitchBusy = false;
+
 /** Instant switch: sends only its own field, so unsaved edits on this page stay unsaved. */
 async function setMetricsCollection(on) {
+  if (metricsSwitchBusy) return;
+  metricsSwitchBusy = true;
   const input = $("settings-metrics-collection");
   const err = $("settings-metrics-collection-msg");
   input.checked = on;
@@ -119,14 +124,16 @@ async function setMetricsCollection(on) {
         body: JSON.stringify({ metrics_collection_enabled: on }),
       })
     );
+    metricsSwitchBusy = false;
     input.checked = state.lastUIPrefs.metrics_collection_enabled;
     setApiStatus(true);
     showToast("Peer ICMP metrics " + (on ? "enabled" : "disabled"), {
       action: { label: "Undo", onClick: () => void setMetricsCollection(!on) },
     });
   } catch (e) {
+    metricsSwitchBusy = false;
     input.checked = !on;
-    err.textContent = String(e.message || e);
+    reportBesideControl(err, String(e.message || e));
   }
 }
 
@@ -139,6 +146,8 @@ async function saveSettingsForm() {
   const prefsDirty = settingsForm.isDirty(SETTINGS_PREF_FIELDS);
   const configDirty = settingsForm.isDirty(SETTINGS_CONFIG_FIELDS);
   const notesDirty = settingsForm.isDirty(SETTINGS_NOTES_FIELDS);
+  // What each store is sent. The form stays editable during the requests, and a later edit is still unsaved.
+  const sent = settingsForm.values();
   if (cidrRaw && !parseIPv4CIDR(cidrRaw)) throw new Error("Invalid IPv4 CIDR (e.g. 10.100.0.0/24).");
   const pubIfValid = validLinuxIfaceName(pubIfRaw);
   if (configDirty && !pubIfValid) {
@@ -157,7 +166,7 @@ async function saveSettingsForm() {
           body: JSON.stringify({ peer_tunnel_subnet_cidr: cidrRaw, wireguard_server_endpoint: epRaw }),
         })
       );
-      settingsForm.mark(SETTINGS_PREF_FIELDS);
+      settingsForm.mark(SETTINGS_PREF_FIELDS, sent);
       saved.push("Preferences");
       void refreshEndpointHostWarning();
     } catch (e) {
@@ -171,7 +180,7 @@ async function saveSettingsForm() {
         cfg.network.public_interface = pubIfValid;
       });
       state.settingsPublicInterfaceLoaded = pubIfValid;
-      settingsForm.mark(SETTINGS_CONFIG_FIELDS);
+      settingsForm.mark(SETTINGS_CONFIG_FIELDS, sent);
       saved.push("Public interface");
       refreshPendingBadge();
     } catch (e) {
@@ -181,7 +190,7 @@ async function saveSettingsForm() {
   if (notesDirty) {
     try {
       await api("/v1/config/notes", { method: "PUT", body: JSON.stringify({ text: body }) });
-      settingsForm.mark(SETTINGS_NOTES_FIELDS);
+      settingsForm.mark(SETTINGS_NOTES_FIELDS, sent);
       saved.push("Notes");
     } catch (e) {
       failed.push("Notes: " + String(e.message || e));
@@ -236,7 +245,7 @@ async function loadSettingsPage() {
   const sep = $("settings-wg-endpoint");
   if (sep) sep.value = (state.lastUIPrefs.wireguard_server_endpoint || "").trim();
   const spl = $("settings-metrics-collection");
-  if (spl) spl.checked = !!state.lastUIPrefs.metrics_collection_enabled;
+  if (spl && !metricsSwitchBusy) spl.checked = !!state.lastUIPrefs.metrics_collection_enabled;
   const pubIfEl = $("settings-public-interface");
   if (pubIfEl) {
     try {
@@ -349,7 +358,10 @@ export function initSettingsPage() {
   });
   const metricsToggle = $("settings-metrics-collection");
   if (metricsToggle) {
-    metricsToggle.addEventListener("change", () => void setMetricsCollection(metricsToggle.checked));
+    metricsToggle.addEventListener("change", () => {
+      if (metricsSwitchBusy) metricsToggle.checked = !metricsToggle.checked;
+      else void setMetricsCollection(metricsToggle.checked);
+    });
   }
   registerModalCloser($("config-upload-modal"), closeConfigUploadModal);
   const settingsTabPrefs = $("settings-tab-prefs-btn");

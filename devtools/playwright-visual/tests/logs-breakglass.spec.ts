@@ -67,6 +67,26 @@ test.describe("logs break-glass affordance", () => {
     expect((await after.json()).geo.break_glass_cidrs).toEqual(["203.0.113.7/32"]);
   });
 
+  test("a failed Undo on a page you left shows an error toast", async ({ page }) => {
+    await gotoRoute(page, origin, "logs");
+    await page.locator('[data-logs-breakglass="198.51.100.2"]').click();
+    const undo = page.locator("#toaster").getByRole("button", { name: "Undo" });
+    await expect(undo).toBeVisible();
+
+    await page.locator('.nav-link[data-route="routes"]').click();
+    await expect(page.locator("#page-routes")).toBeVisible();
+    await page.route("**/api/v1/config", (route) =>
+      route.request().method() === "PUT"
+        ? route.fulfill({ status: 500, contentType: "application/json", body: '{"error":"disk full"}' })
+        : route.fallback()
+    );
+    await undo.click();
+
+    const toast = page.locator("#toaster .evu-toast");
+    await expect(toast).toHaveText(/disk full/);
+    await expect(toast).toHaveAttribute("data-error", "");
+  });
+
   test("a /0 break-glass entry covers every SRC", async ({ page, request }) => {
     const get = await request.get(origin + "/api/v1/config", {
       headers: { Authorization: "Bearer " + token() },

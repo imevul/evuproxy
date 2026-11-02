@@ -2,7 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
-import { showToast } from "../core/toast.js";
+import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
 import { refreshPendingBadge } from "./pending.js";
@@ -464,7 +464,8 @@ async function writeBreakGlass(write) {
     // The add button was in the table that just redrew: keep keyboard users near it.
     if (document.activeElement === document.body) $("main-content").focus();
   } catch (e) {
-    setLogsMsg(String(e.message || e), true);
+    setLogsMsg("", true);
+    reportBesideControl($("logs-msg"), String(e.message || e));
   } finally {
     logsBreakGlassBusy = false;
   }

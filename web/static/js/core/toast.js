@@ -139,6 +139,17 @@ export function showToast(message, { action = null, error = false } = {}) {
   resetTimer();
 }
 
+/**
+ * Puts a failure beside its control, as above, unless the control is out of sight: an
+ * Undo follows the operator across pages and tabs, so its failure can land on one they
+ * have left. Then it is a failure with no such place, and it also goes in an error toast.
+ */
+export function reportBesideControl(el, message) {
+  el.textContent = message;
+  const box = el.getBoundingClientRect();
+  if (box.height === 0 || box.bottom <= 0 || box.top >= window.innerHeight) showToast(message, { error: true });
+}
+
 /** Starts the leave transition. Safe to call with nothing on screen. */
 export function dismissToast() {
   if (!toastEl || toastEl.hasAttribute("data-leaving")) return;

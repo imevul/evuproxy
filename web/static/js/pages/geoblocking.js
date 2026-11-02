@@ -9,7 +9,7 @@ import {
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
-import { showToast } from "../core/toast.js";
+import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit, ConfigMergeError } from "../core/config_save.js";
 import { parseSourceAllowListInput } from "../core/net.js";
 import { setGeoEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
@@ -118,7 +118,9 @@ const geoSwitchesBusy = new Set();
 
 function setGeoSwitchError(sw, text) {
   const el = $(sw.id + "-msg");
-  if (el) el.textContent = text;
+  if (!el) return;
+  if (text) reportBesideControl(el, text);
+  else el.textContent = "";
 }
 
 function syncGeoSwitches(cfg) {
@@ -371,10 +373,15 @@ function renderGeoTags() {
 /** geoFormOwnedJson of the config the form was filled from. */
 let geoFormBase = null;
 
-function geoFormFromConfig(cfg) {
+/** Makes cfg what the form is compared and merged against, leaving the fields alone. */
+function setGeoFormBaseline(cfg) {
   geoFormBase = geoFormOwnedJson(cfg);
   geoFormLoadedJson = JSON.stringify(geoblockingConfigSnapshotForCompare(cfg));
   syncGeoSwitches(cfg);
+}
+
+function geoFormFromConfig(cfg) {
+  setGeoFormBaseline(cfg);
   const g = (cfg && cfg.geo) || {};
   const sn = $("geo-f-set-name");
   const zd = $("geo-f-zone-dir");
@@ -499,6 +506,7 @@ function applyGeoFormTo(cfg) {
 
 /** Save bar action: a throw keeps the bar up with the message. */
 async function saveGeoblocking() {
+  const sentJson = JSON.stringify(geoblockingFormSnapshotForCompare());
   const cfg = await saveConfigEdit((c) => {
     if (geoFormOwnedJson(c) !== geoFormBase) {
       // Accept what is there now as the new base, so a second Save is a deliberate overwrite.
@@ -510,7 +518,10 @@ async function saveGeoblocking() {
     }
     applyGeoFormTo(c);
   });
-  geoFormFromConfig(cfg);
+  // The form stays editable during the save. An edit made since is still unsaved, so it
+  // stays in the fields and reads as dirty against what the server now holds.
+  if (JSON.stringify(geoblockingFormSnapshotForCompare()) === sentJson) geoFormFromConfig(cfg);
+  else setGeoFormBaseline(cfg);
   setGeoMsg("");
   setApiStatus(true);
   refreshPendingBadge();

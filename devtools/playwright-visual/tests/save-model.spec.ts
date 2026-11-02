@@ -65,6 +65,19 @@ function failPut(page: Page, glob: string, message: string) {
   );
 }
 
+/** Holds every PUT to `glob` until the returned function is called. */
+async function holdPuts(page: Page, glob: string) {
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(glob, async (route) => {
+    if (route.request().method() === "PUT") await released;
+    await route.fallback();
+  });
+  return release;
+}
+
 test.describe("save model", () => {
   let cfgSnapshot: unknown;
   let prefsSnapshot: unknown;
@@ -183,6 +196,35 @@ test.describe("save model", () => {
       await expect(page.locator("#geo-f-enabled-msg")).toBeEmpty();
       await expect(page.locator("#geo-f-enabled")).toBeChecked();
     });
+
+    test("a failed Undo on a page you left shows an error toast", async ({ page, request }) => {
+      await gotoRoute(page, origin, "geoblocking");
+      const start = !!(await getJson(request, configUrl)).geo.apply_to_input_allows;
+      await track(page, "geo-f-apply-input-allows").click();
+      await expect(undo(page)).toBeVisible();
+
+      await page.locator('.nav-link[data-route="routes"]').click();
+      await expect(page.locator("#page-routes")).toBeVisible();
+      await failPut(page, "**/api/v1/config", "disk full");
+      await undo(page).click();
+
+      await expect(toast(page)).toHaveText(/disk full/);
+      await expect(toast(page)).toHaveAttribute("data-error", "");
+      expect(!!(await getJson(request, configUrl)).geo.apply_to_input_allows).toBe(!start);
+    });
+
+    test("a failed Undo on the switch's own page stays beside the switch", async ({ page }) => {
+      await gotoRoute(page, origin, "geoblocking");
+      await track(page, "geo-f-apply-input-allows").click();
+      await expect(undo(page)).toBeVisible();
+
+      await failPut(page, "**/api/v1/config", "disk full");
+      await undo(page).click();
+
+      await expect(page.locator("#geo-f-apply-input-allows-msg")).toHaveText(/disk full/);
+      await expect(page.locator("#geo-f-apply-input-allows-msg")).toBeVisible();
+      await expect(toast(page)).toHaveCount(0);
+    });
   });
 
   test.describe("save bar", () => {
@@ -240,6 +282,44 @@ test.describe("save model", () => {
       await expect(bar(page, "geoblocking")).toBeHidden();
       await expect(page.locator(`#page-geoblocking .geo-mode-btn[data-geo-mode="${original}"]`)).toHaveClass(/is-active/);
       expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+    });
+
+    test("an edit made during the save stays in the form, and the bar stays up", async ({ page, request }) => {
+      await gotoRoute(page, origin, "geoblocking");
+      const original = await page.locator("#page-geoblocking .geo-mode-btn.is-active").getAttribute("data-geo-mode");
+      const sent = await flipGeoMode(page);
+      const release = await holdPuts(page, "**/api/v1/config");
+
+      await barSave(page, "geoblocking").click();
+      await page.locator(`#page-geoblocking .geo-mode-btn[data-geo-mode="${original}"]`).click();
+      release();
+
+      await expect(toast(page)).toHaveText(/Geoblocking saved/);
+      expect((await getJson(request, configUrl)).geo.mode).toBe(sent);
+      await expect(page.locator(`#page-geoblocking .geo-mode-btn[data-geo-mode="${original}"]`)).toHaveClass(/is-active/);
+      await expect(bar(page, "geoblocking")).toBeVisible();
+
+      // Leaving still warns, and a second Save writes the later edit and clears the bar.
+      await page.locator('.nav-link[data-route="routes"]').click();
+      await expect(page.locator("#confirm-modal")).not.toHaveClass(/is-hidden/);
+      await page.locator("#confirm-modal-cancel").click();
+      await barSave(page, "geoblocking").click();
+      await expect(bar(page, "geoblocking")).toBeHidden();
+      expect((await getJson(request, configUrl)).geo.mode).toBe(original);
+    });
+
+    test("a form left alone during the save is reloaded from what was saved", async ({ page }) => {
+      await gotoRoute(page, origin, "geoblocking");
+      await page.locator("#geo-tab-advanced-btn").click();
+      const field = page.locator("#geo-f-break-glass");
+      await field.fill("203.0.113.5/32   203.0.113.6/32");
+      const release = await holdPuts(page, "**/api/v1/config");
+
+      await barSave(page, "geoblocking").click();
+      release();
+
+      await expect(field).toHaveValue("203.0.113.5/32, 203.0.113.6/32");
+      await expect(bar(page, "geoblocking")).toBeHidden();
     });
 
     test("covers Geoblock's tabs, but not the read-only Zone files", async ({ page }) => {
@@ -310,6 +390,80 @@ test.describe("save model", () => {
 
       await expect(page.locator("#settings-metrics-collection-msg")).toHaveText(/disk full/);
       expect(await input.isChecked()).toBe(before);
+    });
+
+    test("a second flip during the metrics write is ignored, so the UI and server agree", async ({ page, request }) => {
+      await gotoRoute(page, origin, "settings");
+      const input = page.locator("#settings-metrics-collection");
+      const before = await input.isChecked();
+      const puts = recordPuts(page);
+      const release = await holdPuts(page, "**/api/v1/preferences");
+
+      await track(page, "settings-metrics-collection").click();
+      await track(page, "settings-metrics-collection").click();
+      expect(await input.isChecked()).toBe(!before);
+      release();
+
+      await expect(toast(page)).toHaveText(/Peer ICMP metrics (enabled|disabled)/);
+      expect(puts).toEqual([{ path: "/api/v1/preferences", body: { metrics_collection_enabled: !before } }]);
+      expect(await input.isChecked()).toBe(!before);
+      expect(!!(await getJson(request, prefsUrl)).metrics_collection_enabled).toBe(!before);
+    });
+
+    test("a failed metrics Undo on a page you left shows an error toast", async ({ page }) => {
+      await gotoRoute(page, origin, "settings");
+      await track(page, "settings-metrics-collection").click();
+      await expect(undo(page)).toBeVisible();
+
+      await page.locator('.nav-link[data-route="routes"]').click();
+      await expect(page.locator("#page-routes")).toBeVisible();
+      await failPut(page, "**/api/v1/preferences", "disk full");
+      await undo(page).click();
+
+      await expect(toast(page)).toHaveText(/disk full/);
+      await expect(toast(page)).toHaveAttribute("data-error", "");
+    });
+
+    test("an edit made during the save stays dirty, and a second Save writes it", async ({ page, request }) => {
+      await gotoRoute(page, origin, "settings");
+      await page.locator("#settings-tab-maint-btn").click();
+      const notes = page.locator("#config-notes-body");
+      await notes.fill("first");
+      const release = await holdPuts(page, "**/api/v1/config/notes");
+
+      await barSave(page, "settings").click();
+      await notes.fill("first and second");
+      release();
+
+      await expect(toast(page)).toHaveText(/Settings saved/);
+      expect((await getJson(request, notesUrl)).text).toBe("first");
+      await expect(notes).toHaveValue("first and second");
+      await expect(bar(page, "settings")).toBeVisible();
+
+      // Leaving still warns, and a second Save writes the later edit and clears the bar.
+      await page.locator('.nav-link[data-route="routes"]').click();
+      await expect(page.locator("#confirm-modal")).not.toHaveClass(/is-hidden/);
+      await page.locator("#confirm-modal-cancel").click();
+      await barSave(page, "settings").click();
+      await expect(bar(page, "settings")).toBeHidden();
+      expect((await getJson(request, notesUrl)).text).toBe("first and second");
+    });
+
+    test("an edit in another store during the save stays dirty too", async ({ page, request }) => {
+      await gotoRoute(page, origin, "settings");
+      const iface = page.locator("#settings-public-interface");
+      const endpoint = page.locator("#settings-wg-endpoint");
+      await endpoint.fill("sent.example.com:51820");
+      const release = await holdPuts(page, "**/api/v1/preferences");
+
+      await barSave(page, "settings").click();
+      await iface.fill("eth9");
+      release();
+
+      await expect(toast(page)).toHaveText(/Settings saved/);
+      expect((await getJson(request, prefsUrl)).wireguard_server_endpoint).toBe("sent.example.com:51820");
+      await expect(iface).toHaveValue("eth9");
+      await expect(bar(page, "settings")).toBeVisible();
     });
 
     test("one bar covers Preferences and Notes", async ({ page, request }) => {
