@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/imevul/evuproxy/internal/apply"
@@ -52,7 +51,7 @@ func (s *Server) handleBackupInfo(w http.ResponseWriter, r *http.Request) {
 		s.jsonErr(w, http.StatusBadRequest, "invalid or disallowed backup path")
 		return
 	}
-	info, err := os.Stat(path)
+	info, err := apply.StatBackup(path)
 	if err != nil || !info.Mode().IsRegular() {
 		s.jsonErr(w, http.StatusNotFound, "archive not found")
 		return

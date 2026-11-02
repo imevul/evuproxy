@@ -71,6 +71,11 @@ func sanitizedFSPath(p string) string {
 	return filepath.Clean("/" + p)
 }
 
+// StatBackup returns file info for an archive path already validated by ResolveBackupPath.
+func StatBackup(p string) (os.FileInfo, error) {
+	return os.Stat(sanitizedFSPath(p))
+}
+
 // Backup creates a gzip tarball of /etc/evuproxy (parent of config file).
 func Backup(ctx context.Context, configPath, dest string) error {
 	unlock, err := acquireApplyLock(ctx, configPath)

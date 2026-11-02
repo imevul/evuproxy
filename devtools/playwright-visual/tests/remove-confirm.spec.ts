@@ -137,6 +137,82 @@ test.describe("draft edits act at once and offer Undo", () => {
     expect((await fetchConfig(request)).forwarding.routes).toHaveLength(2);
   });
 
+  test("a double-click on Undo restores once and reports no false error", async ({ page, request }) => {
+    await gotoRoute(page, origin, "peers");
+    await page.locator("#peers-table-wrap [data-peer-del]").first().click();
+    await expect(undo(page)).toBeVisible();
+
+    const puts: string[] = [];
+    page.on("request", (r) => {
+      if (r.method() === "PUT" && r.url().endsWith("/api/v1/config")) puts.push(r.url());
+    });
+    await undo(page).dblclick();
+
+    await expect(toast(page)).toContainText("Restored laptop and its routes.");
+    await page.waitForTimeout(500);
+    await expect(toast(page)).not.toHaveAttribute("data-error", "");
+    expect(puts).toHaveLength(1);
+    expect((await fetchConfig(request)).peers.map((p: any) => p.name)).toEqual(["laptop", "phone"]);
+  });
+
+  test("Undo restores a removed route next to a twin that only looks the same", async ({ page, request }) => {
+    const live = { proto: "tcp", ports: ["8080"], target_ip: "10.99.0.2" };
+    const twin = { ...live, disabled: true, source_allow_cidrs: ["192.0.2.0/24"] };
+    await saveElsewhere(request, (c) => {
+      c.forwarding.routes = [live, twin];
+    });
+    await gotoRoute(page, origin, "routes");
+    const wrap = page.locator("#routes-table-wrap");
+
+    await wrap.locator('[data-route-del="0"]').click();
+    await expect(undo(page)).toBeVisible();
+    await undo(page).click();
+
+    await expect(toast(page)).toContainText("Restored route");
+    const routes = (await fetchConfig(request)).forwarding.routes;
+    expect(routes).toHaveLength(2);
+    expect(routes[0]).toMatchObject(live);
+    expect(!!routes[0].disabled).toBe(false);
+    expect(routes[1]).toMatchObject(twin);
+    await expect(wrap.locator('tr[data-row="0"]')).toBeFocused();
+  });
+
+  test("Undo restores a removed inbound rule next to its disabled twin", async ({ page, request }) => {
+    const live = { proto: "tcp", dport: "22", note: "ssh" };
+    const twin = { ...live, disabled: true };
+    await saveElsewhere(request, (c) => {
+      c.input_allows = [live, twin];
+    });
+    await gotoRoute(page, origin, "inbound");
+    const wrap = page.locator("#inbound-table-wrap");
+
+    await wrap.locator('[data-inbound-del="0"]').click();
+    await expect(undo(page)).toBeVisible();
+    await undo(page).click();
+
+    await expect(toast(page)).toContainText("Restored inbound rule");
+    const rules = (await fetchConfig(request)).input_allows;
+    expect(rules).toHaveLength(2);
+    expect(!!rules[0].disabled).toBe(false);
+    expect(rules[1].disabled).toBe(true);
+    await expect(wrap.locator('tr[data-row="0"]')).toBeFocused();
+  });
+
+  test("Undo adds no duplicate when the same row was saved back elsewhere", async ({ page, request }) => {
+    await gotoRoute(page, origin, "routes");
+    const removed = (await fetchConfig(request)).forwarding.routes[0];
+    await page.locator("#routes-table-wrap [data-route-del]").first().click();
+    await expect(undo(page)).toBeVisible();
+
+    await saveElsewhere(request, (c) => {
+      c.forwarding.routes.unshift(removed);
+    });
+    await undo(page).click();
+
+    await expect(toast(page)).toContainText("Restored route");
+    expect((await fetchConfig(request)).forwarding.routes).toHaveLength(2);
+  });
+
   test("Undo of a route removed from another page refreshes the page on screen", async ({ page, request }) => {
     await gotoRoute(page, origin, "routes");
     await page.locator("#routes-table-wrap [data-route-del]").first().click();

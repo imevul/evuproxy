@@ -249,22 +249,24 @@ async function removeInboundRule(index) {
     const proto = String(removed.proto || "").toLowerCase() || "—";
     const note = String(removed.note || "").trim();
     const label = proto + " " + String(removed.dport || "—") + (note ? " (" + note + ")" : "");
+    const removedJson = JSON.stringify(removed);
+    let restoredAt = removedAt;
     showUndoToast("Removed inbound rule " + label + ".", {
       page: "inbound",
       edit: (draft) => {
         if (!draft.input_allows) draft.input_allows = [];
-        // Already back (saved elsewhere since): nothing to reverse.
-        if (draft.input_allows.some((r) => inboundRuleIdentity(r) === identity)) return false;
-        draft.input_allows.splice(Math.min(removedAt, draft.input_allows.length), 0, removed);
+        // Already back (saved elsewhere since): nothing to reverse. Only the whole row counts,
+        // since identity also matches a disabled twin.
+        restoredAt = draft.input_allows.findIndex((r) => JSON.stringify(r) === removedJson);
+        if (restoredAt !== -1) return false;
+        restoredAt = Math.min(removedAt, draft.input_allows.length);
+        draft.input_allows.splice(restoredAt, 0, removed);
       },
       afterSave: (next, focus) => {
         setInboundMsg("");
         refreshPendingBadge();
         renderInboundTable(next);
-        if (focus) {
-          const at = resolveListIndex(next.input_allows, removedAt, identity, inboundRuleIdentity);
-          focusTableRow(wrap, Math.max(at, 0), $("inbound-add"), { force: true });
-        }
+        if (focus) focusTableRow(wrap, restoredAt, $("inbound-add"), { force: true });
       },
       message: () => "Restored inbound rule " + label + ".",
     });

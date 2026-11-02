@@ -568,24 +568,26 @@ async function removeRoute(index) {
     focusTableRow(wrap, removedAt, $("routes-add"));
     const label =
       routeProtoPlainText(removed.proto) + " " + ((removed.ports || []).join(", ") || "—") + " → " + String(removed.target_ip || "—");
+    const removedJson = JSON.stringify(removed);
+    let restoredAt = removedAt;
     showUndoToast("Removed route " + label + ".", {
       page: "routes",
       edit: (draft) => {
         if (!draft.forwarding) draft.forwarding = {};
         if (!draft.forwarding.routes) draft.forwarding.routes = [];
         const routes = draft.forwarding.routes;
-        // Already back (saved elsewhere since): nothing to reverse.
-        if (routes.some((r) => routeIdentity(r) === identity)) return false;
-        routes.splice(Math.min(removedAt, routes.length), 0, removed);
+        // Already back (saved elsewhere since): nothing to reverse. Only the whole row counts,
+        // since identity also matches a twin that is disabled or has other source CIDRs.
+        restoredAt = routes.findIndex((r) => JSON.stringify(r) === removedJson);
+        if (restoredAt !== -1) return false;
+        restoredAt = Math.min(removedAt, routes.length);
+        routes.splice(restoredAt, 0, removed);
       },
       afterSave: (next, focus) => {
         setRoutesMsg("");
         refreshPendingBadge();
         renderRoutesTable(next);
-        if (focus) {
-          const at = resolveListIndex(next.forwarding && next.forwarding.routes, removedAt, identity, routeIdentity);
-          focusTableRow(wrap, Math.max(at, 0), $("routes-add"), { force: true });
-        }
+        if (focus) focusTableRow(wrap, restoredAt, $("routes-add"), { force: true });
       },
       message: () => "Restored route " + label + ".",
     });
