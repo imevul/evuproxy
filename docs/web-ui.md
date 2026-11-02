@@ -18,7 +18,7 @@ The sidebar has a **color scheme** menu (**Light**, **Dark**, or **System**, the
 
 **Replace config (upload):** Settings can upload a config **JSON** file; a modal shows the **current vs. uploaded** config side by side before anything is written. Saving replaces `config.yaml` on disk via `PUT /api/v1/config` (YAML comments are not preserved); the host keeps running the previously applied rules until you apply.
 
-**Pending changes:** the Pending page shows a **diff** of saved-but-not-applied config against the last applied snapshot (unified or split view), with **Apply**, **Discard pending**, and **Restore previous applied** actions.
+**Pending changes:** the Pending page lists each difference from the last applied config in plain language, such as "Removed route UDP 53 → laptop". **Revert** on a row takes that one change back out of the saved config and leaves the others in place; it has no time limit, unlike the Undo on a toast. The generated nftables **diff** (unified or split view) stays available in a collapsed section, and opens by itself when the applied config is not available to compare. The page also has **Apply**, **Discard pending**, and **Restore previous applied** actions.
 
 ## Save, Apply and Refresh
 

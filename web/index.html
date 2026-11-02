@@ -1229,12 +1229,18 @@
             ?
           </button>
         </div>
-        <p class="hint">Saved config that the host is not running yet. Review the generated rules, then apply.</p>
+        <p class="hint">Saved config that the host is not running yet. Review the changes, then apply.</p>
         <div class="evu-card card">
           <div id="pending-status-alert" class="evu-alert pending-status-alert">
             <div class="evu-alert__body pending-status-body">
               <p id="pending-status" class="pending-banner" aria-live="polite"></p>
             </div>
+          </div>
+          <div id="pending-changes" class="pending-changes is-hidden">
+            <h3 id="pending-changes-title" tabindex="-1">Changes</h3>
+            <ul id="pending-changes-list" class="pending-changes-list" aria-labelledby="pending-changes-title"></ul>
+            <p id="pending-changes-note" class="hint meta is-hidden"></p>
+            <p id="pending-changes-msg" class="msg" aria-live="polite"></p>
           </div>
           <div class="toolbar pending-toolbar">
             <button type="button" class="evu-btn evu-btn--outline" id="pending-check-config">Check config</button>
@@ -1258,7 +1264,8 @@
               </div>
             </div>
           </div>
-          <h3>Generated nftables</h3>
+          <details id="pending-raw-diff" class="pending-raw-diff">
+          <summary>Generated nftables</summary>
           <p class="hint meta">
             Compare <code class="inline">generated/nftables.nft</code> as it exists on disk to the ruleset generated from the current saved config (what apply would write).
           </p>
@@ -1289,6 +1296,7 @@
             </div>
             <div id="pending-diff-panel" class="pending-diff-panel" role="tabpanel"></div>
           </div>
+          </details>
           <p id="pending-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>
@@ -1612,6 +1620,10 @@
         <p>
           Saving on Peers, Routes, Inbound access or Geoblock writes YAML on the server only. Nothing reaches nftables or WireGuard until you apply here — so this page
           is the diff between what is saved and what the host is running.
+        </p>
+        <p>
+          <strong>Changes</strong> lists each difference in plain language. <strong>Revert</strong> takes one of them back out of the saved config and leaves the others in
+          place; it has no time limit, unlike the Undo on a toast. The exact rules are under <strong>Generated nftables</strong>.
         </p>
         <p>
           <strong>Check config</strong> validates the pending ruleset and reports anything that could lock you out of this host; <strong>Apply</strong> runs it

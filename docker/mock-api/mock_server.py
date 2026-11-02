@@ -1244,6 +1244,7 @@ class Handler(BaseHTTPRequestHandler):
                         _config_change_count(MOCK_CONFIG, MOCK_BAK) if MOCK_BAK is not None else 0
                     ),
                     "restore_previous_change_count": restore_previous_change_count,
+                    "applied_config": MOCK_CONFIG_BASELINE,
                 },
             )
         if path == "/api/v1/backup/info":
