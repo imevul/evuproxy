@@ -9,6 +9,7 @@ import {
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { geoUpdatedMessage } from "../core/format.js";
 import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit, ConfigMergeError } from "../core/config_save.js";
 import { parseSourceAllowListInput } from "../core/net.js";
@@ -658,12 +659,12 @@ export async function refreshGeoblockingPage() {
 async function geoUpdateLists() {
   setGeoMsg("…");
   try {
-    await api("/v1/update-geo", { method: "POST" });
+    const res = await api("/v1/update-geo", { method: "POST" });
     setGeoMsg("");
     setApiStatus(true);
     // The Zone files tab is where an operator confirms the update landed.
     void refreshGeoZonesTable();
-    showToast("Geo lists updated on host");
+    showToast(geoUpdatedMessage(res));
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
   }

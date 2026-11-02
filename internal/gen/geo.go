@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,6 +132,33 @@ func DownloadZones(ctx context.Context, c *config.Config) error {
 		}
 	}
 	return nil
+}
+
+// GeoSetsEqual reports whether GeoLoaderNFT would fill the same sets from the same zones
+// for both configs.
+func GeoSetsEqual(a, b *config.Config) bool {
+	return a.Geo.Enabled == b.Geo.Enabled && a.Geo.ZoneDir == b.Geo.ZoneDir &&
+		reflect.DeepEqual(geoSetCountries(a), geoSetCountries(b))
+}
+
+// geoSetCountries maps each set GeoLoaderNFT fills to its sorted, normalized countries.
+func geoSetCountries(c *config.Config) map[string][]string {
+	normalized := func(countries []string) []string {
+		out := make([]string, 0, len(countries))
+		for _, cc := range countries {
+			out = append(out, strings.ToLower(strings.TrimSpace(cc)))
+		}
+		slices.Sort(out)
+		return out
+	}
+	sets := map[string][]string{c.Geo.EffectiveSetName(): normalized(c.Geo.Countries)}
+	for i, r := range c.Forwarding.Routes {
+		if r.Disabled || !strings.EqualFold(strings.TrimSpace(r.GeoMode), config.RouteGeoCustom) {
+			continue
+		}
+		sets[routeGeoSetName(i)] = normalized(r.GeoCountries)
+	}
+	return sets
 }
 
 // GeoDownloadCountries returns the deduplicated, normalized union of the global

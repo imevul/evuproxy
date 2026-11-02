@@ -462,14 +462,13 @@ func ReloadAtBoot(ctx context.Context, cfgPath string) error {
 
 func reloadAtBoot(ctx context.Context, cfgPath string) error {
 	noProgress := func(string) {}
-	c, err := loadConfirmBaseline(cfgPath)
+	c, err := lastConfirmedConfig(cfgPath)
 	if err != nil {
 		// With no known config to prefer, the alternative is a host with no firewall.
 		slog.Warn("no usable last applied config at boot; applying config.yaml", "err", err)
 		return reload(ctx, cfgPath, noProgress)
 	}
-	// Read from .bak, so that an unapplied edit can't turn confirm off and get itself applied.
-	if !c.Apply.Confirm {
+	if c == nil {
 		return reload(ctx, cfgPath, noProgress)
 	}
 	// checkConfirmBaseline has just shown the applied hash is the hash of .bak.
@@ -484,6 +483,22 @@ func reloadAtBoot(ctx context.Context, cfgPath string) error {
 	}
 	afterApply(c, cfgPath)
 	return nil
+}
+
+// lastConfirmedConfig is the rule for anything that changes the live firewall without an
+// Apply: with confirm on it returns the last applied config, which is what to use instead
+// of config.yaml. It returns nil with confirm off, when config.yaml is what to use, and an
+// error when there is no usable .bak to tell by.
+func lastConfirmedConfig(cfgPath string) (*config.Config, error) {
+	c, err := loadConfirmBaseline(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	// Read from .bak, so that an unapplied edit can't turn confirm off and get itself applied.
+	if !c.Apply.Confirm {
+		return nil, nil
+	}
+	return c, nil
 }
 
 // loadConfirmBaseline returns the last applied config, if it is known to be that.

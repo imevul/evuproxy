@@ -1734,8 +1734,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"result": "reloaded", "session": _mock_session_view()})
             return self._send_json(200, {"result": "reloaded"})
         if path == "/api/v1/update-geo":
+            if MOCK_SESSION:
+                return self._send_json(
+                    409,
+                    {
+                        "error": "an Apply is waiting for confirmation: run `evuproxy reload-confirm` or `evuproxy reload-revert` first",
+                        "error_code": "apply_session_active",
+                    },
+                )
             _push_mock_event("update_geo_ok", "update-geo")
-            return self._send_json(200, {"result": "geo_updated"})
+            held_back = bool((MOCK_CONFIG_BASELINE.get("apply") or {}).get("confirm")) and (
+                MOCK_CONFIG.get("geo") != MOCK_CONFIG_BASELINE.get("geo")
+            )
+            return self._send_json(200, {"result": "geo_updated", "geo_changes_held_back": held_back})
         if path == "/api/v1/backup":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             apath = (qs.get("path") or [""])[0].strip()

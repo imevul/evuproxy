@@ -187,15 +187,21 @@ func (s *Server) handleUpdateGeo(w http.ResponseWriter, r *http.Request) {
 	// many countries are slow, so allow a longer overall budget.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
 	defer cancel()
-	if err := apply.UpdateGeo(ctx, s.Config); err != nil {
+	heldBack, err := apply.UpdateGeo(ctx, s.Config)
+	if err != nil {
 		s.logErr("update-geo", err)
+		if status, code, ok := confirmErrorCode(err); ok {
+			s.emit(eventlog.Record{Event: "update_geo_failed", Detail: eventDetail(err.Error()), ErrorCode: code})
+			s.jsonAPIError(w, status, err.Error(), code)
+			return
+		}
 		s.emit(eventlog.Record{Event: "update_geo_failed", Detail: eventDetail(err.Error()), ErrorCode: "update_geo_error"})
 		s.jsonErr(w, http.StatusInternalServerError, "geo update failed")
 		return
 	}
 	apply.InvalidateGeoSummaryCache()
 	s.emit(eventlog.Record{Event: "update_geo_ok", Detail: "update-geo"})
-	s.jsonOK(w, map[string]string{"result": "geo_updated"})
+	s.jsonOK(w, map[string]any{"result": "geo_updated", "geo_changes_held_back": heldBack})
 }
 
 func (s *Server) handleRouteTest(w http.ResponseWriter, r *http.Request) {
