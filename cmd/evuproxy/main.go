@@ -28,6 +28,12 @@ var (
 )
 
 func main() {
+	if err := newRootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "evuproxy",
 		Short: "EvuProxy — WireGuard + nftables forwarding control",
@@ -55,9 +61,7 @@ func main() {
 		cmdPeerSet(),
 		cmdValidate(),
 	)
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return root
 }
 
 func cmdVersion() *cobra.Command {
