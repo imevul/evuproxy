@@ -1,6 +1,6 @@
 # Confirm-or-revert on a real kernel
 
-Tests the revert timer in a throwaway Debian VM with real `nft`, `wg` and `systemd-run`. It applies a config that cuts the forwarded SSH port, stops the API, and checks that SSH comes back by itself. It also covers confirming, applying again during the window, an API restart, a failed revert, a reboot, a failed Apply whose revert also fails, and a revert killed partway. The Go tests only cover these with a fake command runner.
+Tests the revert timer in a throwaway Debian VM with real `nft`, `wg` and `systemd-run`. It applies a config that cuts the forwarded SSH port, stops the API, and checks that SSH comes back by itself. It also covers confirming, applying again during the window, an API restart, a failed revert, a reboot, a failed Apply whose revert also fails, a revert killed partway, what a reboot does with edits that were never confirmed, and an upgrade through `scripts/update.sh` from the old boot unit. The Go tests only cover these with a fake command runner.
 
 It also shows that **Keep changes** needs a new connection, with Chromium in the container driving the real panel through `docker/nginx.conf`. As a control, it first reproduces the lockout with keep-alive on, then shows on the shipped config that Keep gets no answer after a cut, that the firewall dropped the connection, that Keep never reached nginx, and that nginx and the API were otherwise fine. It records one known limit: Keep through an SSH tunnel still works.
 
@@ -11,7 +11,7 @@ From the repo root, on a Linux host with `/dev/kvm`:
 ```bash
 CGO_ENABLED=0 go build -o devtools/rollback-vm/evuproxy ./cmd/evuproxy
 docker run --rm --device /dev/kvm \
-  -v "$PWD/devtools/rollback-vm:/rollback-vm:ro" -v "$PWD/templates:/templates:ro" \
+  -v "$PWD/devtools/rollback-vm:/rollback-vm:ro" -v "$PWD/templates:/templates:ro" -v "$PWD/scripts:/scripts:ro" \
   -v "$PWD/web:/web:ro" -v "$PWD/docker:/docker:ro" \
   alpine:latest sh -c "apk add --no-cache -q bash && exec bash /rollback-vm/run.sh"
 ```

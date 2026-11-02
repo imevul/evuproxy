@@ -359,7 +359,7 @@ func restoreConfirmBaseline(cfgPath string) error {
 // rollbackLocked reverts the session. The caller holds the apply lock. reload applies
 // the firewall before WireGuard, so a WireGuard failure still leaves the firewall reverted.
 // restoreEdits puts a failed Apply's edits back in config.yaml. Only pass it when someone
-// is there to see them: the boot unit applies whatever config.yaml holds.
+// is there to see them: a plain reload, or a boot with confirm off, applies what config.yaml holds.
 func rollbackLocked(ctx context.Context, cfgPath string, s *ConfirmSession, reason string, restoreEdits bool) error {
 	stopRevertTimer(ctx, s.Token)
 	if s.RevertReason == "" {
@@ -437,6 +437,61 @@ func checkOneWayReload(ctx context.Context, cfgPath string) error {
 		return ErrConfirmSessionActive
 	}
 	return rollbackLocked(ctx, cfgPath, s, RevertReasonInterrupted, false)
+}
+
+// ReloadAtBoot is what evuproxy.service runs, at boot and on a unit restart. With confirm
+// on it applies the last confirmed config and leaves any edits in config.yaml as unapplied
+// changes: nobody is there to confirm them, and a config that locks the host out would stay
+// live. Everything else applies config.yaml like Reload.
+func ReloadAtBoot(ctx context.Context, cfgPath string) error {
+	unlock, err := acquireApplyLock(ctx, cfgPath)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := checkOneWayReload(ctx, cfgPath); err != nil {
+		return err
+	}
+	if err := reloadAtBoot(ctx, cfgPath); err != nil {
+		_ = state.RecordApplyFailure(cfgPath)
+		return err
+	}
+	_ = state.RecordApplySuccess(cfgPath)
+	return nil
+}
+
+func reloadAtBoot(ctx context.Context, cfgPath string) error {
+	noProgress := func(string) {}
+	c, err := loadConfirmBaseline(cfgPath)
+	if err != nil {
+		// With no known config to prefer, the alternative is a host with no firewall.
+		slog.Warn("no usable last applied config at boot; applying config.yaml", "err", err)
+		return reload(ctx, cfgPath, noProgress)
+	}
+	// Read from .bak, so that an unapplied edit can't turn confirm off and get itself applied.
+	if !c.Apply.Confirm {
+		return reload(ctx, cfgPath, noProgress)
+	}
+	// checkConfirmBaseline has just shown the applied hash is the hash of .bak.
+	applied, _ := state.ReadAppliedHash(cfgPath)
+	if cur, err := state.ConfigFileSHA256(cfgPath); err != nil || cur != applied {
+		slog.Warn("config.yaml has unapplied changes; applying the last confirmed config instead. Run `evuproxy reload` to apply them")
+	}
+	// .bak and the applied hash already describe this config, so there is nothing to record.
+	// If it fails, the failure is the answer: the edits are still not confirmed.
+	if err := applyToHost(ctx, c, cfgPath, noProgress); err != nil {
+		return err
+	}
+	afterApply(c, cfgPath)
+	return nil
+}
+
+// loadConfirmBaseline returns the last applied config, if it is known to be that.
+func loadConfirmBaseline(cfgPath string) (*config.Config, error) {
+	if err := checkConfirmBaseline(cfgPath); err != nil {
+		return nil, err
+	}
+	return config.Load(state.ConfigYAMLBackupPath(cfgPath))
 }
 
 // RecoverConfirmSession reverts a session that outlived its timer. `evuproxy serve` calls

@@ -2,6 +2,8 @@ package apply
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"os/exec"
@@ -410,6 +412,289 @@ func TestReboot_bootReloadRevertsFirst(t *testing.T) {
 	if st.LastRevert == nil || st.LastRevert.Reason != RevertReasonInterrupted {
 		t.Fatalf("status: %+v", st.LastRevert)
 	}
+}
+
+// newBootEnv is a host whose last applied config has the given confirm setting.
+func newBootEnv(t *testing.T, confirm bool) *confirmEnv {
+	t.Helper()
+	e := newConfirmEnv(t)
+	if confirm {
+		e.baseline = append(e.baseline, []byte("apply:\n  confirm: true\n")...)
+		if err := os.WriteFile(e.cfgPath, e.baseline, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := Reload(context.Background(), e.cfgPath); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return e
+}
+
+// editPort saves an edit with a rule that can be told apart in what gets loaded.
+func (e *confirmEnv) editPort(extra string) []byte {
+	e.t.Helper()
+	b := append(append([]byte{}, e.baseline...), []byte("input_allows:\n  - proto: tcp\n    dport: \"4242\"\n"+extra)...)
+	if err := os.WriteFile(e.cfgPath, b, 0o644); err != nil {
+		e.t.Fatal(err)
+	}
+	return b
+}
+
+// reboot runs the boot unit as a new boot.
+func (e *confirmEnv) reboot() error {
+	e.t.Helper()
+	e.bootID += "+"
+	clear(e.timers)
+	e.f.calls = nil
+	return ReloadAtBoot(context.Background(), e.cfgPath)
+}
+
+func (e *confirmEnv) wantLoadedEdit(want bool) {
+	e.t.Helper()
+	if e.f.callIndex("nft -f") < 0 {
+		e.t.Fatalf("the firewall should be loaded: %v", e.f.calls)
+	}
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(e.cfgPath), GeneratedDir, "apply.nft"))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if got := strings.Contains(string(b), "4242"); got != want {
+		e.t.Fatalf("edit in the loaded ruleset: got %v want %v", got, want)
+	}
+}
+
+func (e *confirmEnv) wantAppliedHashOf(want []byte) {
+	e.t.Helper()
+	applied, err := state.ReadAppliedHash(e.cfgPath)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	p := filepath.Join(e.t.TempDir(), "want")
+	if err := os.WriteFile(p, want, 0o644); err != nil {
+		e.t.Fatal(err)
+	}
+	if h, _ := state.ConfigFileSHA256(p); applied != h {
+		e.t.Fatalf("applied hash %s, want %s", applied, h)
+	}
+}
+
+func TestBoot_confirmOnKeepsEditsUnapplied(t *testing.T) {
+	e := newBootEnv(t, true)
+	edited := e.editPort("")
+	if err := e.reboot(); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(false)
+	e.wantFile(e.cfgPath, edited)
+	e.wantFile(state.ConfigYAMLBackupPath(e.cfgPath), e.baseline)
+	e.wantNoFile(state.ConfigYAMLBackupPath(e.cfgPath) + ".2") // newBootEnv's own Apply made .1
+	e.wantAppliedHashOf(e.baseline)
+	p, err := PendingSummary(e.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Pending {
+		t.Fatal("the edits should still be unapplied changes")
+	}
+
+	// A hand reload is how they go live.
+	e.f.calls = nil
+	if err := Reload(context.Background(), e.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(true)
+	e.wantFile(state.ConfigYAMLBackupPath(e.cfgPath), edited)
+}
+
+func TestBoot_confirmOnNothingUnapplied(t *testing.T) {
+	e := newBootEnv(t, true)
+	if err := e.reboot(); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(false)
+	e.wantFile(e.cfgPath, e.baseline)
+	e.wantNoFile(state.ConfigYAMLBackupPath(e.cfgPath) + ".2") // newBootEnv's own Apply made .1
+}
+
+// The setting that counts is the applied one, or an edit could wave itself through.
+func TestBoot_editTurningConfirmOffIsStillHeldBack(t *testing.T) {
+	e := newBootEnv(t, true)
+	b := []byte(strings.Replace(string(e.editPort("")), "confirm: true", "confirm: false", 1))
+	if err := os.WriteFile(e.cfgPath, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.reboot(); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(false)
+	e.wantFile(e.cfgPath, b)
+}
+
+func TestBoot_confirmOffAppliesEdits(t *testing.T) {
+	e := newBootEnv(t, false)
+	edited := e.editPort("")
+	if err := e.reboot(); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(true)
+	e.wantFile(state.ConfigYAMLBackupPath(e.cfgPath), edited)
+	e.wantAppliedHashOf(edited)
+}
+
+// Turning confirm on takes effect from the next Apply, not from saving the setting.
+func TestBoot_editTurningConfirmOnStillApplies(t *testing.T) {
+	e := newBootEnv(t, false)
+	edited := e.editPort("apply:\n  confirm: true\n")
+	if err := e.reboot(); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(true)
+	e.wantFile(state.ConfigYAMLBackupPath(e.cfgPath), edited)
+}
+
+func TestBoot_noUsableBaselineAppliesConfig(t *testing.T) {
+	for name, breakIt := range map[string]func(e *confirmEnv){
+		"no .bak": func(e *confirmEnv) { _ = os.Remove(state.ConfigYAMLBackupPath(e.cfgPath)) },
+		"invalid .bak": func(e *confirmEnv) {
+			bak := []byte("apply:\n  confirm: true\n")
+			_ = os.WriteFile(state.ConfigYAMLBackupPath(e.cfgPath), bak, 0o644)
+			h := sha256.Sum256(bak)
+			_ = state.WriteAppliedConfigHash(e.cfgPath, hex.EncodeToString(h[:]))
+		},
+		"stale .bak": func(e *confirmEnv) {
+			_ = state.WriteAppliedConfigHash(e.cfgPath, "not the hash of .bak")
+		},
+		"no applied hash": func(e *confirmEnv) {
+			_ = os.Remove(filepath.Join(filepath.Dir(e.cfgPath), ".evuproxy-last-applied.json"))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newBootEnv(t, true)
+			edited := e.editPort("")
+			breakIt(e)
+			if err := e.reboot(); err != nil {
+				t.Fatal(err)
+			}
+			e.wantLoadedEdit(true)
+			e.wantAppliedHashOf(edited)
+		})
+	}
+}
+
+func TestBoot_firstBootAppliesConfig(t *testing.T) {
+	f := &fakeRunner{}
+	withFakeReloadEnv(t, f, true)
+	cfgPath := writeReloadTestConfig(t)
+	if err := ReloadAtBoot(context.Background(), cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	if f.callIndex("nft -f") < 0 {
+		t.Fatalf("the firewall should be loaded: %v", f.calls)
+	}
+	if _, err := os.Stat(state.ConfigYAMLBackupPath(cfgPath)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A config that was confirmed and now fails must not hand the host to one that wasn't.
+func TestBoot_baselineFailureDoesNotFallBackToEdits(t *testing.T) {
+	e := newBootEnv(t, true)
+	edited := e.editPort("")
+	e.failNft = true
+	if err := e.reboot(); err == nil {
+		t.Fatal("boot should report the failure")
+	}
+	loads := 0
+	for _, c := range e.f.calls {
+		if strings.HasPrefix(c, "nft -f") {
+			loads++
+		}
+	}
+	if loads != 1 {
+		t.Fatalf("no second attempt with the edits: %v", e.f.calls)
+	}
+	e.wantLoadedEdit(false)
+	e.wantFile(e.cfgPath, edited)
+	e.wantAppliedHashOf(e.baseline)
+	if state.ApplyFailureTotal(e.cfgPath) != 1 {
+		t.Fatalf("failures: %d", state.ApplyFailureTotal(e.cfgPath))
+	}
+}
+
+// failWGTimes makes the next n WireGuard syncs fail, then lets them work.
+func (e *confirmEnv) failWGTimes(n int) {
+	e.f.handler = func(name string, args []string) ([]byte, error) {
+		if name == "wg" && n > 0 {
+			n--
+			return []byte("wg broke"), errors.New("exit 1")
+		}
+		return e.handle(name, args)
+	}
+}
+
+func TestBoot_failedApplyWithSuccessfulRevertStaysOut(t *testing.T) {
+	e := newBootEnv(t, true)
+	edited := e.editPort("")
+	e.failWGTimes(1)
+	if _, err := ReloadWithConfirm(context.Background(), e.cfgPath, 60, func(string) {}); err == nil {
+		t.Fatal("apply should fail")
+	}
+	e.wantFile(e.cfgPath, edited) // back as unapplied changes
+	if err := e.reboot(); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(false)
+	e.wantFile(e.cfgPath, edited)
+	e.wantAppliedHashOf(e.baseline)
+}
+
+func TestBoot_failedApplyAfterRetryRevertStaysOut(t *testing.T) {
+	e := newBootEnv(t, true)
+	edited := e.editPort("")
+	e.failWGTimes(1 + rollbackAttempts)
+	if _, err := ReloadWithConfirm(context.Background(), e.cfgPath, 60, func(string) {}); !errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("got %v", err)
+	}
+	if err := RevertApply(context.Background(), e.cfgPath, RevertReasonManual, ""); err != nil {
+		t.Fatal(err)
+	}
+	e.wantFile(e.cfgPath, edited) // Retry revert brought them back
+	if err := e.reboot(); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(false)
+	e.wantFile(e.cfgPath, edited)
+}
+
+// A session that outlived its timer reverts first, as a plain reload does.
+func TestBoot_revertsInterruptedSession(t *testing.T) {
+	e := newBootEnv(t, true)
+	rejected := e.editPort("")
+	e.apply()
+	if err := e.reboot(); err != nil {
+		t.Fatal(err)
+	}
+	e.wantLoadedEdit(false)
+	if e.session() != nil {
+		t.Fatal("session should be cleared")
+	}
+	e.wantFile(e.cfgPath, e.baseline)
+	e.wantFile(RevertedConfigPath(e.cfgPath), rejected)
+}
+
+// A unit restart is not a new boot, so a live window stands.
+func TestBoot_unitRestartDuringWindowIsRefused(t *testing.T) {
+	e := newBootEnv(t, true)
+	edited := e.editPort("")
+	e.apply()
+	e.f.calls = nil
+	if err := ReloadAtBoot(context.Background(), e.cfgPath); !errors.Is(err, ErrConfirmSessionActive) {
+		t.Fatalf("got %v", err)
+	}
+	if e.f.callIndex("nft") >= 0 {
+		t.Fatalf("firewall must not be touched: %v", e.f.calls)
+	}
+	e.wantFile(e.cfgPath, edited)
 }
 
 func TestRecover_apiRestart(t *testing.T) {

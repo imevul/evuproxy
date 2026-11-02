@@ -45,6 +45,7 @@ packages:
   - nftables
   - wireguard-tools
   - nginx-light
+  - git
 EOF
 cat >meta-data <<EOF
 instance-id: evuproxy-rollback-vm
@@ -293,6 +294,8 @@ held systemctl reboot || true
 close_held_shell
 sleep 10
 check "SSH comes back after the reboot, long before the 600s window" wait_for_ssh 120
+# SSH can answer before the boot unit has finished reverting.
+vm systemctl is-system-running --wait >/dev/null 2>&1
 check "config.yaml is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
 check "the firewall is back" live_rules_allow_ssh
 wait_for_api || die "API did not come back"
@@ -370,10 +373,154 @@ vm mv /usr/sbin/nft.off /usr/sbin/nft
 check "retry succeeds" test "$(api -X POST "$api_url/apply/revert" | jq -r .result)" = reverted
 check "and clears the session" test "$(session_phase)" = none
 check "config.yaml is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+
+log "=== 11. A reboot keeps unapplied edits off the host ==="
+reset_host baseline
+live_rules_allow_marker() { vm nft list table inet evuproxy | grep -q 'tcp dport 9849'; }
+MARKER_RULES="$OPEN_RULES
+  - proto: tcp
+    dport: \"9849\""
+put_config "$LOCKED_RULES" saved-locked
+check "the VM comes back past a saved lockout" reboot_and_wait
+check "the firewall is the baseline" live_rules_allow_ssh
+check "config.yaml still holds the edits" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# saved-locked"
+check "config.yaml.bak is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml.bak)" = "# baseline"
+wait_for_api || die "API did not come back"
+check "they show as unapplied changes" test "$(api "$api_url/pending" | jq -r .pending)" = true
+check "the journal says so" bash -c "ssh ${SSH_BASE[*]} -o ControlPath=none root@127.0.0.1 journalctl -b --no-pager -u evuproxy.service | grep -q 'unapplied changes'"
+check "restarting the unit doesn't apply them either" vm systemctl restart evuproxy.service
+check "SSH still works after it" ssh_works
+check "the firewall is still the baseline" live_rules_allow_ssh
+put_config "$MARKER_RULES" hand-reload
+check "a hand reload applies edits" vm evuproxy reload
+check "they are live" live_rules_allow_marker
+check "and are the new baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml.bak)" = "# hand-reload"
+
+log "=== 12. An edit can't turn confirm off to get itself applied at boot ==="
+reset_host baseline
+write_config "$MARKER_RULES" confirm-off-edit | sed 's/confirm: true/confirm: false/' | vm "cat >/etc/evuproxy/config.yaml"
+check "the VM comes back" reboot_and_wait
+check "the edit is not live" bash -c "! ssh ${SSH_BASE[*]} -o ControlPath=none root@127.0.0.1 nft list table inet evuproxy | grep -q 'tcp dport 9849'"
+check "and is still in config.yaml" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# confirm-off-edit"
+
+log "=== 13. With confirm off, or no usable .bak, a reboot applies config.yaml as before ==="
+write_config "$OPEN_RULES" confirm-off | sed 's/confirm: true/confirm: false/' | vm "cat >/etc/evuproxy/config.yaml"
+vm evuproxy reload || die "confirm-off reload"
+write_config "$MARKER_RULES" confirm-off-hand-edit | sed 's/confirm: true/confirm: false/' | vm "cat >/etc/evuproxy/config.yaml"
+check "the VM comes back" reboot_and_wait
+check "confirm off: the hand edit is live" live_rules_allow_marker
+check "confirm off: and is the new baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml.bak)" = "# confirm-off-hand-edit"
+reset_host baseline
+put_config "$MARKER_RULES" no-bak
+vm rm -f /etc/evuproxy/config.yaml.bak
+check "the VM comes back" reboot_and_wait
+check "no .bak: config.yaml is live" live_rules_allow_marker
+check "no .bak: and it is recorded" test "$(vm tail -1 /etc/evuproxy/config.yaml.bak)" = "# no-bak"
+
+log "=== 14. A failed Apply's edits stay off the host at reboot ==="
+wait_for_api || die "API did not come back"
+reset_host baseline
+# Fails this many `wg syncconf` calls, then works. /run clears at reboot.
+vm bash -s <<'EOF' || die "wg wrapper"
+mv /usr/bin/wg /usr/bin/wg.real
+cat >/usr/bin/wg <<'WRAP'
+#!/bin/bash
+if [ "$1" = syncconf ] && [ -s /run/wg-failures ] && [ "$(cat /run/wg-failures)" -gt 0 ]; then
+	echo $(($(cat /run/wg-failures) - 1)) >/run/wg-failures
+	echo "wg: failing on purpose" >&2
+	exit 1
+fi
+exec /usr/bin/wg.real "$@"
+WRAP
+chmod 755 /usr/bin/wg
+EOF
+put_config "$LOCKED_RULES" failed-revert-worked
+vm "echo 1 >/run/wg-failures"
+code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":600}')
+log "POST /reload answered $code"
+check "the Apply failed" test "$code" != 200
+check "SSH works: its revert did" ssh_works
+check "no session is left" test "$(session_phase)" = none
+check "the edits are back as unapplied changes" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# failed-revert-worked"
+check "the VM comes back" reboot_and_wait
+check "the firewall is the baseline" live_rules_allow_ssh
+check "the edits are still unapplied" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# failed-revert-worked"
+
+wait_for_api || die "API did not come back"
+reset_host baseline
+put_config "$LOCKED_RULES" failed-then-retried
+# The Apply, then all three revert attempts.
+vm "echo 4 >/run/wg-failures"
+code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":600}')
+check "the Apply is refused as a failed revert" test "$code" = 409
+check "the failure is reported" test "$(vm evuproxy reload-status | jq -r .session.phase)" = failed
+check "Retry revert succeeds" test "$(api -X POST "$api_url/apply/revert" | jq -r .result)" = reverted
+check "the edits are back as unapplied changes" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# failed-then-retried"
+check "the VM comes back" reboot_and_wait
+check "the firewall is the baseline" live_rules_allow_ssh
+check "the edits are still unapplied" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# failed-then-retried"
+vm mv /usr/bin/wg.real /usr/bin/wg
+
+log "=== 15. The update that brings in --boot installs it before restarting the unit ==="
+wait_for_api || die "API did not come back"
+reset_host baseline
+use_old_unit() { vm "sed -i 's/ --boot//' /etc/systemd/system/evuproxy.service && systemctl daemon-reload && systemctl restart evuproxy.service"; }
+unit_has_boot() { vm "grep -q 'reload --boot' /etc/systemd/system/evuproxy.service && systemctl show -p ExecStart evuproxy.service | grep -q 'reload --boot'"; }
+use_old_unit || die "old unit"
+scp_vm /scripts/update.sh /scripts/rebuild.sh /scripts/update-boot-unit.sh root@127.0.0.1:/root/ || die "copy scripts"
+# A clone on the old release, about to pull this one. Bash keeps running the update.sh it
+# opened, and this update.sh has the same body as the old one. The old rebuild.sh mustn't
+# run, so it fails. The go stand-in "builds" the binary already installed.
+vm bash -s <<'EOF' || die "update flow setup"
+set -e
+printf '#!/bin/sh\ncp /usr/local/bin/evuproxy evuproxy\n' >/usr/local/bin/go
+chmod 755 /usr/local/bin/go
+git config --global user.email vm@example.invalid
+git config --global user.name vm
+git init -q --bare -b main /root/origin.git
+git clone -q /root/origin.git /root/evuproxy 2>/dev/null
+cd /root/evuproxy
+mkdir scripts
+cp /root/update.sh scripts/update.sh
+printf '#!/bin/sh\nexit 1\n' >scripts/rebuild.sh
+chmod 755 scripts/rebuild.sh
+git add .
+git commit -qm old
+git push -qu origin main
+git clone -q /root/origin.git /root/next
+cd /root/next
+mkdir templates
+cp /root/rebuild.sh /root/update-boot-unit.sh scripts/
+EOF
+scp_vm /templates/evuproxy.service root@127.0.0.1:/root/next/templates/ || die "copy template"
+vm "cd /root/next && git add . && git commit -qm new && git push -q" || die "push new release"
+put_config "$LOCKED_RULES" saved-before-update
+vm /root/evuproxy/scripts/update.sh
+check "update.sh succeeds" test $? -eq 0
+check "the pull brought in the new rebuild.sh" vm grep -q update-boot-unit /root/evuproxy/scripts/rebuild.sh
+check "the unit has --boot, and systemd has loaded it" unit_has_boot
+check "SSH still works: the update's restart kept the edits off the host" ssh_works
+check "the firewall is the baseline" live_rules_allow_ssh
+check "the edits are still unapplied" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# saved-before-update"
+check "the VM comes back past them" reboot_and_wait
+check "the firewall is still the baseline" live_rules_allow_ssh
+
+wait_for_api || die "API did not come back"
+reset_host baseline
+use_old_unit || die "old unit"
+put_config "$OPEN_RULES" window-during-refresh
+api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":20}' >/dev/null
+check "a session is waiting" test "$(session_phase)" = active
+check "rebuild.sh --install succeeds in the window" vm "cd /root/evuproxy && scripts/rebuild.sh --install"
+check "the unit has --boot" unit_has_boot
+check "the session is still active" test "$(session_phase)" = active
+sleep 25
+check "its timer still reverts" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+check "and clears the session" test "$(session_phase)" = none
 }
 [ "${KEEP_ONLY:-}" = 1 ] || host_sections
 
-log "=== 11. Keep needs a new connection ==="
+log "=== 16. Keep needs a new connection ==="
 # The real panel in a real browser, outside the VM, through the real docker/nginx.conf.
 apk add --no-cache -q chromium nodejs npm || die "apk add browser"
 mkdir -p /vm/browser
