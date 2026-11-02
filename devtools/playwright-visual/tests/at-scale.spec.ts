@@ -170,7 +170,7 @@ test.describe("at scale", () => {
   test("the toast for a removed route leads with its name", async ({ page }) => {
     await gotoRoute(page, origin, "routes");
     await routeRows(page).first().locator("[data-route-del]").click();
-    await expect(page.locator("#toaster .evu-toast")).toContainText("Removed route service-31 (tcp 30000 to peer-01)");
+    await expect(page.locator("#toaster .evu-toast")).toContainText("Removed route service-31: tcp 30000 to peer-01.");
   });
 
   test("the sort and the scroll position survive a save", async ({ page }) => {

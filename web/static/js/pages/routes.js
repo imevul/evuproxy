@@ -600,7 +600,7 @@ async function removeRoute(index) {
     const targetHost = String(removed.target_ip || "").trim();
     const target = peerNameForTargetHost(c, targetHost) || targetHost || "—";
     const detail = routeProtoPlainText(removed.proto) + " " + ((removed.ports || []).join(", ") || "—") + " to " + target;
-    const label = routeName(removed) ? routeName(removed) + " (" + detail + ")" : detail;
+    const label = routeName(removed) ? routeName(removed) + ": " + detail : detail;
     const removedJson = JSON.stringify(removed);
     let restoredAt = removedAt;
     showUndoToast("Removed route " + label + ".", {
