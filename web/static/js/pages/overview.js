@@ -1,6 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiNotConnected, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
-import { eventDetail, eventLabel, timeHtml } from "../core/format.js";
+import { applyErrorText, eventDetail, eventLabel, geoSourceLabel, timeHtml } from "../core/format.js";
 import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
 import { showToast } from "../core/toast.js";
@@ -624,7 +624,7 @@ function overviewHostGeoCard(o) {
 
     if (src) {
       const srcSpan = document.createElement("span");
-      srcSpan.textContent = "Source: " + src;
+      srcSpan.textContent = "Source: " + geoSourceLabel(src);
       meta.appendChild(srcSpan);
     }
 
@@ -1078,7 +1078,7 @@ export function initOverviewPage() {
       refreshPendingBadge();
       showToast("Applied to host");
     } catch (e) {
-      setOverviewMsg(String(e.message || e), true);
+      setOverviewMsg(applyErrorText(e), true);
     }
   }
 

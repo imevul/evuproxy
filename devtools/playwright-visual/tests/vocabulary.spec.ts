@@ -50,6 +50,55 @@ test("a failed Apply still shows why", async ({ page }) => {
   await expect(page.locator("#overview-events-list")).toContainText("nft: syntax error");
 });
 
+const APPLY_ERRORS = [
+  { route: "overview", button: "#btn-apply", msg: "#overview-action-msg" },
+  { route: "pending", button: "#pending-apply", msg: "#pending-msg" },
+];
+
+for (const { route: name, button, msg } of APPLY_ERRORS) {
+  test(`a failed Apply on ${name} does not repeat the API's reload error`, async ({ page }) => {
+    await page.route("**/api/v1/validate", (route) =>
+      route.fulfill({ json: { ok: true, warnings: [] } })
+    );
+    await page.route("**/api/v1/reload", (route) =>
+      route.fulfill({ status: 500, json: { error: "reload failed" } })
+    );
+    await gotoRoute(page, origin, name);
+    await page.locator(button).click();
+    await expect(page.locator(msg)).toHaveText("Apply failed");
+  });
+}
+
+test("another Apply error is shown as sent", async ({ page }) => {
+  await page.route("**/api/v1/validate", (route) =>
+    route.fulfill({ json: { ok: true, warnings: [] } })
+  );
+  await page.route("**/api/v1/reload", (route) =>
+    route.fulfill({ status: 503, json: { error: "another operation is in progress" } })
+  );
+  await gotoRoute(page, origin, "pending");
+  await page.locator("#pending-apply").click();
+  await expect(page.locator("#pending-msg")).toHaveText("another operation is in progress");
+});
+
+test("geo freshness calls an Apply an Apply", async ({ page }) => {
+  await page.route("**/api/v1/overview", async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...json,
+        geo_enabled: true,
+        geo_last_success_utc: new Date().toISOString(),
+        geo_last_success_source: "reload",
+      },
+    });
+  });
+  await gotoRoute(page, origin, "overview");
+  await expect(page.locator(".overview-geo-fresh-meta")).toHaveText("Source: Apply");
+});
+
 test("no page or help text uses the old labels", async ({ page }) => {
   await gotoRoute(page, origin, "overview");
   await expect(page.locator("#overview-events-list li").first()).toBeVisible();

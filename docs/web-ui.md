@@ -30,7 +30,7 @@ The UI uses one word for each operation:
 | **Apply** | Changes the host: regenerates WireGuard and nftables from the saved config. | `POST /api/v1/reload` | `evuproxy reload` |
 | **Refresh** | Re-reads what's on screen from the API. Nothing is written. | `GET` endpoints | |
 
-**Apply** in the UI and `reload` in the API and CLI are the same operation. **Overview** and **Pending changes** both offer **Apply**, and both run the lockout check first. **Recent activity** on Overview shows Apply events as **Apply started**, **Applied config** and **Apply failed**. The stored events and the CSV export keep the API's codes (`reload_started`, `reload_ok`, `reload_failed`), and a failed Apply also shows its `reload_error` code.
+**Apply** in the UI and `reload` in the API and CLI are the same operation. **Overview** and **Pending changes** both offer **Apply**, and both run the lockout check first. **Recent activity** on Overview shows Apply events as **Apply started**, **Applied config** and **Apply failed**. The stored events and the CSV export keep the API's codes (`reload_started`, `reload_ok`, `reload_failed`), and a failed Apply also shows its `reload_error` code. The API's `reload failed` error reads **Apply failed**, and a `geo_last_success_source` of `reload` reads **Source: Apply** in Overview's geo freshness.
 
 ## Saving
 

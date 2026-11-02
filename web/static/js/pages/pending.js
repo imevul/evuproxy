@@ -1,5 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus, clientIPSourceLabel } from "../core/dom.js";
+import { applyErrorText } from "../core/format.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
@@ -685,7 +686,7 @@ export function initPendingPage() {
         setApiStatus(true);
         showToast("Applied to host");
       } catch (e) {
-        setPendingMsg(String(e.message || e), true);
+        setPendingMsg(applyErrorText(e), true);
       }
     } finally {
       applyBtn.disabled = false;

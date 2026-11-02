@@ -84,3 +84,14 @@ export function eventLabel(code) {
 export function eventDetail(e) {
   return e.detail === "reload" ? "" : e.detail || "";
 }
+
+/** Why an Apply failed. Other errors, such as a busy or unreachable API, read as sent. */
+export function applyErrorText(e) {
+  const text = String(e.message || e);
+  return text === "reload failed" ? "Apply failed" : text;
+}
+
+/** What last loaded the geo lists. The API records an Apply as "reload". */
+export function geoSourceLabel(source) {
+  return source === "reload" ? "Apply" : source;
+}
