@@ -23,6 +23,7 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	clientIP := DetectClientIP(r)
+	clientIP.ConnPort = detectConnPort(r)
 	var draft *config.Config
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -54,7 +55,7 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 		c = loaded
 	}
 
-	res := apply.ValidateConfigWithWarnings(c, clientIP, s.GeoIP, fromDraft)
+	res := apply.ValidateConfigWithWarnings(c, apply.LoadAppliedConfig(s.Config), clientIP, s.GeoIP, fromDraft)
 	if !res.OK {
 		w.WriteHeader(http.StatusBadRequest)
 	}

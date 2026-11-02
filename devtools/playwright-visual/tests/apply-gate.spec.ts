@@ -7,7 +7,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { gotoRoute, seed } from "./helpers";
+import { gotoRoute, seed, token } from "./helpers";
 
 const origin = process.env.PW_BASE_URL?.trim() || "http://127.0.0.1:9080";
 
@@ -224,6 +224,78 @@ test.describe("pre-apply check", () => {
     await page.locator("#pending-apply").click();
     await expect(page.locator("#pending-lockout-ack")).not.toBeChecked();
     expect(applied).toBe(false);
+  });
+});
+
+/*
+ * These go through the mock's real /validate logic rather than a stubbed body.
+ * The edit is sent as a draft, which the mock does not persist, so the shared mock
+ * state stays untouched for other specs.
+ */
+test.describe("inbound rule lockout risk", () => {
+  test.beforeEach(async ({ page }) => {
+    await seed(page, { scheme: "light" });
+  });
+
+  type InboundRule = { dport: string; disabled?: boolean };
+
+  async function validateDraft(
+    page: import("@playwright/test").Page,
+    edit: (rules: InboundRule[]) => InboundRule[]
+  ) {
+    await page.route("**/api/v1/validate", async (route) => {
+      const res = await page.request.get(`${origin}/api/v1/config`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const cfg = await res.json();
+      cfg.input_allows = edit(cfg.input_allows);
+      // The mock's geo warning also engages the gate, so it would hide a missing inbound risk.
+      cfg.geo = { ...cfg.geo, enabled: false };
+      await route.continue({
+        postData: JSON.stringify(cfg),
+        headers: { ...route.request().headers(), "content-type": "application/json" },
+      });
+    });
+  }
+
+  const forSSH = (r: InboundRule) => r.dport === "22";
+
+  for (const [name, edit] of [
+    ["disabling", (rules: InboundRule[]) => rules.map((r) => (forSSH(r) ? { ...r, disabled: true } : r))],
+    ["removing", (rules: InboundRule[]) => rules.filter((r) => !forSSH(r))],
+  ] as const) {
+    test(`${name} the SSH rule requires acknowledgement before Apply`, async ({ page }) => {
+      await validateDraft(page, edit);
+      await gotoRoute(page, origin, "pending");
+
+      let applied = false;
+      await page.route("**/api/v1/reload", (route) => {
+        applied = true;
+        return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+      });
+
+      await page.locator("#pending-apply").click();
+      await expect(page.locator("#pending-validate-panel")).toHaveClass(/evu-alert--warning/);
+      await expect(page.locator("#pending-validate-warnings")).toContainText("TCP port 22 (SSH)");
+      await expect(page.locator("#pending-lockout-ack-wrap")).not.toHaveClass(/is-hidden/);
+      expect(applied, "apply must not reach the host before acknowledgement").toBe(false);
+
+      await page.locator("#pending-lockout-ack").check();
+      await page.locator("#pending-apply").click();
+      await expect.poll(() => applied).toBe(true);
+    });
+  }
+
+  test("disabling an unrelated rule raises no inbound risk", async ({ page }) => {
+    await validateDraft(page, (rules) =>
+      rules.map((r) => (r.dport.includes("443") ? { ...r, disabled: true } : r))
+    );
+    await gotoRoute(page, origin, "pending");
+
+    await page.locator("#pending-check-config").click();
+    await expect(page.locator("#pending-validate-panel")).toHaveClass(/evu-alert--success/);
+    await expect(page.locator("#pending-validate-warnings")).not.toContainText("TCP port");
+    await expect(page.locator("#pending-lockout-ack-wrap")).toHaveClass(/is-hidden/);
   });
 });
 

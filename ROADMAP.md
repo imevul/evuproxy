@@ -177,7 +177,7 @@ Apply flow:
 
 - [ ] Plain-language list of pending changes with per-item Revert, with the raw nftables diff collapsed beneath it
 - [ ] Unapplied-changes bar on every page, and a single Apply action that checks first and shows progress
-- [ ] Warn when a change would disable inbound access for the current connection
+- [x] Warn when a change would disable inbound access for the current connection
 
 Polish and reach:
 
