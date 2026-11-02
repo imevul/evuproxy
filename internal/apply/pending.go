@@ -28,6 +28,9 @@ type PendingInfo struct {
 	DiscardChangeCount int `json:"discard_change_count"`
 	// RestorePreviousChangeCount is how many things restoring the previous applied config would change; 0 when unknown.
 	RestorePreviousChangeCount int `json:"restore_previous_change_count"`
+	// AppliedConfig is the last applied config, shaped like GET /config, for comparing with
+	// the saved one. Null when .bak is missing, does not load, or is not what was last applied.
+	AppliedConfig *config.Config `json:"applied_config"`
 }
 
 // PendingSummary loads the on-disk config, compares its hash to last apply, and renders nftables preview.
@@ -64,6 +67,11 @@ func PendingSummary(cfgPath string) (PendingInfo, error) {
 		bh := sha256.Sum256(bakBytes)
 		bakHex := hex.EncodeToString(bh[:])
 		out.DiscardAvailable = cur != bakHex
+		// The hash is recorded before .bak on reload and without it on first start, so
+		// .bak can lag behind. Comparing against the wrong config would list wrong changes.
+		if bakHex == applied {
+			out.AppliedConfig = LoadAppliedConfig(cfgPath)
+		}
 		ra, err := state.RestorePreviousAppliedAvailable(cfgPath)
 		if err != nil {
 			slog.Debug("pending: restore-previous check", "err", err)

@@ -136,5 +136,22 @@ test.describe("accessibility (axe-core)", () => {
       await page.locator("#confirm-modal").waitFor({ state: "visible" });
       await expectNoBlockingViolations(page, `danger confirm (${scheme})`);
     });
+
+    test(`a11y pending changes list ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme });
+      await page.route("**/api/v1/pending", async (route) => {
+        const res = await route.fetch();
+        const body = await res.json();
+        // An applied config with no rows, so whatever is saved lists as added.
+        const applied = { ...body.applied_config, peers: [], input_allows: [] };
+        await route.fulfill({ response: res, json: { ...body, pending: true, applied_config: applied } });
+      });
+      await gotoRoute(page, baseURL!, "pending");
+      await page.locator("#pending-changes-list .pending-change").first().waitFor({ state: "visible" });
+      await page.locator("#pending-raw-diff summary").click();
+      await page.locator("#pending-mode-unified").waitFor({ state: "visible" });
+      await expectNoBlockingViolations(page, `pending changes list (${scheme})`);
+    });
   }
 });
