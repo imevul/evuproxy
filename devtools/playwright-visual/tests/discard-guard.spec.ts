@@ -31,7 +31,7 @@ async function editGeoForm(page: Page): Promise<void> {
   await seed(page, { scheme: "light", advanced: true });
   await gotoRoute(page, origin, "geoblocking");
   await fillBreakGlass(page);
-  await expect(page.locator("#page-geoblocking #geo-unsaved-msg")).toBeVisible();
+  await expect(page.locator("#page-geoblocking .save-bar")).toBeVisible();
 }
 
 const navLink = (page: Page, route: string) => page.locator(`.nav-link[data-route="${route}"]`);
@@ -202,7 +202,7 @@ test.describe("discard guard: page forms", () => {
     await expect(page.locator("#page-geoblocking")).toBeVisible();
     await page.waitForLoadState("networkidle");
     await expect(prompt(page)).toHaveClass(/is-hidden/);
-    await expect(page.locator("#page-geoblocking #geo-unsaved-msg")).toBeHidden();
+    await expect(page.locator("#page-geoblocking .save-bar")).toBeHidden();
   });
 
   test("leaving a dirty Geoblock form warns, and staying keeps the edits", async ({ page }) => {
@@ -265,7 +265,7 @@ test.describe("discard guard: page forms", () => {
     await gotoRoute(page, origin, "geoblocking");
     await page.locator("#page-geoblocking #geo-tab-advanced-btn").click();
     await page.locator("#page-geoblocking #geo-f-rate-udp").fill("4242");
-    await expect(page.locator("#page-geoblocking #geo-unsaved-msg")).toBeVisible();
+    await expect(page.locator("#page-geoblocking .save-bar")).toBeVisible();
 
     await navLink(page, "routes").click();
     await expect(prompt(page)).not.toHaveClass(/is-hidden/);

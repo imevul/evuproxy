@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
@@ -485,6 +486,8 @@ async function addBreakGlass(ip, rowIndex) {
         cfg.geo.break_glass_cidrs = list.filter((c) => c !== cidr);
       },
       afterSave: (_cfg, focus) => {
+        // Drop any in-flight Logs refresh so its older config cannot overwrite this write.
+        state.logsRefreshSeq++;
         setLogsMsg("");
         refreshPendingBadge();
         renderLogsView();
@@ -496,7 +499,8 @@ async function addBreakGlass(ip, rowIndex) {
       message: () => "Removed " + cidr + " from break-glass.",
     });
   } catch (e) {
-    setLogsMsg(String(e.message || e), true);
+    setLogsMsg("", true);
+    reportBesideControl($("logs-msg"), String(e.message || e));
   } finally {
     logsBreakGlassBusy = false;
   }

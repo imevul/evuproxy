@@ -40,7 +40,7 @@ text needs. The app darkens the fill with `--evuproxy-danger-fill` in
 - New `--control-border` / `--evu-control-border` token, and motion tokens (`--evu-ease-out`, `--evu-duration-press`, `--evu-duration-fast`, `--evu-duration-enter`).
 - `.evu-btn` scales on press, with reduced motion respected.
 - New `.evu-checkbox`, `.evu-check`, `.evu-check-group`, `.evu-toaster` and `.evu-toast`. Toasts are styles only; each app supplies the timer and behaviour.
-- The app's forms do not use the new checkbox yet. The checkbox rules in [`../style/forms.css`](../style/forms.css) stay until the form migration, and override `.evu-checkbox` by specificity.
+- The app's forms use the theme checkbox. Switches stay on `.evu-switch`.
 
 ## Sync notes (833a0ab)
 

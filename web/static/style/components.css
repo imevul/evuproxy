@@ -6,6 +6,86 @@ tr.is-filter-hidden {
   display: none;
 }
 
+/*
+ * Save bar (core/save_bar.js). Fixed, not sticky: the document scrolls, because the
+ * shell only has a min-height, so the main column never scrolls for sticky to hold on
+ * to. It lines up with the main column: sidebar width plus the column's padding.
+ */
+.page:has(> .save-bar:not([hidden])) {
+  padding-bottom: 5rem;
+}
+
+/* Tabbing to a field near the bottom must not leave it underneath the bar. */
+html:has(.page:not([hidden]) > .save-bar:not([hidden])) {
+  scroll-padding-bottom: 5.5rem;
+}
+
+.save-bar {
+  position: fixed;
+  z-index: 5;
+  inset-block-end: 1rem;
+  inset-inline: 15.25rem 1.25rem;
+  max-width: calc(var(--evuproxy-content-max-width, 1200px) - 2.5rem);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--evu-border);
+  border-radius: var(--evu-radius);
+  background: var(--evu-card);
+  color: var(--evu-card-foreground);
+  box-shadow: 0 8px 24px hsl(220 20% 4% / 0.18), 0 1px 2px hsl(220 20% 4% / 0.12);
+}
+
+.save-bar[hidden] {
+  display: none;
+}
+
+/* The sidebar is off-canvas here, so the bar has the whole width. */
+@media (max-width: 767px) {
+  .save-bar {
+    inset-inline: 1rem;
+  }
+}
+
+.save-bar__text {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.save-bar .save-bar__error {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+
+.save-bar__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+/* The toaster sits over the same corner as Save. */
+body:has(.page:not([hidden]) > .save-bar:not([hidden])) .evu-toaster {
+  inset-block-end: 4.5rem;
+}
+
+/* A checkbox with a help button beside it: a button cannot sit inside the label. */
+.check-with-help {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* An instant switch's own error, under the switch that snapped back. */
+.switch-error {
+  margin: 0.35rem 0 0;
+}
+
+.switch-error:empty {
+  display: none;
+}
+
 /* Base and --ok come from the theme; the theme has no destructive pill variant. */
 .evu-pill--err {
   color: var(--evuproxy-danger-text);
@@ -20,6 +100,12 @@ tr.is-filter-hidden {
  */
 .evu-pill--ok {
   color: var(--evuproxy-success-text);
+}
+
+/* Same for this badge, on the 12% tint that --evuproxy-warning-text is tuned for. */
+.evu-badge--warning {
+  color: var(--evuproxy-warning-text);
+  background: hsl(var(--warning) / 0.12);
 }
 
 .data .cell-disabled-toggle {
@@ -93,7 +179,8 @@ tr.is-filter-hidden {
   margin: 0 0 0.75rem;
 }
 
-.hint code {
+.hint code,
+.meta code {
   color: var(--evuproxy-secondary-text);
 }
 

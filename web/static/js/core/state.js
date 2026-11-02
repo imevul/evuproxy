@@ -23,7 +23,7 @@ export const state = {
   lastPeerPingByTunnel: null,
   peerOverviewFetchSeq: 0,
   peerOverviewDebounceTimer: null,
-  /** Ignores stale results when multiple refreshOverviewPage runs overlap (navigate + save-token, etc.). */
+  /** Ignores stale results when multiple refreshOverviewPage runs overlap (navigate + token Connect, etc.). */
   overviewRefreshSeq: 0,
 
   /** Parsed firewall log lines from last successful GET /v1/logs (client-side filter/table). */
