@@ -33,6 +33,30 @@ async function columnText(page: Page, wrap: string, nth: number): Promise<string
   return page.locator(`#${wrap} tbody tr:not(.row-error) td:nth-child(${nth})`).allInnerTexts();
 }
 
+/** Waits for the next poll to have redrawn `selector`: a redraw replaces the element, and the mark with it. */
+async function waitForRedraw(page: Page, selector: string) {
+  await page.locator(selector).evaluate((el) => el.setAttribute("data-before-poll", ""));
+  await expect(page.locator(`${selector}:not([data-before-poll])`)).toHaveCount(1, { timeout: 20_000 });
+}
+
+const panZoomLayer = "#topology-pan-zoom-layer";
+
+async function panZoom(page: Page) {
+  const transform = (await page.locator(panZoomLayer).getAttribute("transform")) ?? "";
+  const m = transform.match(/translate\((.+),(.+)\) scale\((.+)\)/);
+  expect(m, transform).toBeTruthy();
+  return { x: +m![1], y: +m![2], k: +m![3] };
+}
+
+/** Drags from the graph's empty left edge, where a press pans rather than hits a card. */
+async function dragGraph(page: Page, dy: number) {
+  const box = (await page.locator("#topology-svg").boundingBox())!;
+  await page.mouse.move(box.x + 5, box.y + 150);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 5, box.y + 150 + dy);
+  await page.mouse.up();
+}
+
 test.describe("at scale", () => {
   let snapshot: unknown;
 
@@ -188,12 +212,25 @@ test.describe("at scale", () => {
     expect(await scroller.evaluate((el) => el.scrollTop)).toBe(300);
   });
 
-  test("peers sort by name, and a ping poll keeps the order", async ({ page }) => {
-    await gotoRoute(page, origin, "peers");
-    const button = sortButton(page, "peers-table-wrap", "Name");
-    await button.click();
-    await button.click();
-    await expect(page.locator("#peers-table-wrap tbody tr td").first()).toHaveText("peer-40");
+  test("peers sort by name, and a ping poll keeps the order", async ({ page, request }) => {
+    const prefsUrl = origin + "/api/v1/preferences";
+    const prefsPut = { headers: { ...auth(), "Content-Type": "application/json" } };
+    const prefs = await (await request.get(prefsUrl, { headers: auth() })).json();
+    // The ping poll only runs with metrics on, every 12 seconds.
+    await request.put(prefsUrl, { ...prefsPut, data: { metrics_collection_enabled: true } });
+    try {
+      await gotoRoute(page, origin, "peers");
+      const button = sortButton(page, "peers-table-wrap", "Name");
+      await button.click();
+      await button.click();
+      await expect(page.locator("#peers-table-wrap tbody tr td").first()).toHaveText("peer-40");
+
+      await waitForRedraw(page, "#peers-table-wrap table");
+      await expect(page.locator("#peers-table-wrap tbody tr td").first()).toHaveText("peer-40");
+      await expect(page.locator("#peers-table-wrap thead th", { hasText: "Name" })).toHaveAttribute("aria-sort", "descending");
+    } finally {
+      await request.put(prefsUrl, { ...prefsPut, data: { metrics_collection_enabled: !!prefs.metrics_collection_enabled } });
+    }
   });
 
   test.describe("topology", () => {
@@ -208,6 +245,22 @@ test.describe("at scale", () => {
       const card = await page.locator("#topology-svg .topology-node--peer").first().boundingBox();
       // Drawn at 58 units; the sliver this replaces was a fraction of that.
       expect(card!.height).toBeGreaterThanOrEqual(58);
+    });
+
+    test("the graph's accessible name counts routes, not drawn rows", async ({ page }) => {
+      await gotoRoute(page, origin, "topology");
+      const title = page.locator("#topology-svg-title");
+      await expect(routeCards(page)).toHaveCount(10);
+      await expect(page.locator("#topology-svg")).toHaveAttribute("aria-labelledby", "topology-svg-title");
+      await expect(title).toHaveText(/^31 routes on 10 peer\(s\), \d+ online peer link\(s\)$/);
+
+      await page.locator("#topology-expand-all").click();
+      await expect(routeCards(page)).toHaveCount(31);
+      await expect(title).toHaveText(/^31 routes on 10 peer\(s\), /);
+
+      await page.locator("#topology-filter").fill("peer-01");
+      await expect(routeCards(page)).toHaveCount(4);
+      await expect(title).toHaveText(/^4 of 31 routes match, on 1 peer\(s\), /);
     });
 
     test("Center returns to the readable level, not a fit of the whole graph", async ({ page }) => {
@@ -269,11 +322,136 @@ test.describe("at scale", () => {
       const graph = page.locator("#topology-svg");
       await graph.hover();
       await page.mouse.wheel(0, 40);
-      const layer = page.locator("#topology-pan-zoom-layer");
+      const layer = page.locator(panZoomLayer);
       await expect(layer).toHaveAttribute("transform", /,-40\)/);
-      await page.waitForResponse((r) => r.url().endsWith("/api/v1/stats"), { timeout: 15_000 });
+      await waitForRedraw(page, panZoomLayer);
       await expect(routeCards(page)).toHaveCount(31);
       await expect(layer).toHaveAttribute("transform", /,-40\)/);
+    });
+
+    /** Expanded, scrolled well away from the first peer's toggle. */
+    async function scrollAwayFromFirstToggle(page: Page) {
+      await page.locator("#topology-svg").hover({ position: { x: 5, y: 5 } });
+      await page.mouse.wheel(0, 900);
+      await expect(page.locator(panZoomLayer)).toHaveAttribute("transform", /,-900\)/);
+    }
+
+    test("a poll does not pull the graph back to a toggle clicked with the mouse", async ({ page }) => {
+      await gotoRoute(page, origin, "topology");
+      await page.locator("#topology-expand-all").click();
+      await expect(routeCards(page)).toHaveCount(31);
+      await toggles(page).first().click();
+      await expect(routeCards(page)).toHaveCount(28);
+      await toggles(page).first().click();
+      await expect(routeCards(page)).toHaveCount(31);
+      await expect(toggles(page).first()).toBeFocused();
+
+      await scrollAwayFromFirstToggle(page);
+      await waitForRedraw(page, panZoomLayer);
+      await expect(page.locator(panZoomLayer)).toHaveAttribute("transform", /,-900\)/);
+      await expect(toggles(page).first()).toBeFocused();
+    });
+
+    test("a poll does not pull the graph back to a toggle used from the keyboard", async ({ page }) => {
+      await gotoRoute(page, origin, "topology");
+      await page.locator("#topology-expand-all").click();
+      await expect(routeCards(page)).toHaveCount(31);
+      await toggles(page).first().focus();
+      await page.keyboard.press("Enter");
+      await expect(routeCards(page)).toHaveCount(28);
+      await page.keyboard.press("Enter");
+      await expect(routeCards(page)).toHaveCount(31);
+
+      await scrollAwayFromFirstToggle(page);
+      await waitForRedraw(page, panZoomLayer);
+      await expect(page.locator(panZoomLayer)).toHaveAttribute("transform", /,-900\)/);
+      await expect(toggles(page).first()).toBeFocused();
+    });
+
+    test("tabbing to a toggle off screen still brings it into view", async ({ page }) => {
+      await gotoRoute(page, origin, "topology");
+      await page.locator("#topology-expand-all").click();
+      await expect(routeCards(page)).toHaveCount(31);
+      await scrollAwayFromFirstToggle(page);
+
+      await page.locator("#topology-expand-all").focus();
+      for (let i = 0; i < 6 && !(await toggles(page).first().evaluate((el) => el === document.activeElement)); i++) {
+        await page.keyboard.press("Tab");
+      }
+      await expect(toggles(page).first()).toBeFocused();
+      const box = (await page.locator("#topology-svg").boundingBox())!;
+      const toggle = (await toggles(page).first().boundingBox())!;
+      expect(toggle.y).toBeGreaterThanOrEqual(box.y);
+      expect(toggle.y + toggle.height).toBeLessThanOrEqual(box.y + box.height);
+    });
+
+    test("a mouse click lands on a toggle that is partly scrolled out of view", async ({ page }) => {
+      await gotoRoute(page, origin, "topology");
+      await page.locator("#topology-expand-all").click();
+      await expect(routeCards(page)).toHaveCount(31);
+      const box = (await page.locator("#topology-svg").boundingBox())!;
+      const toggle = (await toggles(page).first().boundingBox())!;
+      const dy = Math.round(toggle.y - box.y + toggle.height / 2);
+      await page.locator("#topology-svg").hover({ position: { x: 5, y: 5 } });
+      await page.mouse.wheel(0, dy);
+      await expect(page.locator(panZoomLayer)).toHaveAttribute("transform", new RegExp(`,-${dy}\\)`));
+
+      await page.mouse.click(toggle.x + toggle.width / 2, box.y + 2);
+      await expect(routeCards(page)).toHaveCount(28);
+    });
+
+    test("a poll keeps a Ctrl+scroll zoom-out from the top of the graph", async ({ page }) => {
+      await gotoRoute(page, origin, "topology");
+      await page.locator("#topology-expand-all").click();
+      await expect(routeCards(page)).toHaveCount(31);
+      await page.locator("#topology-svg").hover({ position: { x: 300, y: 200 } });
+      await page.keyboard.down("Control");
+      await page.mouse.wheel(0, 300);
+      await page.mouse.wheel(0, 300);
+      await page.keyboard.up("Control");
+      await expect.poll(async () => (await panZoom(page)).k).toBeLessThan(0.31);
+
+      const zoomed = await panZoom(page);
+      expect(zoomed.y).toBe(0);
+      await waitForRedraw(page, panZoomLayer);
+      expect(await panZoom(page)).toEqual(zoomed);
+    });
+
+    test("a poll keeps a Ctrl+scroll zoom-out from the bottom of the graph", async ({ page }) => {
+      await gotoRoute(page, origin, "topology");
+      await page.locator("#topology-expand-all").click();
+      await expect(routeCards(page)).toHaveCount(31);
+      const graph = page.locator("#topology-svg");
+      await graph.hover({ position: { x: 300, y: 200 } });
+      await page.mouse.wheel(0, 100_000);
+      await expect.poll(async () => (await panZoom(page)).y).toBeLessThan(-900);
+
+      await page.keyboard.down("Control");
+      await page.mouse.wheel(0, 100);
+      await page.keyboard.up("Control");
+      await expect.poll(async () => (await panZoom(page)).k).toBeLessThan(0.9);
+
+      const zoomed = await panZoom(page);
+      await waitForRedraw(page, panZoomLayer);
+      expect(await panZoom(page)).toEqual(zoomed);
+    });
+
+    test("a poll keeps a drag, which stops at the top of the graph", async ({ page }) => {
+      await gotoRoute(page, origin, "topology");
+      await page.locator("#topology-expand-all").click();
+      await expect(routeCards(page)).toHaveCount(31);
+
+      await dragGraph(page, 100);
+      const atTop = await panZoom(page);
+      expect(atTop.y).toBe(0);
+      await waitForRedraw(page, panZoomLayer);
+      expect(await panZoom(page)).toEqual(atTop);
+
+      await dragGraph(page, -100);
+      const dragged = await panZoom(page);
+      expect(dragged.y).toBeLessThan(-50);
+      await waitForRedraw(page, panZoomLayer);
+      expect(await panZoom(page)).toEqual(dragged);
     });
   });
 });
@@ -289,6 +467,18 @@ test.describe("at normal sizes", () => {
     await expect(page.locator("#topology-svg .topology-node--route")).toHaveCount(routes.length);
     await expect(page.locator("#topology-svg [data-topo-toggle]")).toHaveCount(0);
     await expect(page.locator("#topology-scale-controls")).toBeHidden();
+    await expect(page.locator("#topology-svg-title")).toHaveText(new RegExp(`^${routes.length} route\\(s\\), \\d+ peer target\\(s\\), `));
+  });
+
+  test("the graph can still be dragged freely, and a poll keeps it there", async ({ page, request }) => {
+    const routes = (await getConfig(request)).forwarding.routes;
+    await gotoRoute(page, origin, "topology");
+    await expect(page.locator("#topology-svg .topology-node--route")).toHaveCount(routes.length);
+    await dragGraph(page, 60);
+    const dragged = await panZoom(page);
+    expect(dragged.y).toBeGreaterThan(0);
+    await waitForRedraw(page, panZoomLayer);
+    expect(await panZoom(page)).toEqual(dragged);
   });
 });
 

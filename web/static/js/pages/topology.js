@@ -132,6 +132,13 @@ function routeCountText(n) {
   return n + (n === 1 ? " route" : " routes");
 }
 
+function topologyScaleSummaryText(groups, totalRoutes) {
+  const shown = groups.reduce((n, g) => n + g.routes.length, 0);
+  return state.topologyFilter.trim()
+    ? shown + " of " + routeCountText(totalRoutes) + " match, on " + groups.length + " peer(s)"
+    : routeCountText(totalRoutes) + " on " + groups.length + " peer(s)";
+}
+
 function syncTopologyScaleControls(atScale, groups, totalRoutes) {
   const controls = $("topology-scale-controls");
   if (!controls) return;
@@ -140,10 +147,7 @@ function syncTopologyScaleControls(atScale, groups, totalRoutes) {
     $("topology-filter").value = "";
     return;
   }
-  const shown = groups.reduce((n, g) => n + g.routes.length, 0);
-  const text = state.topologyFilter.trim()
-    ? shown + " of " + routeCountText(totalRoutes) + " match, on " + groups.length + " peer(s)"
-    : routeCountText(totalRoutes) + " on " + groups.length + " peer(s)";
+  const text = topologyScaleSummaryText(groups, totalRoutes);
   // A status region: only a real change should be read out, not every poll.
   const summary = $("topology-scale-summary");
   if (summary.textContent !== text) summary.textContent = text;
@@ -358,6 +362,11 @@ function clampTopologyPanY(y, viewH) {
   return Math.min(0, Math.max(lowest, y));
 }
 
+/** The limit a redraw applies, used by gestures too so the next poll has nothing to move. */
+function limitTopologyPanY(y) {
+  return state.topologyAtScale ? clampTopologyPanY(y, topologyScaleViewBox().vh) : y;
+}
+
 /** Moves a card reached by keyboard into view; the browser cannot scroll inside an SVG for us. */
 function revealTopologyNode(svg, node) {
   const fo = node.closest("foreignObject");
@@ -370,6 +379,8 @@ function revealTopologyNode(svg, node) {
   state.topologyPanY = clampTopologyPanY(state.topologyPanY + (top < 0 ? -top : vh - bottom), vh);
   applyTopologyPanZoomTransform(svg);
 }
+
+let restoringTopologyFocus = false;
 
 function initTopologyViewport() {
   const svg = $("topology-svg");
@@ -402,9 +413,9 @@ function initTopologyViewport() {
       const k1 = state.topologyZoomK;
       if (Math.abs(k2 - k1) < 1e-9) return;
       const r = k2 / k1;
-      state.topologyPanX = mx - r * (mx - state.topologyPanX);
-      state.topologyPanY = my - r * (my - state.topologyPanY);
       state.topologyZoomK = k2;
+      state.topologyPanX = mx - r * (mx - state.topologyPanX);
+      state.topologyPanY = limitTopologyPanY(my - r * (my - state.topologyPanY));
       applyTopologyPanZoomTransform(svg);
     },
     { passive: false }
@@ -436,7 +447,7 @@ function initTopologyViewport() {
     const u = topologySvgPointFromClient(svg, e.clientX, e.clientY);
     if (!u) return;
     state.topologyPanX = state.topologyPanDrag.tx0 + (u.x - state.topologyPanDrag.u0.x);
-    state.topologyPanY = state.topologyPanDrag.ty0 + (u.y - state.topologyPanDrag.u0.y);
+    state.topologyPanY = limitTopologyPanY(state.topologyPanDrag.ty0 + (u.y - state.topologyPanDrag.u0.y));
     applyTopologyPanZoomTransform(svg);
   });
 
@@ -462,7 +473,10 @@ function initTopologyViewport() {
     redrawTopology();
   });
   svg.addEventListener("focusin", (e) => {
-    if (e.target.closest && e.target.closest("[data-topo-toggle]")) revealTopologyNode(svg, e.target);
+    // Keyboard moves only. A redraw restoring focus must not pull the graph back to the toggle, and
+    // moving a toggle out from under a mouse press would make the click miss it.
+    if (restoringTopologyFocus || !e.target.matches(":focus-visible")) return;
+    if (e.target.closest("[data-topo-toggle]")) revealTopologyNode(svg, e.target);
   });
 
   const wrap = $("topology-graph-wrap");
@@ -473,6 +487,7 @@ function initTopologyViewport() {
       const { vw, vh } = topologyScaleViewBox();
       svg.setAttribute("viewBox", "0 0 " + vw + " " + vh);
       state.topologyPanX += (vw - before) / 2;
+      state.topologyPanY = clampTopologyPanY(state.topologyPanY, vh);
       applyTopologyPanZoomTransform(svg);
     }).observe(wrap);
   }
@@ -717,11 +732,12 @@ function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
   }
 
   const online = slots.filter((s) => s.peer && peerWgTopologyState(s.peer, st) === "on").length;
+  // At scale `routes` holds stand-ins for collapsed peers, so it does not count routes.
   const summary =
-    routes.length +
-    " route(s), " +
-    slots.length +
-    " peer target(s), " +
+    (atScale
+      ? topologyScaleSummaryText(groups, configRoutes.length)
+      : routes.length + " route(s), " + slots.length + " peer target(s)") +
+    ", " +
     online +
     " online peer link(s)";
   if (atScale) {
@@ -745,7 +761,11 @@ function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
   applyTopologyPanZoomTransform(svg);
   if (focusedToggle) {
     const again = svg.querySelector('[data-topo-toggle="' + CSS.escape(focusedToggle) + '"]');
-    if (again) again.focus();
+    if (again) {
+      restoringTopologyFocus = true;
+      again.focus({ preventScroll: true });
+      restoringTopologyFocus = false;
+    }
   }
 }
 
