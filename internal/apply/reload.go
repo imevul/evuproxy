@@ -29,16 +29,27 @@ var wgInterfaceExists = func(iface string) bool {
 	return err == nil
 }
 
+// The stages of a reload, in order, as passed to ReloadWithProgress's callback.
+const (
+	ReloadStepFirewall  = "firewall"
+	ReloadStepWireGuard = "wireguard"
+)
+
 // Reload writes generated artifacts and applies nftables + WireGuard.
 // A cross-process file lock serializes it against other mutating operations
 // (CLI vs API); privileged subprocesses run under per-command timeouts.
 func Reload(ctx context.Context, cfgPath string) error {
+	return ReloadWithProgress(ctx, cfgPath, func(string) {})
+}
+
+// ReloadWithProgress is Reload, calling progress as each stage starts.
+func ReloadWithProgress(ctx context.Context, cfgPath string, progress func(step string)) error {
 	unlock, err := acquireApplyLock(ctx, cfgPath)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	err = reload(ctx, cfgPath)
+	err = reload(ctx, cfgPath, progress)
 	if err != nil {
 		_ = state.RecordApplyFailure(cfgPath)
 		return err
@@ -47,7 +58,8 @@ func Reload(ctx context.Context, cfgPath string) error {
 	return nil
 }
 
-func reload(ctx context.Context, cfgPath string) error {
+func reload(ctx context.Context, cfgPath string, progress func(step string)) error {
+	progress(ReloadStepFirewall)
 	c, err := config.Load(cfgPath)
 	if err != nil {
 		return err
@@ -133,6 +145,7 @@ func reload(ctx context.Context, cfgPath string) error {
 		}
 	}
 
+	progress(ReloadStepWireGuard)
 	if err := reloadWireGuard(ctx, c.WireGuard.Interface, strings.TrimSpace(c.WireGuard.Address), wgPath); err != nil {
 		return err
 	}

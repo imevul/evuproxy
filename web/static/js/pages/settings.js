@@ -207,7 +207,7 @@ async function saveSettingsForm() {
   setApiStatus(true);
   showToast(
     configDirty
-      ? "Settings saved. The public interface needs Apply: review it on Pending changes."
+      ? "Settings saved. The public interface needs Apply."
       : "Settings saved"
   );
 }
@@ -664,7 +664,7 @@ export function initSettingsPage() {
         await putConfigAtRevision(state.configUploadDraft, configUploadRevision);
         closeConfigUploadModal();
         refreshPendingBadge();
-        showToast("Config replaced on server. Review it on Pending changes, then Apply.");
+        showToast("Config replaced on server.");
       } catch (e) {
         let text = String(e.message || e);
         if (isConfigRevisionMismatch(e)) {

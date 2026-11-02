@@ -528,7 +528,7 @@ async function saveGeoblocking() {
   setApiStatus(true);
   refreshPendingBadge();
   void refreshGeoZonesTable();
-  showToast("Geoblocking saved. Review it on Pending changes, then Apply.");
+  showToast("Geoblocking saved.");
 }
 
 function clearGeoIPCheckResult() {

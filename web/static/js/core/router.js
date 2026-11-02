@@ -4,6 +4,7 @@ import { ensureApiGate, applyNavRestriction, token } from "./api.js";
 import { setGeoEditorTab } from "./advanced.js";
 import { beginLoading } from "./loading.js";
 import { setTitlePage } from "./title.js";
+import { dropPassedCheck } from "./apply_bar.js";
 import { ensureUIPrefs } from "./prefs.js";
 import { anyOpenModalDirty, closeAllModals, closeConfirmModal, confirmDiscard } from "./modal.js";
 import { pageForm } from "./dirty.js";
@@ -149,6 +150,7 @@ export async function navigate(name, opts) {
     // the page has reloaded it on the next visit.
     const leaving = pageForm(currentRoute);
     if (leaving) leaving.clear();
+    dropPassedCheck();
     currentRoute = name;
   }
   if (name !== "overview") {

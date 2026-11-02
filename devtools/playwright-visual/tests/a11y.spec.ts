@@ -153,5 +153,30 @@ test.describe("accessibility (axe-core)", () => {
       await page.locator("#pending-mode-unified").waitFor({ state: "visible" });
       await expectNoBlockingViolations(page, `pending changes list (${scheme})`);
     });
+
+    test(`a11y apply bar and result ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme });
+      await page.route("**/api/v1/pending", async (route) => {
+        const res = await route.fetch();
+        await route.fulfill({ response: res, json: { ...(await res.json()), pending: true } });
+      });
+      await page.route("**/api/v1/validate", (route) =>
+        route.fulfill({
+          json: {
+            ok: false,
+            errors: [{ code: "nft_syntax", message: "nft -c rejected the ruleset." }],
+            warnings: [{ code: "lockout_risk_source_allow", message: "Your IP is not in the source allowlist." }],
+            detected_client_ip: "203.0.113.50",
+            ip_detection_source: "direct",
+          },
+        })
+      );
+      await gotoRoute(page, baseURL!, "routes");
+      await page.locator("#apply-bar-apply").click();
+      await page.locator("#pending-validate-panel").waitFor({ state: "visible" });
+      await page.locator("#pending-lockout-ack").waitFor({ state: "visible" });
+      await expectNoBlockingViolations(page, `apply bar and failed result (${scheme})`);
+    });
   }
 });

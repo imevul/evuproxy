@@ -1,6 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiNotConnected, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
-import { applyErrorText, eventDetail, eventLabel, geoSourceLabel, timeHtml } from "../core/format.js";
+import { eventDetail, eventLabel, geoSourceLabel, timeHtml } from "../core/format.js";
 import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
 import { showToast } from "../core/toast.js";
@@ -14,13 +14,6 @@ import {
 } from "../core/peers_data.js";
 import { tunnelToHost } from "../core/net.js";
 import { refreshPendingBadge } from "./pending.js";
-import { openConfirmModal } from "../core/modal.js";
-import {
-  fetchValidateResult,
-  lockoutRiskLines,
-  lockoutRisks,
-  lockoutSignature,
-} from "../core/lockout.js";
 
 /** 1 min aligns with collector buckets; avoids doubling load with full overview refetch. */
 const OVERVIEW_LATENCY_POLL_MS = 60 * 1000;
@@ -1012,85 +1005,6 @@ export function initOverviewPage() {
     });
   }
 
-  const applyBtn = $("btn-apply");
-  // Same host-mutating endpoint as Apply on Pending changes, so it gets the same
-  // lockout gate. Leaving this one ungated would make the gate decorative —
-  // maintenance mode is itself a lockout risk, and the copy next to this button
-  // tells the operator to press it.
-  async function applyWithLockoutCheck() {
-    setOverviewMsg("Checking config…");
-    const { res, error } = await fetchValidateResult();
-    if (!res) {
-      setOverviewMsg(error, true);
-      return;
-    }
-    if (!res.ok) {
-      setOverviewMsg("Config check failed; see Pending changes → Check config.", true);
-      return;
-    }
-    const risks = lockoutRisks(res);
-    if (risks.length) {
-      const ip = res.detected_client_ip || "unknown";
-      setOverviewMsg("Apply needs confirmation: this config may lock you out.", true);
-      openConfirmModal({
-        title: "Applying may lock you out",
-        message:
-          "Your connection appears as " +
-          ip +
-          ".\n\n" +
-          lockoutRiskLines(risks).join("\n") +
-          "\n\nOnly continue if you have another way back into this host.",
-        confirmLabel: "Apply anyway",
-        // Re-check on confirm: the dialog can sit open while another tab, the CLI
-        // or another operator saves something else. The confirmation covers the
-        // risks that were on screen, so a different set has to be read first.
-        onConfirm: () => confirmedApply(lockoutSignature(risks)),
-      });
-      return;
-    }
-    await doApply();
-  }
-
-  async function confirmedApply(acknowledged) {
-    setOverviewMsg("Checking config…");
-    const { res, error } = await fetchValidateResult();
-    if (!res) {
-      setOverviewMsg(error, true);
-      return;
-    }
-    if (!res.ok) {
-      setOverviewMsg("Config check failed; see Pending changes → Check config.", true);
-      return;
-    }
-    if (lockoutSignature(lockoutRisks(res)) !== acknowledged) {
-      setOverviewMsg("The config changed since you confirmed. Press Apply to review again.", true);
-      return;
-    }
-    await doApply();
-  }
-
-  async function doApply() {
-    setOverviewMsg("…");
-    try {
-      await api("/v1/reload", { method: "POST" });
-      setOverviewMsg("");
-      await refreshOverviewPage();
-      refreshPendingBadge();
-      showToast("Applied to host");
-    } catch (e) {
-      setOverviewMsg(applyErrorText(e), true);
-    }
-  }
-
-  applyBtn.addEventListener("click", async () => {
-    if (applyBtn.disabled) return;
-    applyBtn.disabled = true;
-    try {
-      await applyWithLockoutCheck();
-    } finally {
-      applyBtn.disabled = false;
-    }
-  });
   $("btn-geo").addEventListener("click", async () => {
     setOverviewMsg("…");
     try {

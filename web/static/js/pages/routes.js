@@ -557,7 +557,7 @@ async function saveRouteEditor() {
     renderRoutesTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
-    showToast((idxRaw === "" ? "Route added." : "Route saved.") + " Review it on Pending changes, then Apply.");
+    showToast(idxRaw === "" ? "Route added." : "Route saved.");
   } catch (e) {
     if (e instanceof ConfigMergeError) {
       setEditorMsg(

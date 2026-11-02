@@ -31,7 +31,7 @@ const smallTargets = (page: Page, route: string) =>
   page.evaluate((r) => {
     const scope = `#page-${r}`;
     const controls = document.querySelectorAll(
-      `.evu-app-header button, .evu-toaster button, ${scope} button, ${scope} select, ${scope} input:not([type=checkbox]):not([type=radio]), ${scope} .evu-switch`
+      `.evu-app-header button, .evu-toaster button, .apply-region button, .apply-region a, ${scope} button, ${scope} select, ${scope} input:not([type=checkbox]):not([type=radio]), ${scope} .evu-switch`
     );
     return [...controls].flatMap((el) => {
       const box = el.getBoundingClientRect();
@@ -109,6 +109,27 @@ test.describe("phone layout", () => {
     await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height - 1);
     await expect(page.locator(".geo-tag-remove")).toHaveCount(5);
     await expect(page.getByRole("button", { name: label!, exact: true })).toHaveCount(0);
+  });
+
+  test("the apply bar fits, has full-size targets and stays on screen", async ({ page }) => {
+    await page.route("**/api/v1/pending", (r) =>
+      r.fulfill({ json: { pending: true, applied_config: null, nftables_baseline: "a\nkeep\nb", nftables: "A\nkeep\nB" } })
+    );
+    await gotoRoute(page, origin, "routes");
+    const bar = page.locator("#apply-bar");
+    await expect(bar).toBeVisible();
+    expect(await pageWidth(page)).toBeLessThanOrEqual(375);
+    expect(await smallTargets(page, "routes")).toEqual([]);
+
+    await page.evaluate(() => window.scrollTo({ top: 1500, behavior: "instant" }));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    const box = await bar.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      return { top: b.top, right: b.right };
+    });
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.top).toBeLessThan(100);
+    expect(box.right).toBeLessThanOrEqual(375);
   });
 
   test("a wrapped card label stays inside its own cell", async ({ page }) => {
@@ -200,6 +221,10 @@ test.describe("phone layout", () => {
   });
 
   test("one header, far shorter than the two it replaced", async ({ page }) => {
+    // The large config differs from the applied one, which would bring up the apply bar.
+    await page.route("**/api/v1/pending", (r) =>
+      r.fulfill({ json: { pending: false, applied_config: null, nftables_baseline: "", nftables: "" } })
+    );
     await gotoRoute(page, origin, "routes");
     await expect(page.locator(".evu-main__topbar")).toHaveCount(0);
     const top = await page.locator("#page-routes").evaluate((el) => el.getBoundingClientRect().top);

@@ -70,9 +70,9 @@
   color: var(--evuproxy-warning-text);
 }
 
-/* Errors are failures to fix, not risks to accept — colour them accordingly. */
+/* The panel's tint says these are errors; red text on that tint misses 4.5:1 in both schemes. */
 .evu-alert--danger .pending-validate-warnings {
-  color: var(--evuproxy-danger-text);
+  color: var(--evu-foreground);
 }
 
 /* Machine code trails the message it belongs to; useful for docs, not the fix. */
