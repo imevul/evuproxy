@@ -538,7 +538,7 @@ export function initSettingsPage() {
       openConfirmModal({
         title: "Restore " + name + "?",
         message:
-          "This replaces files under /etc/evuproxy with the archive " + path + dated + ". Reload the host if needed.",
+          "This replaces files under /etc/evuproxy with the archive " + path + dated + ". Apply afterwards if needed.",
         confirmLabel: "Replace host files",
         extraAction: {
           label: "Back up current config first",
@@ -560,7 +560,7 @@ export function initSettingsPage() {
           try {
             const q = "?path=" + encodeURIComponent(path);
             await api("/v1/restore" + q, { method: "POST" });
-            showToast("Restore finished. Review config and use Reload if needed.");
+            showToast("Restore finished. Review config and Apply if needed.");
             setApiStatus(true);
             invalidateUIPrefsCache();
             state.lastConfig = await api("/v1/config");
@@ -664,7 +664,7 @@ export function initSettingsPage() {
         await putConfigAtRevision(state.configUploadDraft, configUploadRevision);
         closeConfigUploadModal();
         refreshPendingBadge();
-        showToast("Config replaced on server. Check Pending changes / Reload.");
+        showToast("Config replaced on server. Review it on Pending changes, then Apply.");
       } catch (e) {
         let text = String(e.message || e);
         if (isConfigRevisionMismatch(e)) {

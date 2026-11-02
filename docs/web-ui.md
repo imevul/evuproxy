@@ -14,11 +14,23 @@ See also [Security and privacy](security-and-privacy.md) and [Local HTTP API](ht
 
 The sidebar has a **color scheme** menu (**Light**, **Dark**, or **System**, the default), saved in this browser. **Overview** shows recent **audit events** (from the API), geo list freshness when available, and a **Maintenance mode** toggle (sets `forwarding.maintenance_mode`; when on, no forward DNAT/accept rules are generated until you apply with it off again). **Settings** uses tabs (**Preferences**, **Notes & backups**, **Advanced**) and can download raw **`config.yaml`** from Preferences. **Peers** and **Routes** support a **header search** (press **`/`** to focus). **Routes** include an on-host **Test** probe (TCP/UDP; UDP may be inconclusive). **Geoblocking** lists per-country zone statistics from the API and includes a **Check an IP** preview (dry-run against form rules via **`POST /api/v1/geo/check-ip`**). **Topology** shows a read-only graph of `forwarding.routes` from the EvuProxy host (ingress) to each target peer, using `GET /v1/stats` for WireGuard handshake-style edge coloring.
 
-**Backup & restore (Settings → Notes & backups):** create a config tarball via `POST /api/v1/backup` and restore one via `POST /api/v1/restore`. Paths must resolve under the API's backup allowlist directory (default `/var/backups`, override with `EVUPROXY_BACKUP_DIR` on the API service) — see [Local HTTP API](http-api.md). After a restore, apply with reload.
+**Backup & restore (Settings → Notes & backups):** create a config tarball via `POST /api/v1/backup` and restore one via `POST /api/v1/restore`. Paths must resolve under the API's backup allowlist directory (default `/var/backups`, override with `EVUPROXY_BACKUP_DIR` on the API service) — see [Local HTTP API](http-api.md). After a restore, review the config and **Apply** if needed.
 
 **Replace config (upload):** Settings can upload a config **JSON** file; a modal shows the **current vs. uploaded** config side by side before anything is written. Saving replaces `config.yaml` on disk via `PUT /api/v1/config` (YAML comments are not preserved); the host keeps running the previously applied rules until you apply.
 
 **Pending changes:** the Pending page shows a **diff** of saved-but-not-applied config against the last applied snapshot (unified or split view), with **Apply**, **Discard pending**, and **Restore previous applied** actions.
+
+## Save, Apply and Refresh
+
+The UI uses one word for each operation:
+
+| Word | What it does | API | CLI |
+| ---- | ------------ | --- | --- |
+| **Save** | Writes the draft: `config.yaml`, notes or preferences. The firewall and tunnel keep running as they were. | `PUT /api/v1/config` | Edit `config.yaml` |
+| **Apply** | Changes the host: regenerates WireGuard and nftables from the saved config. | `POST /api/v1/reload` | `evuproxy reload` |
+| **Refresh** | Re-reads what's on screen from the API. Nothing is written. | `GET` endpoints | |
+
+**Apply** in the UI and `reload` in the API and CLI are the same operation. **Overview** and **Pending changes** both offer **Apply**, and both run the lockout check first. **Recent activity** on Overview shows Apply events as **Apply started**, **Applied config** and **Apply failed**. The stored events and the CSV export keep the API's codes (`reload_started`, `reload_ok`, `reload_failed`), and a failed Apply also shows its `reload_error` code. The API's `reload failed` error reads **Apply failed**, and a `geo_last_success_source` of `reload` reads **Source: Apply** in Overview's geo freshness.
 
 ## Saving
 

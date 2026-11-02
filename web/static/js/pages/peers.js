@@ -548,7 +548,7 @@ async function savePeerEditor() {
     renderPeersTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
-    showToast((idxRaw === "" ? "Peer added." : "Peer saved.") + " Review it on Pending changes, then Apply to host.");
+    showToast((idxRaw === "" ? "Peer added." : "Peer saved.") + " Review it on Pending changes, then Apply.");
   } catch (e) {
     if (e instanceof ConfigMergeError) {
       setEditorMsg(
