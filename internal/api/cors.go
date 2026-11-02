@@ -67,7 +67,8 @@ func (c *corsRule) wrap(next http.Handler) http.Handler {
 				w.Header().Add("Vary", "Origin")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Token, Accept")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Token, Accept, If-Match")
+			w.Header().Set("Access-Control-Expose-Headers", "ETag")
 			w.Header().Set("Access-Control-Max-Age", "86400")
 		}
 		if r.Method == http.MethodOptions {

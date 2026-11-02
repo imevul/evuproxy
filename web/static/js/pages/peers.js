@@ -13,6 +13,7 @@ import {
   clearFieldInvalid,
 } from "../core/dom.js";
 import { api, apiBlob } from "../core/api.js";
+import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
 import {
   PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC,
@@ -229,14 +230,19 @@ function disableDependentRoutes(cfg, deps) {
   }
 }
 
+/** Peers are found by key, so a rename elsewhere does not stop an edit from applying. */
+function peerIdentity(p) {
+  return String(p.public_key || "");
+}
+
 async function patchPeerDisabled(index, disabled) {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.peers || cfg.peers[index] === undefined) return;
+  const cfg = state.lastConfig;
+  if (!cfg || !cfg.peers || cfg.peers[index] === undefined) return;
   const peer = cfg.peers[index];
-  const finish = async (nextCfg) => {
+  const identity = peerIdentity(peer);
+  const finish = async (edit) => {
     try {
-      await api("/v1/config", { method: "PUT", body: JSON.stringify(nextCfg) });
-      state.lastConfig = nextCfg;
+      const nextCfg = await saveConfigEdit(edit);
       setPeersMsg("");
       setApiStatus(true);
       refreshPendingBadge();
@@ -254,11 +260,11 @@ async function patchPeerDisabled(index, disabled) {
         message: dependentRoutesConfirmMessage(peer.name || "peer", deps),
         confirmLabel: "Disable peer and routes",
         onConfirm: async () => {
-          const c = JSON.parse(JSON.stringify(state.lastConfig));
-          if (!c.peers || c.peers[index] === undefined) return;
-          disableDependentRoutes(c, dependentRoutesForPeer(c, c.peers[index]));
-          c.peers[index].disabled = true;
-          await finish(c);
+          await finish((c) => {
+            const i = findConfigRow(c.peers, index, identity, peerIdentity, "peer");
+            disableDependentRoutes(c, dependentRoutesForPeer(c, c.peers[i]));
+            c.peers[i].disabled = true;
+          });
         },
         onCancel: () => {
           renderPeersTable(state.lastConfig, state.lastPeerWgStats);
@@ -267,8 +273,10 @@ async function patchPeerDisabled(index, disabled) {
       return;
     }
   }
-  cfg.peers[index].disabled = disabled;
-  await finish(cfg);
+  await finish((c) => {
+    const i = findConfigRow(c.peers, index, identity, peerIdentity, "peer");
+    c.peers[i].disabled = disabled;
+  });
 }
 
 export async function refreshPeersPage() {
@@ -395,11 +403,16 @@ async function openPeerQRModal() {
   }
 }
 
+/** JSON of the peer open in the editor, to detect it changing elsewhere before Save. */
+let peerEditBase = null;
+
 function openPeerEditor(index) {
   const cfg = state.lastConfig;
   if (!cfg || !cfg.peers[index]) return;
   resetPeerOnboardExtras();
+  $("peer-editor-msg").textContent = "";
   const p = cfg.peers[index];
+  peerEditBase = JSON.stringify(p);
   $("peer-edit-index").value = String(index);
   $("peer-editor-title").textContent = "Edit peer";
   $("peer-f-name").value = p.name || "";
@@ -462,8 +475,6 @@ function resetPeerOnboardExtras() {
 }
 
 async function savePeerEditor() {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.peers) cfg.peers = [];
   const idxRaw = $("peer-edit-index").value;
   const peer = {
     name: $("peer-f-name").value.trim(),
@@ -482,18 +493,27 @@ async function savePeerEditor() {
     setPeersMsg(missing[2], true, $(missing[1]));
     return;
   }
-  if (idxRaw === "") cfg.peers.push(peer);
-  else cfg.peers[+idxRaw] = peer;
+  const base = peerEditBase;
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      if (!c.peers) c.peers = [];
+      if (idxRaw === "") c.peers.push(peer);
+      // The form replaces the whole row, so only a row still as it was when opened is safe to overwrite.
+      else c.peers[findConfigRow(c.peers, +idxRaw, base, JSON.stringify, "peer")] = peer;
+    });
     setPeersMsg("Saved. Open Pending changes to review nftables, then Apply to host.");
     closePeerEditor();
     renderPeersTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
   } catch (e) {
-    setPeersMsg(String(e.message || e), true);
+    if (e instanceof ConfigMergeError) {
+      $("peer-editor-msg").textContent =
+        e.message + " Your values are still in this form: note them, press Cancel, and edit the latest version.";
+      renderPeersTable(state.lastConfig);
+    } else {
+      setPeersMsg(String(e.message || e), true);
+    }
   }
 }
 
@@ -502,6 +522,7 @@ async function removePeer(index) {
   if (!cfg || !cfg.peers || !cfg.peers[index]) return;
   const peer = cfg.peers[index];
   const peerName = peer.name;
+  const identity = peerIdentity(peer);
   const deps = dependentRoutesForPeer(cfg, peer);
   const baseMsg =
     "Remove \"" +
@@ -517,16 +538,12 @@ async function removePeer(index) {
     message,
     confirmLabel: deps.length ? "Disable routes and remove" : "Remove",
     onConfirm: async () => {
-      const c = JSON.parse(JSON.stringify(state.lastConfig));
-      if (!c.peers) return;
-      const i = c.peers.findIndex((p) => p.name === peerName);
-      if (i < 0) return;
-      const depNow = dependentRoutesForPeer(c, c.peers[i]);
-      disableDependentRoutes(c, depNow);
-      c.peers.splice(i, 1);
       try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
-        state.lastConfig = c;
+        const c = await saveConfigEdit((draft) => {
+          const i = findConfigRow(draft.peers, index, identity, peerIdentity, "peer");
+          disableDependentRoutes(draft, dependentRoutesForPeer(draft, draft.peers[i]));
+          draft.peers.splice(i, 1);
+        });
         setPeersMsg(
           deps.length
             ? "Peer removed and dependent routes disabled in config. Apply on Pending changes when ready."
@@ -537,6 +554,7 @@ async function removePeer(index) {
         refreshPendingBadge();
       } catch (e) {
         setPeersMsg(String(e.message || e), true);
+        renderPeersTable(state.lastConfig);
       }
     },
   });

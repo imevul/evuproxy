@@ -8,16 +8,22 @@ import {
   clearFieldInvalid,
 } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
 import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
+/** JSON of the rule open in the editor, to detect it changing elsewhere before Save. */
+let inboundEditBase = null;
+
 async function patchInboundDisabled(index, disabled) {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.input_allows || cfg.input_allows[index] === undefined) return;
-  cfg.input_allows[index].disabled = disabled;
+  const cur = state.lastConfig;
+  if (!cur || !cur.input_allows || cur.input_allows[index] === undefined) return;
+  const identity = inboundRuleIdentity(cur.input_allows[index]);
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      const i = findConfigRow(c.input_allows, index, identity, inboundRuleIdentity, "inbound rule");
+      c.input_allows[i].disabled = disabled;
+    });
     setInboundMsg("");
     setApiStatus(true);
     refreshPendingBadge();
@@ -96,6 +102,7 @@ function openInboundEditor(index) {
   const note = $("inbound-f-note");
   if (!protoSel || !dport || !note) return;
 
+  $("inbound-editor-msg").textContent = "";
   const disInp = $("inbound-f-disabled");
   if (index === -1) {
     $("inbound-edit-index").value = "";
@@ -107,6 +114,7 @@ function openInboundEditor(index) {
   } else {
     const r = cfg.input_allows[index];
     if (!r) return;
+    inboundEditBase = JSON.stringify(r);
     $("inbound-edit-index").value = String(index);
     $("inbound-editor-title").textContent = "Edit rule";
     const p = String(r.proto || "tcp").toLowerCase();
@@ -128,8 +136,6 @@ export function closeInboundEditor() {
 }
 
 async function saveInboundEditor() {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.input_allows) cfg.input_allows = [];
   const proto = ($("inbound-f-proto").value || "tcp").toLowerCase();
   const dport = $("inbound-f-dport").value.trim();
   const note = $("inbound-f-note").value.trim();
@@ -148,18 +154,27 @@ async function saveInboundEditor() {
   if (note) entry.note = note;
   entry.disabled = !enabled;
   const idxRaw = $("inbound-edit-index").value;
-  if (idxRaw === "") cfg.input_allows.push(entry);
-  else cfg.input_allows[+idxRaw] = entry;
+  const base = inboundEditBase;
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      if (!c.input_allows) c.input_allows = [];
+      if (idxRaw === "") c.input_allows.push(entry);
+      // The form replaces the whole row, so only a row still as it was when opened is safe to overwrite.
+      else c.input_allows[findConfigRow(c.input_allows, +idxRaw, base, JSON.stringify, "inbound rule")] = entry;
+    });
     setInboundMsg("Saved. Open Pending changes to review nftables, then Apply to host.");
     closeInboundEditor();
     renderInboundTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
   } catch (e) {
-    setInboundMsg(String(e.message || e), true);
+    if (e instanceof ConfigMergeError) {
+      $("inbound-editor-msg").textContent =
+        e.message + " Your values are still in this form: note them, press Cancel, and edit the latest version.";
+      renderInboundTable(state.lastConfig);
+    } else {
+      setInboundMsg(String(e.message || e), true);
+    }
   }
 }
 
@@ -171,19 +186,6 @@ function inboundRuleIdentity(r) {
     "\0" +
     String(r.note || "").trim()
   );
-}
-
-function resolveListIndex(list, openIndex, identity, identityOf) {
-  // Prefer the open-time index when it still matches (handles duplicate keys).
-  if (!list) return -1;
-  if (list[openIndex] != null && identityOf(list[openIndex]) === identity) return openIndex;
-  const matches = [];
-  for (let i = 0; i < list.length; i++) {
-    if (identityOf(list[i]) === identity) matches.push(i);
-  }
-  if (matches.length === 1) return matches[0];
-  if (matches.length === 0) return -1;
-  return -2; // ambiguous after list churn
 }
 
 async function removeInboundRule(index) {
@@ -204,30 +206,19 @@ async function removeInboundRule(index) {
       " from the saved config? The host is not updated until you apply on Pending changes.",
     confirmLabel: "Remove",
     onConfirm: async () => {
-      // Re-resolve: list may have changed while the dialog was open.
-      const c = JSON.parse(JSON.stringify(state.lastConfig));
-      if (!c.input_allows) return;
-      const i = resolveListIndex(c.input_allows, openIndex, identity, inboundRuleIdentity);
-      if (i === -1) {
-        setInboundMsg("That inbound rule is no longer in the saved config.", true);
-        renderInboundTable(c);
-        return;
-      }
-      if (i === -2) {
-        setInboundMsg("Could not uniquely identify that inbound rule; refresh and try again.", true);
-        renderInboundTable(c);
-        return;
-      }
-      c.input_allows.splice(i, 1);
       try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
-        state.lastConfig = c;
+        // Re-resolve in the edit: the list may have changed while the dialog was open, or since this tab loaded.
+        const c = await saveConfigEdit((draft) => {
+          const i = findConfigRow(draft.input_allows, openIndex, identity, inboundRuleIdentity, "inbound rule");
+          draft.input_allows.splice(i, 1);
+        });
         setInboundMsg("Rule removed. Apply on Pending changes when ready.");
         renderInboundTable(c);
         setApiStatus(true);
         refreshPendingBadge();
       } catch (e) {
         setInboundMsg(String(e.message || e), true);
+        renderInboundTable(state.lastConfig);
       }
     },
   });

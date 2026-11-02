@@ -149,6 +149,11 @@ button {
   color: var(--evuproxy-danger-text);
 }
 
+/* Editor modals only use this for save conflicts, so it reserves no space until then. */
+.msg.editor-msg:empty {
+  display: none;
+}
+
 .code-block {
   margin: 0.75rem 0 0;
   padding: 0.75rem;

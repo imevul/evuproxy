@@ -1,6 +1,7 @@
 import { state, defaultPeerSubnetCidr, contentWidthKey, contentWidthCssValues } from "../core/state.js";
 import { $, setApiStatus } from "../core/dom.js";
-import { api, getApiBase, headersDownload } from "../core/api.js";
+import { api, getApiBase, headersDownload, responseEtag } from "../core/api.js";
+import { saveConfigEdit, putConfigAtRevision, isConfigRevisionMismatch } from "../core/config_save.js";
 import {
   fetchUIPrefsFromServer,
   migrateFromLocalStorageIfEmpty,
@@ -316,11 +317,11 @@ export function initSettingsPage() {
         if (!cfg) cfg = await api("/v1/config");
         const prevPubIf = String((cfg.network && cfg.network.public_interface) || "").trim();
         if (prevPubIf !== pubIfValid) {
-          const cfgOut = JSON.parse(JSON.stringify(cfg));
-          if (!cfgOut.network) cfgOut.network = {};
-          cfgOut.network.public_interface = pubIfValid;
-          await api("/v1/config", { method: "PUT", body: JSON.stringify(cfgOut) });
-          state.lastConfig = cfgOut;
+          state.lastConfig = cfg;
+          await saveConfigEdit((cfgOut) => {
+            if (!cfgOut.network) cfgOut.network = {};
+            cfgOut.network.public_interface = pubIfValid;
+          });
           state.settingsPublicInterfaceLoaded = pubIfValid;
           statusParts.push("Public interface saved — reload to apply nftables.");
           refreshPendingBadge();
@@ -495,6 +496,8 @@ export function initSettingsPage() {
 
   const configUploadOpen = $("config-upload-open");
   const configUploadFile = $("config-upload-file");
+  // Revision of the "current" pane in the upload preview: Save replaces exactly what was shown.
+  let configUploadRevision = "";
   if (configUploadOpen && configUploadFile) {
     configUploadOpen.addEventListener("click", () => configUploadFile.click());
     configUploadFile.addEventListener("change", () => {
@@ -535,6 +538,7 @@ export function initSettingsPage() {
           return;
         }
         state.configUploadDraft = parsed;
+        configUploadRevision = responseEtag(cur);
         const hint = $("config-upload-modal-hint");
         const same = stableConfigJson(cur) === stableConfigJson(parsed);
         if (hint) {
@@ -573,16 +577,29 @@ export function initSettingsPage() {
         am.classList.remove("err");
       }
       try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(state.configUploadDraft) });
-        state.lastConfig = state.configUploadDraft;
+        await putConfigAtRevision(state.configUploadDraft, configUploadRevision);
         if (am) am.textContent = "Saved. Check Pending changes / Reload.";
         closeConfigUploadModal();
         const um = $("config-upload-msg");
         if (um) um.textContent = "Config updated on server.";
         refreshPendingBadge();
       } catch (e) {
+        let text = String(e.message || e);
+        if (isConfigRevisionMismatch(e)) {
+          // An upload replaces everything, so there is no edit to reapply: show what is there now and let the user decide.
+          try {
+            const cur = await api("/v1/config");
+            state.lastConfig = cur;
+            configUploadRevision = responseEtag(cur);
+            const preC = $("config-upload-pre-current");
+            if (preC) preC.textContent = JSON.stringify(cur, null, 2);
+            text = "The server config changed since this preview, so nothing was saved. The current config above is updated: Save again to replace it.";
+          } catch (e2) {
+            text = String(e2.message || e2);
+          }
+        }
         if (am) {
-          am.textContent = String(e.message || e);
+          am.textContent = text;
           am.classList.add("err");
         }
       }
