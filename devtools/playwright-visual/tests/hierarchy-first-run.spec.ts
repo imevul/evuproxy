@@ -30,7 +30,7 @@ function modalTransitionCount(page: Page, selector: string): Promise<number> {
 
 test.describe("no token", () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem("evuproxy_gh_release_check_v1", JSON.stringify({ t: Date.now(), tag: "v0.0.0" })));
+    await page.addInitScript(() => sessionStorage.setItem("evuproxy_gh_release_check_v1", JSON.stringify({ t: Date.now(), tag: "v0.0.0" })));
   });
 
   test("lands on the token page, neutral, from any route", async ({ page }) => {

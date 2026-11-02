@@ -10,6 +10,8 @@ import * as path from "path";
 
 import type { Page } from "@playwright/test";
 
+import { freeze } from "./freeze";
+
 export const ROUTES = [
   "overview",
   "settings",
@@ -62,6 +64,7 @@ export interface SeedOptions {
  * chosen scheme and no theme flash is captured.
  */
 export async function seed(page: Page, opts: SeedOptions): Promise<void> {
+  await freeze(page);
   await page.addInitScript(
     (args: { tok: string; scheme: string; advanced: boolean }) => {
       localStorage.setItem("evuproxy_api_token", args.tok);
@@ -72,7 +75,7 @@ export async function seed(page: Page, opts: SeedOptions): Promise<void> {
       // Pre-seed the release cache so the sidebar never reaches api.github.com:
       // whether that call succeeds decides if the update note renders, which
       // otherwise makes every sidebar (and so every full-page shot) flaky.
-      localStorage.setItem(
+      sessionStorage.setItem(
         "evuproxy_gh_release_check_v1",
         JSON.stringify({ t: Date.now(), tag: "v0.0.0" })
       );

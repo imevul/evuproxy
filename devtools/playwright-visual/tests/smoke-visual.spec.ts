@@ -31,6 +31,8 @@ test.describe("modals (full-page screenshots)", () => {
 
       await page.locator("#peers-add-start").click();
       await page.locator("#peer-modal").waitFor({ state: "visible" });
+      // Focus lands on Name only after the keypair is generated, so the focus ring races the shot.
+      await page.locator("#peer-modal input:focus").waitFor({ state: "visible" });
       await capture(page, `modal-peer-editor-${scheme}`);
 
       // Onboarding and install copy live behind the editor's own tabs.
