@@ -2,7 +2,7 @@ import { state, defaultPeerSubnetCidr, contentWidthKey, contentWidthCssValues } 
 import { $, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, getApiBase, headersDownload, responseEtag } from "../core/api.js";
-import { showToast } from "../core/toast.js";
+import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit, putConfigAtRevision, isConfigRevisionMismatch } from "../core/config_save.js";
 import {
   fetchUIPrefsFromServer,
@@ -22,7 +22,8 @@ import {
   closeConfirmModal,
   registerModalCloser,
 } from "../core/modal.js";
-import { createFormTrackerByIds, registerPageForm } from "../core/dirty.js";
+import { createFormTrackerByIds } from "../core/dirty.js";
+import { createSaveBar } from "../core/save_bar.js";
 import { refreshOverviewPage, refreshOverviewEventsList } from "./overview.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -80,15 +81,136 @@ function syncContentWidthSelect() {
   sel.value = Object.prototype.hasOwnProperty.call(contentWidthCssValues, p) ? p : "medium";
 }
 
-const SETTINGS_PREF_FIELDS = [
-  "peer-subnet-cidr",
-  "settings-wg-endpoint",
-  "settings-public-interface",
-  "settings-metrics-collection",
-];
+/*
+ * One save bar over three stores, each written only if its fields changed: UI
+ * preferences, config and notes. The API has no transaction across them, so a save can
+ * land partly. Whatever landed is marked clean as it lands, which leaves the bar up
+ * over just the rest, and Save retries only that.
+ */
+const SETTINGS_PREF_FIELDS = ["peer-subnet-cidr", "settings-wg-endpoint"];
+const SETTINGS_CONFIG_FIELDS = ["settings-public-interface"];
 const SETTINGS_NOTES_FIELDS = ["config-notes-body"];
-/** The fields behind Save buttons. The other Settings controls apply as soon as they change. */
-const settingsForm = createFormTrackerByIds([...SETTINGS_PREF_FIELDS, ...SETTINGS_NOTES_FIELDS]);
+/** The fields behind the save bar. The other Settings controls apply as soon as they change. */
+const settingsForm = createFormTrackerByIds([
+  ...SETTINGS_PREF_FIELDS,
+  ...SETTINGS_CONFIG_FIELDS,
+  ...SETTINGS_NOTES_FIELDS,
+]);
+let settingsSaveBar = null;
+
+function adoptUIPrefs(p) {
+  state.lastUIPrefs = {
+    peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr,
+    wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
+    metrics_collection_enabled: !!p.metrics_collection_enabled,
+  };
+}
+
+/** A write is in flight: a second flip would race it, and could land first. */
+let metricsSwitchBusy = false;
+
+/** Instant switch: sends only its own field, so unsaved edits on this page stay unsaved. */
+async function setMetricsCollection(on) {
+  if (metricsSwitchBusy) return;
+  metricsSwitchBusy = true;
+  const input = $("settings-metrics-collection");
+  const err = $("settings-metrics-collection-msg");
+  input.checked = on;
+  err.textContent = "";
+  try {
+    adoptUIPrefs(
+      await api("/v1/preferences", {
+        method: "PUT",
+        body: JSON.stringify({ metrics_collection_enabled: on }),
+      })
+    );
+    metricsSwitchBusy = false;
+    input.checked = state.lastUIPrefs.metrics_collection_enabled;
+    setApiStatus(true);
+    showToast("Peer ICMP metrics " + (on ? "enabled" : "disabled"), {
+      action: { label: "Undo", onClick: () => void setMetricsCollection(!on) },
+    });
+  } catch (e) {
+    metricsSwitchBusy = false;
+    input.checked = !on;
+    reportBesideControl(err, String(e.message || e));
+  }
+}
+
+/** Save bar action. Validates everything before writing anything. */
+async function saveSettingsForm() {
+  const cidrRaw = $("peer-subnet-cidr").value.trim();
+  const epRaw = $("settings-wg-endpoint").value.trim();
+  const pubIfRaw = $("settings-public-interface").value.trim();
+  const body = $("config-notes-body").value;
+  const prefsDirty = settingsForm.isDirty(SETTINGS_PREF_FIELDS);
+  const configDirty = settingsForm.isDirty(SETTINGS_CONFIG_FIELDS);
+  const notesDirty = settingsForm.isDirty(SETTINGS_NOTES_FIELDS);
+  // What each store is sent. The form stays editable during the requests, and a later edit is still unsaved.
+  const sent = settingsForm.values();
+  if (cidrRaw && !parseIPv4CIDR(cidrRaw)) throw new Error("Invalid IPv4 CIDR (e.g. 10.100.0.0/24).");
+  const pubIfValid = validLinuxIfaceName(pubIfRaw);
+  if (configDirty && !pubIfValid) {
+    throw new Error(
+      pubIfRaw ? "Invalid public interface name (1–15 chars: letters, digits, . _ -)." : "Public interface is required."
+    );
+  }
+
+  const saved = [];
+  const failed = [];
+  if (prefsDirty) {
+    try {
+      adoptUIPrefs(
+        await api("/v1/preferences", {
+          method: "PUT",
+          body: JSON.stringify({ peer_tunnel_subnet_cidr: cidrRaw, wireguard_server_endpoint: epRaw }),
+        })
+      );
+      settingsForm.mark(SETTINGS_PREF_FIELDS, sent);
+      saved.push("Preferences");
+      void refreshEndpointHostWarning();
+    } catch (e) {
+      failed.push("Preferences: " + String(e.message || e));
+    }
+  }
+  if (configDirty) {
+    try {
+      await saveConfigEdit((cfg) => {
+        if (!cfg.network) cfg.network = {};
+        cfg.network.public_interface = pubIfValid;
+      });
+      state.settingsPublicInterfaceLoaded = pubIfValid;
+      settingsForm.mark(SETTINGS_CONFIG_FIELDS, sent);
+      saved.push("Public interface");
+      refreshPendingBadge();
+    } catch (e) {
+      failed.push("Public interface: " + String(e.message || e));
+    }
+  }
+  if (notesDirty) {
+    try {
+      await api("/v1/config/notes", { method: "PUT", body: JSON.stringify({ text: body }) });
+      settingsForm.mark(SETTINGS_NOTES_FIELDS, sent);
+      saved.push("Notes");
+    } catch (e) {
+      failed.push("Notes: " + String(e.message || e));
+    }
+  }
+
+  if (failed.length) {
+    const landed = saved.length ? " Already saved: " + saved.join(", ") + "." : "";
+    throw new Error("Not saved. " + failed.join(" ") + landed);
+  }
+  const msg = $("settings-prefs-msg");
+  msg.textContent = epRaw ? "" : "Tip: add WireGuard server endpoint (host:port) for client snippets.";
+  msg.classList.remove("err");
+  setApiStatus(true);
+  showToast(
+    configDirty
+      ? "Settings saved. The public interface needs Apply: review it on Pending changes."
+      : "Settings saved"
+  );
+}
 
 export async function refreshSettingsPage() {
   const doneLoading = beginLoading("settings-tab-prefs-panel", "settings-tab-maint-panel");
@@ -123,7 +245,7 @@ async function loadSettingsPage() {
   const sep = $("settings-wg-endpoint");
   if (sep) sep.value = (state.lastUIPrefs.wireguard_server_endpoint || "").trim();
   const spl = $("settings-metrics-collection");
-  if (spl) spl.checked = !!state.lastUIPrefs.metrics_collection_enabled;
+  if (spl && !metricsSwitchBusy) spl.checked = !!state.lastUIPrefs.metrics_collection_enabled;
   const pubIfEl = $("settings-public-interface");
   if (pubIfEl) {
     try {
@@ -171,6 +293,7 @@ async function loadSettingsPage() {
   if (bp && !bp.value.trim()) bp.value = "/var/backups/evuproxy-config.tgz";
   if (rp && !rp.value.trim()) rp.value = "/var/backups/evuproxy-config.tgz";
   settingsForm.mark();
+  if (settingsSaveBar) settingsSaveBar.sync();
 }
 
 export function setSettingsEditorTab(which) {
@@ -227,7 +350,19 @@ function closeConfigUploadModal() {
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initSettingsPage() {
-  registerPageForm("settings", settingsForm);
+  settingsSaveBar = createSaveBar("settings", {
+    isDirty: () => settingsForm.isDirty(),
+    clear: () => settingsForm.clear(),
+    save: saveSettingsForm,
+    discard: () => settingsForm.revert(),
+  });
+  const metricsToggle = $("settings-metrics-collection");
+  if (metricsToggle) {
+    metricsToggle.addEventListener("change", () => {
+      if (metricsSwitchBusy) metricsToggle.checked = !metricsToggle.checked;
+      else void setMetricsCollection(metricsToggle.checked);
+    });
+  }
   registerModalCloser($("config-upload-modal"), closeConfigUploadModal);
   const settingsTabPrefs = $("settings-tab-prefs-btn");
   const settingsTabMaint = $("settings-tab-maint-btn");
@@ -280,82 +415,6 @@ export function initSettingsPage() {
     });
   }
 
-  $("settings-save-prefs").addEventListener("click", async () => {
-    const cidrRaw = ($("peer-subnet-cidr") && $("peer-subnet-cidr").value.trim()) || "";
-    const epRaw = ($("settings-wg-endpoint") && $("settings-wg-endpoint").value.trim()) || "";
-    const pubIfRaw = ($("settings-public-interface") && $("settings-public-interface").value.trim()) || "";
-    const msg = $("settings-prefs-msg");
-    if (msg) {
-      msg.textContent = "";
-      msg.classList.remove("err");
-    }
-    if (cidrRaw && !parseIPv4CIDR(cidrRaw)) {
-      if (msg) {
-        msg.textContent = "Invalid IPv4 CIDR (e.g. 10.100.0.0/24).";
-        msg.classList.add("err");
-      }
-      return;
-    }
-    const pubIfValid = validLinuxIfaceName(pubIfRaw);
-    const configSaveRequested = state.settingsPublicInterfaceLoaded !== null || !!pubIfRaw;
-    if (configSaveRequested && !pubIfValid) {
-      if (msg) {
-        msg.textContent = pubIfRaw
-          ? "Invalid public interface name (1–15 chars: letters, digits, . _ -)."
-          : "Public interface is required.";
-        msg.classList.add("err");
-      }
-      return;
-    }
-    try {
-      const lat = $("settings-metrics-collection");
-      const p = await api("/v1/preferences", {
-        method: "PUT",
-        body: JSON.stringify({
-          peer_tunnel_subnet_cidr: cidrRaw,
-          wireguard_server_endpoint: epRaw,
-          metrics_collection_enabled: !!(lat && lat.checked),
-        }),
-      });
-      state.lastUIPrefs = {
-        peer_tunnel_subnet_cidr: (p.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr,
-        wireguard_server_endpoint: (p.wireguard_server_endpoint || "").trim(),
-        metrics_collection_enabled: !!p.metrics_collection_enabled,
-      };
-      let confirmation = "Preferences saved.";
-      let note = "";
-      if (configSaveRequested) {
-        let cfg = state.lastConfig;
-        if (!cfg) cfg = await api("/v1/config");
-        const prevPubIf = String((cfg.network && cfg.network.public_interface) || "").trim();
-        if (prevPubIf !== pubIfValid) {
-          state.lastConfig = cfg;
-          await saveConfigEdit((cfgOut) => {
-            if (!cfgOut.network) cfgOut.network = {};
-            cfgOut.network.public_interface = pubIfValid;
-          });
-          state.settingsPublicInterfaceLoaded = pubIfValid;
-          confirmation += " Public interface saved — reload to apply nftables.";
-          refreshPendingBadge();
-        }
-      } else {
-        note = "Public interface not updated (config could not be loaded).";
-      }
-      if (!note && !epRaw) note = "Tip: add WireGuard server endpoint (host:port) for client snippets.";
-      if (msg) msg.textContent = note;
-      settingsForm.mark(SETTINGS_PREF_FIELDS);
-      showToast(confirmation);
-      setApiStatus(true);
-      await refreshEndpointHostWarning();
-    } catch (e) {
-      if (msg) {
-        msg.textContent = String(e.message || e);
-        msg.classList.add("err");
-      }
-      setApiStatus(false, String(e.message || e));
-    }
-  });
-
   $("btn-status").addEventListener("click", async () => {
     const out = $("settings-status-out");
     out.textContent = "…";
@@ -407,29 +466,6 @@ export function initSettingsPage() {
           msg.classList.add("err");
         }
         setApiStatus(false, String(e.message || e));
-      }
-    });
-  }
-
-  const notesSaveBtn = $("config-notes-save");
-  if (notesSaveBtn) {
-    notesSaveBtn.addEventListener("click", async () => {
-      const msg = $("config-notes-msg");
-      const body = ($("config-notes-body") && $("config-notes-body").value) || "";
-      if (msg) {
-        msg.textContent = "";
-        msg.classList.remove("err");
-      }
-      try {
-        await api("/v1/config/notes", { method: "PUT", body: JSON.stringify({ text: body }) });
-        settingsForm.mark(SETTINGS_NOTES_FIELDS);
-        showToast("Notes saved");
-        setApiStatus(true);
-      } catch (e) {
-        if (msg) {
-          msg.textContent = String(e.message || e);
-          msg.classList.add("err");
-        }
       }
     });
   }

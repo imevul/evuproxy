@@ -1,5 +1,5 @@
 /**
- * EvuProxy — Forms — wells, switches, checkboxes, field layout.
+ * EvuProxy — Forms — wells, switches, field layout.
  *
  * Native controls are styled by element selector on purpose: it keeps every
  * control full width inside .field and modals, and a newly added control type
@@ -155,54 +155,6 @@ body.app select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%2399a1af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
 }
 
-/* Multi-select checkboxes only (TCP/UDP etc.) — never Switch inputs */
-body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input) {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 0.875rem;
-  height: 0.875rem;
-  min-width: 0.875rem;
-  margin: 0 0.35rem 0 0;
-  border: 1px solid var(--evu-border);
-  border-radius: 3px;
-  background: var(--evu-background);
-  cursor: pointer;
-  position: relative;
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-
-body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):hover {
-  border-color: var(--evu-muted-foreground);
-}
-
-body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):checked {
-  background: var(--evu-primary);
-  border-color: var(--evu-ring);
-}
-
-body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):checked::after {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 0;
-  width: 4px;
-  height: 7px;
-  border: solid var(--evu-primary-foreground);
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-
-body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):focus-visible {
-  outline: 2px solid var(--evu-ring);
-  outline-offset: 2px;
-}
-
-body.app input[type="checkbox"]:not(.evu-switch__input):not(.toggle-switch-input):disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .input-reveal-wrap {
   display: flex;
   align-items: stretch;
@@ -275,6 +227,13 @@ input.mono {
   align-items: center;
   font-size: inherit;
   color: inherit;
+  margin-bottom: 0;
+}
+
+/* Same for checkboxes: the box and its text are one row, as the theme lays them out. */
+.field label.evu-check {
+  display: inline-flex;
+  font-size: 0.875rem;
   margin-bottom: 0;
 }
 

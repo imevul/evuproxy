@@ -1,6 +1,6 @@
 import { state } from "../core/state.js";
-import { $ } from "../core/dom.js";
-import { tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
+import { $, setApiStatus } from "../core/dom.js";
+import { api, applyNavRestriction, tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
 import { invalidateUIPrefsCache } from "../core/prefs.js";
 import { createFormTrackerByIds, registerPageForm } from "../core/dirty.js";
 import { refreshOverviewPage } from "./overview.js";
@@ -41,12 +41,15 @@ export function initTokenPage() {
     $("api-base").value = String(savedApiBase).trim();
   }
 
-  $("save-token").addEventListener("click", async () => {
+  $("token-connect").addEventListener("click", async () => {
     const wasConnected = state.apiConnectionOk;
     const t = $("token").value.trim();
-    if (t) {
-      localStorage.setItem(tokenKey, t);
+    if (!t) {
+      setAuthMsg("Enter an API token to connect.", true);
+      $("token").focus();
+      return;
     }
+    localStorage.setItem(tokenKey, t);
     const ab = $("api-base");
     if (ab) {
       const b = ab.value.trim();
@@ -63,16 +66,22 @@ export function initTokenPage() {
     }
     invalidateUIPrefsCache();
     tokenForm.mark();
-    setAuthMsg("Saved in browser storage.");
-    await refreshOverviewPage();
-    const hasToken = !!(sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey));
-    setNotConnectedNotice(!hasToken);
-    if (!hasToken) return;
-    if (!state.apiConnectionOk) {
-      setAuthMsg("Saved, but the API did not accept it. Check the token and the API base URL.", true);
-    } else if (!wasConnected) {
-      // First connection: the setup checklist on Overview is the next step.
-      location.hash = "#/overview";
+    setAuthMsg("Connecting…");
+    try {
+      state.lastOverview = await api("/v1/overview");
+      state.apiConnectionOk = true;
+      setApiStatus(true);
+      setAuthMsg("Connected. The token is saved in this browser.");
+    } catch (e) {
+      state.apiConnectionOk = false;
+      setApiStatus(false, String(e.message || e));
+      setAuthMsg("Could not connect: " + String(e.message || e), true);
     }
+    applyNavRestriction();
+    setNotConnectedNotice(false);
+    const connected = state.apiConnectionOk;
+    void refreshOverviewPage();
+    // First connection: the setup checklist on Overview is the next step.
+    if (connected && !wasConnected) location.hash = "#/overview";
   });
 }

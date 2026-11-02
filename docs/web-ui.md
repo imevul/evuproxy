@@ -20,6 +20,24 @@ The sidebar has a **color scheme** menu (**Light**, **Dark**, or **System**, the
 
 **Pending changes:** the Pending page shows a **diff** of saved-but-not-applied config against the last applied snapshot (unified or split view), with **Apply**, **Discard pending**, and **Restore previous applied** actions.
 
+## Saving
+
+What a control does tells you whether it has saved:
+
+| You're changing | Control | What happens |
+| ---------------- | ------- | ------------ |
+| One on/off setting | **Switch** | Already saved when you flip it. Config and preference switches show a toast with **Undo**; browser-only settings show nothing. A rejected switch snaps back with the error beside it. |
+| One object with several fields | **Dialog** | Footer **Save**. On/off inside it is a checkbox. Closing with edits warns first. |
+| A page of related settings | **Save bar** | **Geoblocking** and **Settings** have one bar each, covering all the page's tabs. It appears only while there are unsaved edits: **Unsaved changes · Discard · Save**. Leaving with edits warns first. Geoblocking's read-only **Zone files** tab hides the bar but keeps the edits. |
+| A choice feeding a form | **Dialog** | **Done**, as in the country picker. Nothing is saved until the form is. |
+| Something done to the host or files | **Named action** | **Apply**, **Update geo lists**, **Create backup**. |
+
+Geoblocking's switches (**Enable geoblocking**, **Apply geoblocking to inbound allow rules**, **CrowdSec integration**) write only their own field, never the unsaved form, so enabling geoblocking is rejected if no country has been saved yet, even with countries picked in the form.
+
+The Settings bar writes up to three separate stores: UI preferences, config (**Public interface**) and notes. Only the ones you changed are written. There is no transaction across them, so one can fail after another has landed: the bar stays up over what is left, names what was already saved, and **Save** retries only the rest.
+
+**API token** is stored in this browser by **Connect**, which then reports whether the API accepted it.
+
 ## Stats page
 
 **WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft list table … -a`).
@@ -28,7 +46,7 @@ Generated EvuProxy enforcement drops (geoblock, rate limits, CrowdSec, forward c
 
 **Deferred:** add optional **`counter`** on selected drop rules (or dedicated summary rules) so rate-limit and CrowdSec packet counts could also appear on Stats, in addition to log lines on Logs.
 
-**Advanced mode** (Settings) **disables** the **Advanced** tab on **Routes** and **Geoblocking** in this browser (`localStorage`) until turned on — the tab stays visible with a hint linking to Settings. It does not gate **Apply geoblocking to inbound allow rules** — that control stays on the Geoblocking default tab. The **CrowdSec integration** toggle lives on the Geoblocking **Advanced** tab (its value is preserved on Save even when the tab is gated off). When only one tab is actionable, the tab control uses subdued styling so the active segment reads as a section label, not a lone button.
+**Advanced mode** (Settings) **disables** the **Advanced** tab on **Routes** and **Geoblocking** in this browser (`localStorage`) until turned on — the tab stays visible with a hint linking to Settings. It does not gate **Apply geoblocking to inbound allow rules** — that control stays on the Geoblocking default tab. The **CrowdSec integration** toggle lives on the Geoblocking **Advanced** tab. When only one tab is actionable, the tab control uses subdued styling so the active segment reads as a section label, not a lone button.
 
 ## Local UI with mock API
 

@@ -48,7 +48,7 @@ test.describe("no token", () => {
   test("saving a working token moves on to Overview", async ({ page }) => {
     await page.goto(`${origin}/#/overview`);
     await page.locator("#token").fill("dev");
-    await page.locator("#save-token").click();
+    await page.locator("#token-connect").click();
     await expect(page.locator("#page-overview")).toBeVisible();
     await expect(page.locator("#api-status")).toHaveText("API OK");
   });
@@ -56,8 +56,8 @@ test.describe("no token", () => {
   test("saving a rejected token says so and stays on the token page", async ({ page }) => {
     await page.goto(`${origin}/#/token`);
     await page.locator("#token").fill("not-the-token");
-    await page.locator("#save-token").click();
-    await expect(page.locator("#auth-msg")).toContainText("did not accept");
+    await page.locator("#token-connect").click();
+    await expect(page.locator("#auth-msg")).toContainText("Could not connect");
     await expect(page.locator("#page-token")).toBeVisible();
   });
 });

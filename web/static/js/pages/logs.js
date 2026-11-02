@@ -2,10 +2,9 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
-import { showToast } from "../core/toast.js";
+import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
-import { openConfirmModal } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 /* ——— Logs ——— */
@@ -448,50 +447,64 @@ export async function refreshLogsPage() {
 /** One break-glass write at a time so overlapping GET→PUT cannot drop a sibling /32. */
 let logsBreakGlassBusy = false;
 
-function confirmAddBreakGlass(ip) {
+/** Runs `write` as the one break-glass write, then redraws the table from what it saved. */
+async function writeBreakGlass(write) {
   if (logsBreakGlassBusy) return;
+  logsBreakGlassBusy = true;
+  // Drop any in-flight Logs refresh so its older config cannot overwrite this write.
+  state.logsRefreshSeq++;
+  setLogsMsg("…");
+  try {
+    state.lastConfig = await api("/v1/config");
+    await write();
+    state.logsRefreshSeq++;
+    setApiStatus(true);
+    await refreshPendingBadge();
+    renderLogsView();
+    // The add button was in the table that just redrew: keep keyboard users near it.
+    if (document.activeElement === document.body) $("main-content").focus();
+  } catch (e) {
+    setLogsMsg("", true);
+    reportBesideControl($("logs-msg"), String(e.message || e));
+  } finally {
+    logsBreakGlassBusy = false;
+  }
+}
+
+/** A draft edit, so it saves at once and offers Undo. Nothing reaches the host until Apply. */
+function addBreakGlass(ip) {
   const cidr = ip + "/32";
-  openConfirmModal({
-    title: "Add to break-glass?",
-    message:
-      "Add " +
-      cidr +
-      " to the geoblocking break-glass list? That address will bypass country rules after you Apply from Pending changes.",
-    confirmLabel: "Add to break-glass",
-    onConfirm: async () => {
-      if (logsBreakGlassBusy) return;
-      logsBreakGlassBusy = true;
-      // Drop any in-flight Logs refresh so its older config cannot overwrite this write.
-      state.logsRefreshSeq++;
-      setLogsMsg("…");
-      try {
-        state.lastConfig = await api("/v1/config");
-        let alreadyCovered = false;
-        await saveConfigEdit((cfg) => {
-          if (!cfg.geo) cfg.geo = {};
-          const list = Array.isArray(cfg.geo.break_glass_cidrs) ? cfg.geo.break_glass_cidrs.slice() : [];
-          alreadyCovered = ipv4CoveredByCIDRList(ip, list);
-          if (alreadyCovered) return false;
-          list.push(cidr);
-          cfg.geo.break_glass_cidrs = list;
-        });
-        state.logsRefreshSeq++;
-        if (alreadyCovered) {
-          setLogsMsg(ip + " is already covered by the break-glass list.");
-          renderLogsView();
-          return;
-        }
-        setLogsMsg("");
-        setApiStatus(true);
-        await refreshPendingBadge();
-        renderLogsView();
-        showToast("Added " + cidr + " to break-glass. Review Pending changes, then Apply.");
-      } catch (e) {
-        setLogsMsg(String(e.message || e), true);
-      } finally {
-        logsBreakGlassBusy = false;
-      }
-    },
+  return writeBreakGlass(async () => {
+    let alreadyCovered = false;
+    await saveConfigEdit((cfg) => {
+      if (!cfg.geo) cfg.geo = {};
+      const list = Array.isArray(cfg.geo.break_glass_cidrs) ? cfg.geo.break_glass_cidrs.slice() : [];
+      alreadyCovered = ipv4CoveredByCIDRList(ip, list);
+      if (alreadyCovered) return false;
+      list.push(cidr);
+      cfg.geo.break_glass_cidrs = list;
+    });
+    if (alreadyCovered) {
+      setLogsMsg(ip + " is already covered by the break-glass list.");
+      return;
+    }
+    setLogsMsg("");
+    showToast("Added " + cidr + " to break-glass. Review Pending changes, then Apply.", {
+      action: { label: "Undo", onClick: () => void removeBreakGlass(cidr) },
+    });
+  });
+}
+
+/** Undo takes out only this entry, from fresh config, so later additions survive. */
+function removeBreakGlass(cidr) {
+  return writeBreakGlass(async () => {
+    await saveConfigEdit((cfg) => {
+      const list = (cfg.geo && cfg.geo.break_glass_cidrs) || [];
+      if (!list.includes(cidr)) return false;
+      cfg.geo.break_glass_cidrs = list.filter((c) => c !== cidr);
+    });
+    setLogsMsg("");
+    showToast("Removed " + cidr + " from break-glass.");
   });
 }
 
@@ -504,7 +517,7 @@ export function initLogsPage() {
       const btn = ev.target.closest("[data-logs-breakglass]");
       if (!btn || !tableWrap.contains(btn)) return;
       const ip = btn.getAttribute("data-logs-breakglass");
-      if (ip) confirmAddBreakGlass(ip);
+      if (ip) void addBreakGlass(ip);
     });
   }
   const logsFilterType = $("logs-filter-type");

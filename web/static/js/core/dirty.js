@@ -27,20 +27,42 @@ export function createFormTracker(getControls) {
      * Treats the current values as saved. Pass `ids` to update only those
      * controls, so a late programmatic fill does not also absorb what the
      * operator typed elsewhere in the meantime.
+     *
+     * Pass `sent` (from `values`) as well when a save finishes: the operator may have
+     * kept typing during the request, and that must still read as dirty. A tracker
+     * cleared in the meantime stays cleared, since the form's edits were given up.
      */
-    mark(ids) {
-      const now = readControls(getControls());
+    mark(ids, sent) {
+      if (sent && !baseline) return;
+      const now = sent || readControls(getControls());
       if (!ids || !baseline) {
         baseline = now;
         return;
       }
       for (const id of ids) baseline[id] = now[id];
     },
+    /** The controls' values now, for a later `mark(ids, sent)`. */
+    values() {
+      return readControls(getControls());
+    },
     clear() {
       baseline = null;
     },
-    isDirty() {
-      return !!baseline && JSON.stringify(readControls(getControls())) !== JSON.stringify(baseline);
+    /** Pass `ids` to ask about only those controls. */
+    isDirty(ids) {
+      if (!baseline) return false;
+      const now = readControls(getControls());
+      if (ids) return ids.some((id) => now[id] !== baseline[id]);
+      return JSON.stringify(now) !== JSON.stringify(baseline);
+    },
+    /** Puts the controls back to the values `mark` remembered. */
+    revert() {
+      if (!baseline) return;
+      Array.from(getControls()).forEach((el) => {
+        if (!el.id || !(el.id in baseline)) return;
+        if (el.type === "checkbox" || el.type === "radio") el.checked = baseline[el.id];
+        else el.value = baseline[el.id];
+      });
     },
   };
 }
