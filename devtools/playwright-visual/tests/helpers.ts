@@ -131,6 +131,9 @@ export async function gotoRoute(page: Page, origin: string, route: Route): Promi
 }
 
 export async function capture(page: Page, name: string): Promise<void> {
+  // Dialogs focus their first field in requestAnimationFrame, so let queued frames run;
+  // otherwise the focus ring is sometimes missing from the shot.
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   // Without this, a shot taken right after a click can land mid-transition —
   // e.g. the tab underline still fading off the tab you just left.
   await page.screenshot({
