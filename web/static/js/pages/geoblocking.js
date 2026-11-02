@@ -9,6 +9,7 @@ import {
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { geoUpdatedMessage } from "../core/format.js";
 import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit, ConfigMergeError } from "../core/config_save.js";
@@ -76,7 +77,6 @@ async function refreshGeoZonesTable() {
   } catch (e) {
     msg.textContent = String(e.message || e);
     msg.classList.add("err");
-    wrap.innerHTML = "";
   } finally {
     doneLoading();
   }
@@ -646,6 +646,7 @@ export async function refreshGeoblockingPage() {
     state.lastConfig = await api("/v1/config");
     setApiStatus(true);
     geoFormFromConfig(state.lastConfig);
+    markPageLoaded("geoblocking");
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setGeoMsg(String(e.message || e), true);

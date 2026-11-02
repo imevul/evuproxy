@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { tunnelToHost, tunnelHostOnly, routeProtoPlainText } from "../core/net.js";
 import {
   wgPeerPubKeyMap,
@@ -791,6 +792,7 @@ export async function refreshTopologyPage(opts) {
         state.lastPeerPingByTunnel = pingByTunnel;
       } catch (_) {
         pingByTunnel = state.lastPeerPingByTunnel;
+        if (msg && pingByTunnel) msg.textContent = "Latency could not be refreshed, so it's from an earlier load.";
       }
     }
     const activeKeys = new Set();
@@ -808,6 +810,7 @@ export async function refreshTopologyPage(opts) {
     }
     renderTopologyGraph(cfg, st, activeKeys, pingByTunnel);
     setApiStatus(true);
+    markPageLoaded("topology");
   } catch (e) {
     if (msg) {
       msg.textContent = String(e.message || e);

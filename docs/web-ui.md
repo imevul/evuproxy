@@ -28,6 +28,8 @@ After a revert, the panel says why and offers **Restore as unapplied changes**, 
 
 With the setting off, Apply is one-way. If the check finds a lockout risk, Apply stops until you tick the acknowledgement and press it again; that re-runs the check, and a different set of warnings clears the tick.
 
+**Losing the API:** when the API stops answering, a banner above every page says why, with **Retry now**. A network failure or a gateway error (502, 503 or 504 from nginx) reads as **Can't reach the EvuProxy API**. A 401 reads as **The API rejected this browser's token**, with a link to **API token**. A failure on the overview request that is neither reads as **The API is returning errors**. One other endpoint failing shows no banner, only its own message on the page, and on **Overview** a note on whichever part is from an earlier load. A failed request never empties a page: what was loaded stays on screen, tagged **Stale data**, a page that never loaded is tagged **Not loaded yet**, and the nav links other than **Overview** and **API token** are disabled. The page checks again every 5 seconds and, once the API answers, re-enables the links and reloads the page on screen, keeping your tab, scroll position and any open dialog. A page form with unsaved edits isn't reloaded, so the edits stay. On a page with no polling of its own, the outage is noticed by the 30-second check for an Apply session, or by the next request you make.
+
 ## Save, Apply and Refresh
 
 The UI uses one word for each operation:

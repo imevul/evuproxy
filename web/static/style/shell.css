@@ -106,6 +106,14 @@ body.app .nav-link.nav-disabled:hover {
   filter: none;
 }
 
+/* The page on screen during an outage: not a way to go anywhere, but it still says where you are. */
+body.app .nav-link.is-active.nav-disabled,
+body.app .nav-link.is-active.nav-disabled:hover {
+  color: var(--evu-primary-foreground);
+  background: var(--evu-primary);
+  opacity: 1;
+}
+
 body.app .nav-pending-count {
   margin-left: auto;
 }
@@ -362,7 +370,8 @@ body:has(#apply-bar:not([hidden])) #pending-apply {
   display: none;
 }
 
-.apply-session {
+.apply-session,
+.connection-banner {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -375,15 +384,33 @@ body:has(#apply-bar:not([hidden])) #pending-apply {
 }
 
 .apply-session[hidden],
-.apply-session [hidden] {
+.apply-session [hidden],
+.connection-banner[hidden],
+.connection-banner [hidden] {
   display: none;
 }
 
-.apply-session__detail {
+.apply-session__detail,
+.connection-banner__detail {
   margin: 0;
   font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+.connection-banner__detail:empty {
+  display: none;
+}
+
+.connection-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.stale-tag,
+.not-loaded-tag {
+  flex: none;
 }
 
 .apply-session__note {

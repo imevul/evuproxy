@@ -20,6 +20,7 @@ import {
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { showToast } from "../core/toast.js";
 import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
@@ -640,6 +641,7 @@ export async function refreshRoutesPage() {
     setApiStatus(true);
     renderRoutesTable(state.lastConfig);
     peerTunnelIPv4Options(state.lastConfig);
+    markPageLoaded("routes");
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setRoutesMsg(String(e.message || e), true);

@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
@@ -389,10 +390,7 @@ function setLogsMsg(text, isErr) {
 
 export async function refreshLogsPage() {
   const seq = ++state.logsRefreshSeq;
-  const pre = $("logs-pre");
-  const wrap = $("logs-table-wrap");
   const src = $("logs-source");
-  const countEl = $("logs-count");
   setLogsMsg("");
   const doneLoading = beginLoading("logs-view");
   try {
@@ -427,21 +425,11 @@ export async function refreshLogsPage() {
       return e;
     });
     renderLogsView();
+    markPageLoaded("logs");
   } catch (e) {
     if (seq !== state.logsRefreshSeq) return;
     setApiStatus(false, String(e.message || e));
     setLogsMsg(String(e.message || e), true);
-    state.lastFirewallLogEntries = [];
-    if (wrap) {
-      wrap.innerHTML = "";
-      wrap.hidden = state.logsViewMode === "raw";
-    }
-    if (pre) {
-      pre.textContent = "";
-      pre.hidden = state.logsViewMode !== "raw";
-    }
-    if (countEl) countEl.textContent = "";
-    if (src) src.textContent = "";
   } finally {
     doneLoading();
   }

@@ -2,6 +2,7 @@ import { state, defaultPeerSubnetCidr, contentWidthKey, contentWidthCssValues } 
 import { $, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, getApiBase, headersDownload, responseEtag } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit, putConfigAtRevision, isConfigRevisionMismatch } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
@@ -265,14 +266,18 @@ async function loadSettingsPage() {
     await fetchUIPrefsFromServer();
     state.uiPrefsFetched = true;
     setApiStatus(true);
+    markPageLoaded("settings");
   } catch (e) {
     if (msg) {
       msg.textContent = String(e.message || e);
       msg.classList.add("err");
     }
     setApiStatus(false, String(e.message || e));
-    state.lastUIPrefs = { peer_tunnel_subnet_cidr: "", wireguard_server_endpoint: "", metrics_collection_enabled: false };
-    migrateFromLocalStorageIfEmpty();
+    // Blanks would read as settings the host has, and Save would write them back.
+    if (!state.uiPrefsFetched) {
+      state.lastUIPrefs = { peer_tunnel_subnet_cidr: "", wireguard_server_endpoint: "", metrics_collection_enabled: false };
+      migrateFromLocalStorageIfEmpty();
+    }
   }
   const cidr = $("peer-subnet-cidr");
   if (cidr) cidr.value = (state.lastUIPrefs.peer_tunnel_subnet_cidr || "").trim() || defaultPeerSubnetCidr;
@@ -292,9 +297,10 @@ async function loadSettingsPage() {
         $("settings-apply-confirm").checked = !!(cfg.apply && cfg.apply.confirm);
       }
     } catch (e) {
-      state.settingsPublicInterfaceLoaded = null;
-      pubIfEl.value = "";
-      pubIfEl.placeholder = "Load failed — refresh Settings";
+      if (state.settingsPublicInterfaceLoaded === null) {
+        pubIfEl.value = "";
+        pubIfEl.placeholder = "Load failed — refresh Settings";
+      }
       if (msg) {
         msg.textContent = String(e.message || e);
         msg.classList.add("err");
@@ -320,7 +326,6 @@ async function loadSettingsPage() {
         notesMsg.textContent = String(e.message || e);
         notesMsg.classList.add("err");
       }
-      notesEl.value = "";
     }
   }
   const bp = $("backup-path-input");

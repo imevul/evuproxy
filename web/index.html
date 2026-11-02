@@ -119,6 +119,18 @@
     <div class="evu-main">
       <main class="evu-main__inner content" id="main-content" tabindex="-1">
       <div id="apply-region" class="apply-region">
+        <div id="connection-banner" class="evu-alert evu-alert--danger connection-banner" role="alert" hidden>
+          <div class="evu-alert__body">
+            <p class="evu-alert__title" id="connection-banner-title"></p>
+            <p id="connection-banner-detail" class="connection-banner__detail"></p>
+            <p id="connection-banner-stale" class="connection-banner__detail"></p>
+            <p id="connection-banner-note" class="connection-banner__detail"></p>
+          </div>
+          <div class="connection-banner__actions">
+            <a id="connection-banner-token" class="evu-btn evu-btn--outline evu-btn--sm" href="#/token" hidden>Open API token</a>
+            <button type="button" id="connection-banner-retry" class="evu-btn evu-btn--primary evu-btn--sm">Retry now</button>
+          </div>
+        </div>
         <div id="apply-bar" class="apply-bar" role="group" aria-label="Unapplied changes" hidden>
           <span id="apply-bar-text" class="apply-bar__text" aria-live="polite"></span>
           <div class="apply-bar__actions">
