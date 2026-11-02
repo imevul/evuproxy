@@ -1341,6 +1341,13 @@ class Handler(BaseHTTPRequestHandler):
                     "error_code": "config_revision_mismatch",
                 },
             )
+        # Same messages as Config.Validate, for the rules the UI's instant switches can trip.
+        geo = body.get("geo") or {}
+        if geo.get("enabled"):
+            if not geo.get("countries"):
+                return self._send_json(400, {"error": "geo.countries required when geo.enabled"})
+            if not geo.get("zone_dir"):
+                return self._send_json(400, {"error": "geo.zone_dir required when geo.enabled"})
         MOCK_CONFIG = copy.deepcopy(body)
         _persist_mock_config()
         return self._send_json(

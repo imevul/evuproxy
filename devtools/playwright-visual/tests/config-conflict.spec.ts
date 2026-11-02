@@ -234,18 +234,40 @@ test.describe("conflicting config saves", () => {
     await saveElsewhere(request, (c) => {
       c.peers[0].name = "saved-elsewhere";
     });
-    await page.locator("#geo-save").click();
+    const bar = page.locator("#page-geoblocking .save-bar");
+    const save = bar.getByRole("button", { name: "Save" });
+    // The bar exists only while dirty, so each save needs an edit: flip the list mode.
+    const flipMode = () => page.locator("#page-geoblocking .geo-mode-btn:not(.is-active)").click();
+
+    await flipMode();
+    await save.click();
     await expect(page.locator("#toaster")).toContainText(/Geoblocking saved/);
     expect((await getConfig(request)).cfg.peers[0].name).toBe("saved-elsewhere");
 
     await saveElsewhere(request, (c) => {
       c.geo.break_glass_cidrs = ["203.0.113.9/32"];
     });
-    await page.locator("#geo-save").click();
-    await expect(page.locator("#geo-msg")).toContainText(/changed elsewhere/);
+    await flipMode();
+    await save.click();
+    await expect(bar.locator(".save-bar__error")).toContainText(/changed elsewhere/);
     expect((await getConfig(request)).cfg.geo.break_glass_cidrs).toEqual(["203.0.113.9/32"]);
 
-    await page.locator("#geo-save").click();
+    await save.click();
     await expect(page.locator("#toaster")).toContainText(/Geoblocking saved/);
+    await expect(bar).toBeHidden();
+  });
+
+  test("a switch flipped elsewhere is no conflict for the form", async ({ page, request }) => {
+    await gotoRoute(page, origin, "geoblocking");
+    const wasInbound = !!(await getConfig(request)).cfg.geo.apply_to_input_allows;
+    await page.locator("#page-geoblocking .geo-mode-btn:not(.is-active)").click();
+    await saveElsewhere(request, (c) => {
+      c.geo.apply_to_input_allows = !wasInbound;
+    });
+
+    await page.locator("#page-geoblocking .save-bar").getByRole("button", { name: "Save" }).click();
+
+    await expect(page.locator("#toaster")).toContainText(/Geoblocking saved/);
+    expect(!!(await getConfig(request)).cfg.geo.apply_to_input_allows).toBe(!wasInbound);
   });
 });

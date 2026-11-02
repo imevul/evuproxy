@@ -1,5 +1,6 @@
-import { $ } from "../core/dom.js";
-import { tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
+import { state } from "../core/state.js";
+import { $, setApiStatus } from "../core/dom.js";
+import { api, applyNavRestriction, tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
 import { invalidateUIPrefsCache } from "../core/prefs.js";
 import { createFormTrackerByIds, registerPageForm } from "../core/dirty.js";
 import { refreshOverviewPage } from "./overview.js";
@@ -33,11 +34,14 @@ export function initTokenPage() {
     $("api-base").value = String(savedApiBase).trim();
   }
 
-  $("save-token").addEventListener("click", () => {
+  $("token-connect").addEventListener("click", async () => {
     const t = $("token").value.trim();
-    if (t) {
-      localStorage.setItem(tokenKey, t);
+    if (!t) {
+      setAuthMsg("Enter an API token to connect.", true);
+      $("token").focus();
+      return;
     }
+    localStorage.setItem(tokenKey, t);
     const ab = $("api-base");
     if (ab) {
       const b = ab.value.trim();
@@ -54,7 +58,18 @@ export function initTokenPage() {
     }
     invalidateUIPrefsCache();
     tokenForm.mark();
-    setAuthMsg("Saved in browser storage.");
+    setAuthMsg("Connecting…");
+    try {
+      state.lastOverview = await api("/v1/overview");
+      state.apiConnectionOk = true;
+      setApiStatus(true);
+      setAuthMsg("Connected. The token is saved in this browser.");
+    } catch (e) {
+      state.apiConnectionOk = false;
+      setApiStatus(false, String(e.message || e));
+      setAuthMsg("Could not connect: " + String(e.message || e), true);
+    }
+    applyNavRestriction();
     void refreshOverviewPage();
   });
 }

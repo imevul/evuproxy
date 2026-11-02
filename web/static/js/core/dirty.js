@@ -39,8 +39,21 @@ export function createFormTracker(getControls) {
     clear() {
       baseline = null;
     },
-    isDirty() {
-      return !!baseline && JSON.stringify(readControls(getControls())) !== JSON.stringify(baseline);
+    /** Pass `ids` to ask about only those controls. */
+    isDirty(ids) {
+      if (!baseline) return false;
+      const now = readControls(getControls());
+      if (ids) return ids.some((id) => now[id] !== baseline[id]);
+      return JSON.stringify(now) !== JSON.stringify(baseline);
+    },
+    /** Puts the controls back to the values `mark` remembered. */
+    revert() {
+      if (!baseline) return;
+      Array.from(getControls()).forEach((el) => {
+        if (!el.id || !(el.id in baseline)) return;
+        if (el.type === "checkbox" || el.type === "radio") el.checked = baseline[el.id];
+        else el.value = baseline[el.id];
+      });
     },
   };
 }

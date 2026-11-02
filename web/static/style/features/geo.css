@@ -62,11 +62,6 @@
   margin-bottom: 0;
 }
 
-.msg.geo-unsaved-msg {
-  color: var(--evuproxy-warning-text);
-  margin: 0.35rem 0 0;
-}
-
 table.data .geo-zones-col-country {
   white-space: nowrap;
 }
@@ -226,8 +221,8 @@ button.geo-tags-edit {
   background: var(--evu-card);
 }
 
-.geo-modal-row input {
-  flex-shrink: 0;
+.geo-modal-row > .evu-checkbox {
+  margin-top: 0;
 }
 
 .geo-modal-row-flag {
