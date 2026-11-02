@@ -44,7 +44,7 @@ jobs:
       - name: Wait for mock stack
         # Goes through the UI's nginx to the mock API, so it covers both containers.
         run: |
-          curl -sSf -o /dev/null --retry 30 --retry-delay 2 --retry-connrefused \
+          curl -sSf -o /dev/null --retry 30 --retry-delay 2 --retry-connrefused --retry-all-errors \
             -H "Authorization: Bearer dev" http://127.0.0.1:9080/api/v1/status
       - name: Run suite
         run: make ${{ matrix.target }}
