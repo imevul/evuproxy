@@ -9,6 +9,7 @@ import {
   clearRowError,
   rowErrorHtml,
   restoreRowSwitchFocus,
+  fadeOutRow,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
@@ -56,6 +57,11 @@ function setInboundMsg(text, isErr) {
   if (!text) clearRowError("data-inbound-disabled");
 }
 
+/** The API stores several ports as an nft set, `{ 80, 443 }`. Operators read `80, 443`. */
+function dportDisplay(dport) {
+  return String(dport || "").replace(/[{}]/g, "").trim();
+}
+
 function renderInboundTable(cfg) {
   const wrap = $("inbound-table-wrap");
   if (!wrap) return;
@@ -74,9 +80,9 @@ function renderInboundTable(cfg) {
         "Enabled: INPUT " +
         String(r.proto || "").toLowerCase() +
         " " +
-        String(r.dport || r.note || "#" + i);
+        (dportDisplay(r.dport) || r.note || "#" + i);
       return (
-        `<tr${r.disabled ? ' class="is-row-disabled"' : ""}><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>` +
+        `<tr${r.disabled ? ' class="is-row-disabled"' : ""}><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(dportDisplay(r.dport))}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>` +
         rowErrorHtml("data-inbound-disabled", i, 5)
       );
     })
@@ -213,24 +219,26 @@ async function removeInboundRule(index) {
   const rule = cfg.input_allows[index];
   const identity = inboundRuleIdentity(rule);
   const openIndex = index;
-  const proto = String(rule.proto || "").toLowerCase() || "—";
-  const dport = String(rule.dport || "—");
+  const proto = String(rule.proto || "").toUpperCase() || "—";
+  const dport = dportDisplay(rule.dport) || "—";
   const note = String(rule.note || "").trim();
-  const label = note ? proto + " " + dport + " (" + note + ")" : proto + " " + dport;
+  const label = proto + " " + dport + (note ? " (" + note + ")" : "");
   openConfirmModal({
     title: "Remove inbound rule?",
     message:
-      "Remove " +
       label +
-      " from the saved config? The host is not updated until you apply on Pending changes.",
-    confirmLabel: "Remove",
+      " will no longer be open on this host. The host is not updated until you apply on Pending changes.",
+    confirmLabel: "Remove rule",
     onConfirm: async () => {
       try {
+        const removeBtn = document.querySelector(`#inbound-table-wrap [data-inbound-del="${openIndex}"]`);
+        const row = removeBtn && removeBtn.closest("tr");
         // Re-resolve in the edit: the list may have changed while the dialog was open, or since this tab loaded.
         const c = await saveConfigEdit((draft) => {
           const i = findConfigRow(draft.input_allows, openIndex, identity, inboundRuleIdentity, "inbound rule");
           draft.input_allows.splice(i, 1);
         });
+        await fadeOutRow(row);
         setInboundMsg("");
         renderInboundTable(c);
         setApiStatus(true);

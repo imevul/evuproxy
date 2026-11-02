@@ -65,6 +65,42 @@
   height: auto;
 }
 
+#overview-cards.card-grid > .overview-first-run {
+  grid-column: 1 / -1;
+  height: auto;
+}
+
+.first-run-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem 1.25rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: first-run;
+}
+
+.first-run-step {
+  counter-increment: first-run;
+}
+
+.first-run-step a {
+  font-weight: 500;
+}
+
+.first-run-step a::before {
+  content: counter(first-run) ". ";
+}
+
+.first-run-step.is-done a::before {
+  content: "✓ ";
+  color: var(--evuproxy-success-text);
+}
+
+.first-run-step .meta {
+  margin: 0.15rem 0 0;
+}
+
 /* Consolidated Overview dash cards: avoid stretching last inner block into empty space */
 #overview-cards.card-grid > .card.overview-dash-card:not(.overview-api-issue-card)
   > *:last-child:not(h3) {
@@ -250,22 +286,6 @@
   font-size: 0.76rem;
   line-height: 1.35;
   color: var(--evu-muted-foreground);
-}
-
-.overview-geo-fresh-ts {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.08rem 0.4rem;
-  font-family: ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
-}
-
-.overview-geo-fresh-ts-date,
-.overview-geo-fresh-ts-clock {
-  white-space: nowrap;
-  line-height: 1.25;
 }
 
 .overview-dash-latency .overview-latency-line {

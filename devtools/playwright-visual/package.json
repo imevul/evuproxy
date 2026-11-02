@@ -10,6 +10,6 @@
   "scripts": {
     "test": "playwright test smoke-visual",
     "test:a11y": "playwright test a11y.spec",
-    "test:behavior": "playwright test modal-stack discard-guard drawer-tabs a11y-markup apply-gate config-conflict loading-states toast.spec"
+    "test:behavior": "playwright test modal-stack discard-guard drawer-tabs a11y-markup apply-gate config-conflict loading-states toast.spec hierarchy-first-run"
   }
 }

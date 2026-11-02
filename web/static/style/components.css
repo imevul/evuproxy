@@ -304,6 +304,37 @@ table.data .row-actions {
   white-space: nowrap;
 }
 
+table.data .public-key-text {
+  white-space: nowrap;
+}
+
+.token-not-connected {
+  margin-bottom: 0.75rem;
+}
+
+.dark .evu-btn--danger {
+  background-color: var(--evuproxy-danger-fill);
+}
+
+/* Live numbers and ports must not jitter as their digits change. */
+table.data td,
+.overview-kv-val,
+.overview-events-list,
+.topology-node-title,
+.topology-node-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A removed row fades before the table re-renders. Height is not animated. */
+table.data tr.is-row-leaving {
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition:
+    opacity var(--evu-duration-fast) var(--evu-ease-out),
+    transform var(--evu-duration-fast) var(--evu-ease-out);
+}
+
 .modal {
   position: fixed;
   inset: 0;
@@ -312,10 +343,34 @@ table.data .row-actions {
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  opacity: 1;
+  transition:
+    opacity var(--evu-duration-fast) var(--evu-ease-out),
+    display var(--evu-duration-fast) allow-discrete;
 }
 
+/* `display` is transitioned so the exit plays; it still reads as closed to everything but the eye. */
 .modal.is-hidden {
   display: none !important;
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: var(--evu-duration-press);
+}
+
+@starting-style {
+  .modal:not(.is-hidden) {
+    opacity: 0;
+  }
+
+  .modal:not(.is-hidden) .modal-panel {
+    transform: scale(0.97);
+  }
+}
+
+/* Opened or closed from the keyboard: no motion in the way of the next key. */
+.modal.modal--instant,
+.modal.modal--instant .modal-panel {
+  transition: none;
 }
 
 .modal-backdrop {
@@ -348,6 +403,12 @@ table.data .row-actions {
   border-radius: calc(var(--evu-radius) + 2px);
   padding: 1rem 1.25rem;
   box-shadow: var(--evuproxy-shadow-overlay);
+  transition: transform var(--evu-duration-fast) var(--evu-ease-out);
+}
+
+.modal.is-hidden .modal-panel {
+  transform: scale(0.97);
+  transition-duration: var(--evu-duration-press);
 }
 
 .modal-panel-wide {

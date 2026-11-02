@@ -2,12 +2,13 @@ import { state, defaultPeerSubnetCidr } from "../core/state.js";
 import {
   $,
   escapeHtml,
-  trunc,
   setApiStatus,
   tableDisabledToggleCell,
   monoIpCopyCellHtml,
   bindTunnelIpCopyButtons,
-  applyPeersRoutesTableFilter,
+  applyTableFilter,
+  fadeOutRow,
+  publicKeyCellHtml,
   downloadTextFile,
   setEditorMsg,
   setRowError,
@@ -19,7 +20,15 @@ import { beginLoading } from "../core/loading.js";
 import { api, apiBlob } from "../core/api.js";
 import { showToast } from "../core/toast.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
-import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
+import {
+  tunnelToHost,
+  tunnelHostOnly,
+  parseIPv4CIDR,
+  ipv4ToInt,
+  intToIpv4,
+  ipInCidr,
+  routeProtoPlainText,
+} from "../core/net.js";
 import {
   PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC,
   showPeersMetricsColumn,
@@ -169,7 +178,8 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       return (
         `<tr data-filter="${escapeHtml(f)}"${p.disabled ? ' class="is-row-disabled"' : ""}><td>${escapeHtml(p.name)}</td>` +
         monoIpCopyCellHtml(p.tunnel_ip) +
-        `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>` +
+        publicKeyCellHtml(p.public_key, p.name) +
+        `${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>` +
         rowErrorHtml("data-peer-disabled", i, pingOn ? 7 : 6)
       );
     })
@@ -190,7 +200,7 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       await patchPeerDisabled(idx, !inp.checked);
     });
   });
-  applyPeersRoutesTableFilter();
+  applyTableFilter("peers-table-wrap");
 }
 
 function peerTunnelHost(peer) {
@@ -213,9 +223,9 @@ function dependentRoutesForPeer(cfg, peer) {
 
 function dependentRoutesConfirmMessage(peerName, deps) {
   const labels = deps.map(({ route: r }) => {
-    const ports = (r.ports || []).join(", ") || "?";
-    const proto = String(r.proto || "").toLowerCase() || "?";
-    return proto + " " + ports + " → " + String(r.target_ip || "");
+    const portList = r.ports || [];
+    const proto = routeProtoPlainText(r.proto).toUpperCase();
+    return proto + (portList.length > 1 ? " ports " : " port ") + (portList.join(", ") || "?");
   });
   const list = labels.map((l) => "• " + l).join("\n");
   return (
@@ -551,9 +561,9 @@ async function removePeer(index) {
   const identity = peerIdentity(peer);
   const deps = dependentRoutesForPeer(cfg, peer);
   const baseMsg =
-    "Remove \"" +
+    "\"" +
     peerName +
-    "\" from the saved config? The host is not updated until you apply on Pending changes.";
+    "\" will lose its tunnel access. The host is not updated until you apply on Pending changes.";
   const message = deps.length
     ? dependentRoutesConfirmMessage(peerName || "peer", deps) +
       "\n\nThe peer will then be removed from the saved config. " +
@@ -562,14 +572,17 @@ async function removePeer(index) {
   openConfirmModal({
     title: deps.length ? "Remove peer and disable routes?" : "Remove peer?",
     message,
-    confirmLabel: deps.length ? "Disable routes and remove" : "Remove",
+    confirmLabel: deps.length ? "Remove peer and disable routes" : "Remove peer",
     onConfirm: async () => {
       try {
+        const removeBtn = document.querySelector(`#peers-table-wrap [data-peer-del="${index}"]`);
+        const row = removeBtn && removeBtn.closest("tr");
         const c = await saveConfigEdit((draft) => {
           const i = findConfigRow(draft.peers, index, identity, peerIdentity, "peer");
           disableDependentRoutes(draft, dependentRoutesForPeer(draft, draft.peers[i]));
           draft.peers.splice(i, 1);
         });
+        await fadeOutRow(row);
         setPeersMsg("");
         renderPeersTable(c);
         setApiStatus(true);
