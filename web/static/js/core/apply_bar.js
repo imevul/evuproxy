@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { showToast } from "./toast.js";
 import { setTitlePendingCount } from "./title.js";
 import { fetchValidateResult, lockoutRisks, lockoutSignature } from "./lockout.js";
+import { adoptAppliedSession, confirmModeKnown, initApplySession, readApplyMode } from "./apply_session.js";
 
 /*
  * The one Apply: a bar pinned above every page while changes are waiting, and the
@@ -30,6 +31,8 @@ let afterApply = async () => {};
 let knownRevision = "";
 /** The panel shows a pass with nothing to act on, so it need not follow the operator around. */
 let showingCleanCheck = false;
+/** The session a finished Apply started, until the screen has caught up and can show it. */
+let pendingSession = null;
 
 function syncResultVisibility() {
   $("apply-result").hidden =
@@ -132,7 +135,8 @@ function renderCheckResult(res) {
     state.pendingLockoutAckSig = "";
     ack.checked = false;
   }
-  $("pending-lockout-ack-wrap").classList.toggle("is-hidden", !risks.length);
+  // With confirm-or-revert on, a lockout undoes itself, so there is nothing to acknowledge.
+  $("pending-lockout-ack-wrap").classList.toggle("is-hidden", !risks.length || confirmModeKnown());
   showingCleanCheck = res.ok && !warnings.length;
   syncResultVisibility();
 }
@@ -195,8 +199,12 @@ export function noteConfigRevision(revision) {
   knownRevision = revision;
 }
 
-/** Sends the Apply, following its stages for as long as the one request takes. */
-async function runReload() {
+/**
+ * Sends the Apply, following its stages for as long as the one request takes. With
+ * `confirmSeconds` the host reverts unless it is confirmed in that time. Any risks stay
+ * on screen for that decision.
+ */
+async function runReload(confirmSeconds, keepWarnings) {
   let step = "firewall";
   showProgress(step);
   setApplyMsg("");
@@ -213,8 +221,13 @@ async function runReload() {
     }
   };
   const timer = setInterval(() => void poll(), PROGRESS_POLL_MS);
+  let session = null;
   try {
-    await api("/v1/reload", { method: "POST" });
+    const res = await api("/v1/reload", {
+      method: "POST",
+      ...(confirmSeconds ? { body: JSON.stringify({ confirm_timeout_seconds: confirmSeconds }) } : {}),
+    });
+    session = (res && res.session) || null;
   } catch (e) {
     showProgress(step, true);
     setApplyMsg(applyErrorText(e), true);
@@ -223,25 +236,43 @@ async function runReload() {
     polling = false;
     clearInterval(timer);
   }
-  invalidateCheck();
+  if (!keepWarnings) invalidateCheck();
   showProgress("done");
   doneTimer = setTimeout(hideProgress, DONE_VISIBLE_MS);
   setApiStatus(true);
-  showToast("Applied to host");
+  // The panel asking whether to keep it says what a toast would.
+  if (!session) showToast("Applied to host");
+  pendingSession = session;
   return true;
 }
 
 async function applyWithCheck() {
+  // Read before the check, which needs to know whether to offer the acknowledgement.
+  // An API that can't answer can't be trusted to apply safely either, so stop here.
+  showProgress("validate");
+  let mode;
+  try {
+    mode = await readApplyMode();
+  } catch (e) {
+    showProgress("validate", true);
+    setApplyMsg(String(e.message || e), true);
+    return false;
+  }
+  if (mode.failedRevert) {
+    hideProgress();
+    setApplyMsg("The last Apply hasn't finished reverting. Retry the revert before applying again.", true);
+    return false;
+  }
   // Always check immediately before applying. A stored "it passed earlier"
   // cannot know about a config saved since — in another tab, by the CLI, or
   // on another page of this one.
-  showProgress("validate");
   const res = await runCheck();
   if (!res || !res.ok) {
     showProgress("validate", true);
     return false;
   }
   const risks = lockoutRisks(res);
+  if (mode.confirm) return runReload(mode.timeoutSeconds, risks.length > 0);
   if (risks.length) {
     const ack = $("pending-lockout-ack");
     if (!ack.checked || state.pendingLockoutAckSig !== lockoutSignature(risks)) {
@@ -251,7 +282,7 @@ async function applyWithCheck() {
       return false;
     }
   }
-  return runReload();
+  return runReload(0, false);
 }
 
 function onApplyClick(button) {
@@ -268,7 +299,12 @@ function onApplyClick(button) {
       busy = false;
       button.removeAttribute("aria-busy");
     }
-    if (applied) await afterApply();
+    if (applied) {
+      await afterApply();
+      // Last, since the bar hiding moves focus. The panel's question is the next thing to answer.
+      adoptAppliedSession(pendingSession);
+      pendingSession = null;
+    }
   };
 }
 
@@ -303,6 +339,12 @@ export function initApplyBar(opts) {
     invalidateCheck();
     hideProgress();
     $("main-content").focus({ preventScroll: true });
+  });
+  initApplySession({
+    onSettled: async () => {
+      invalidateCheck();
+      await afterApply();
+    },
   });
   // The region stays on screen as the page scrolls, so a field tabbed to must stop below it.
   const region = $("apply-region");

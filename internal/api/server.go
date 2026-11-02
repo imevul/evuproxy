@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -115,6 +116,11 @@ func (s *Server) Routes() http.Handler {
 	})
 	mux.HandleFunc("POST /api/v1/reload", s.auth(s.handleReload))
 	mux.HandleFunc("GET /api/v1/reload/progress", s.auth(s.handleReloadProgress))
+	mux.HandleFunc("GET /api/v1/apply/session", s.auth(s.handleApplySession))
+	mux.HandleFunc("POST /api/v1/apply/confirm", s.auth(s.handleApplyConfirm))
+	mux.HandleFunc("POST /api/v1/apply/revert", s.auth(s.handleApplyRevert))
+	mux.HandleFunc("POST /api/v1/apply/reverted/restore", s.auth(s.handleApplyRevertedRestore))
+	mux.HandleFunc("POST /api/v1/apply/reverted/dismiss", s.auth(s.handleApplyRevertedDismiss))
 	mux.HandleFunc("POST /api/v1/update-geo", s.auth(s.handleUpdateGeo))
 	mux.HandleFunc("GET /api/v1/status", s.auth(s.handleStatus))
 	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.handleMetrics))
@@ -194,6 +200,11 @@ func (s *Server) logErr(msg string, err error, attrs ...any) {
 func (s *Server) Run() error {
 	if s.Logger == nil {
 		s.Logger = slog.Default()
+	}
+	// After a reboot inside a confirm window the timer is gone, and nothing else would
+	// revert if the boot unit is disabled. With a live timer this leaves the session alone.
+	if err := apply.RecoverConfirmSession(context.Background(), s.Config); err != nil {
+		s.Logger.Error("recover apply session", "err", err)
 	}
 	if err := state.EnsureApplyStateFromDisk(s.Config); err != nil {
 		s.Logger.Warn("apply state bootstrap", "err", err)

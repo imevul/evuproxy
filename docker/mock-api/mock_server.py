@@ -213,6 +213,47 @@ MOCK_BAK_SLOTS: list[dict | None] = [None, None, None, None, None]
 # Archives the mock pretends are on disk, by path: unix time of the last backup.
 MOCK_BACKUPS: dict[str, float] = {"/var/backups/evuproxy-config.tgz": time.time()}
 
+# An Apply waiting for confirmation; the real API keeps this on disk and reverts from a systemd timer.
+MOCK_SESSION: dict | None = None
+MOCK_REVERTED_CONFIG: dict | None = None
+MOCK_LAST_REVERT: dict | None = None
+
+
+def _utc_iso(ts: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _mock_session_view() -> dict | None:
+    if MOCK_SESSION is None:
+        return None
+    return {
+        "phase": "active",
+        "started_at": _utc_iso(MOCK_SESSION["started_at"]),
+        "deadline": _utc_iso(MOCK_SESSION["deadline"]),
+        "timeout_seconds": MOCK_SESSION["timeout"],
+        "remaining_seconds": max(0, round(MOCK_SESSION["deadline"] - time.time())),
+    }
+
+
+def _mock_revert_session(reason: str) -> None:
+    global MOCK_SESSION, MOCK_REVERTED_CONFIG, MOCK_LAST_REVERT, MOCK_CONFIG
+    global MOCK_CONFIG_BASELINE, MOCK_APPLIED_SHA, MOCK_BAK, MOCK_BAK_SLOTS
+    MOCK_REVERTED_CONFIG = copy.deepcopy(MOCK_CONFIG)
+    MOCK_CONFIG = copy.deepcopy(MOCK_SESSION["baseline"])
+    MOCK_CONFIG_BASELINE = copy.deepcopy(MOCK_SESSION["baseline"])
+    MOCK_APPLIED_SHA = MOCK_SESSION["applied_sha"]
+    MOCK_BAK = MOCK_SESSION["bak"]
+    MOCK_BAK_SLOTS = MOCK_SESSION["bak_slots"]
+    MOCK_SESSION = None
+    MOCK_LAST_REVERT = {"at": _utc_iso(time.time()), "reason": reason, "config_available": True}
+    _persist_mock_config()
+    _push_mock_event("apply_reverted", reason)
+
+
+def _mock_expire_session() -> None:
+    if MOCK_SESSION is not None and time.time() >= MOCK_SESSION["deadline"]:
+        _mock_revert_session("timeout")
+
 
 def _config_change_count(a, b) -> int:
     """Match configChangeCount in internal/apply/config_changes.go."""
@@ -1229,6 +1270,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/v1/reload/progress":
             # The mock's reload finishes at once, so one is never seen running.
             return self._send_json(200, {"step": ""})
+        if path == "/api/v1/apply/session":
+            _mock_expire_session()
+            settings = MOCK_CONFIG.get("apply") or {}
+            return self._send_json(
+                200,
+                {
+                    "confirm_enabled": bool(settings.get("confirm")),
+                    "confirm_timeout_seconds": settings.get("confirm_timeout_seconds") or 60,
+                    "session": _mock_session_view(),
+                    "last_revert": MOCK_LAST_REVERT,
+                },
+            )
         if path == "/api/v1/pending":
             _ensure_mock_apply_bootstrap()
             disk = _disk_config_sha()
@@ -1417,6 +1470,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         global MOCK_CONFIG, MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE, MOCK_EVENTS
+        global MOCK_SESSION, MOCK_REVERTED_CONFIG, MOCK_LAST_REVERT
         path = self.path.split("?", 1)[0]
         if not _auth_ok(self):
             return self._send_json(401, {"error": "unauthorized"})
@@ -1561,6 +1615,10 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path not in (
             "/api/v1/reload",
+            "/api/v1/apply/confirm",
+            "/api/v1/apply/revert",
+            "/api/v1/apply/reverted/restore",
+            "/api/v1/apply/reverted/dismiss",
             "/api/v1/update-geo",
             "/api/v1/backup",
             "/api/v1/restore",
@@ -1569,8 +1627,42 @@ class Handler(BaseHTTPRequestHandler):
         ):
             return self._send_json(404, {"error": "not found"})
         length = int(self.headers.get("Content-Length", 0) or 0)
-        if length:
-            self.rfile.read(length)
+        raw_body = self.rfile.read(length) if length else b""
+        _mock_expire_session()
+        if path == "/api/v1/apply/confirm":
+            if MOCK_SESSION is None:
+                return self._send_json(
+                    409, {"error": "no Apply is waiting for confirmation", "error_code": "no_apply_session"}
+                )
+            MOCK_SESSION = None
+            _push_mock_event("apply_confirmed", "confirm")
+            return self._send_json(200, {"result": "confirmed"})
+        if path == "/api/v1/apply/revert":
+            if MOCK_SESSION is None:
+                return self._send_json(
+                    409, {"error": "no Apply is waiting for confirmation", "error_code": "no_apply_session"}
+                )
+            _mock_revert_session("manual")
+            return self._send_json(200, {"result": "reverted"})
+        if path == "/api/v1/apply/reverted/restore":
+            if MOCK_REVERTED_CONFIG is None:
+                return self._send_json(
+                    409, {"error": "no reverted config is being kept", "error_code": "no_reverted_config"}
+                )
+            if _disk_config_sha() != MOCK_APPLIED_SHA:
+                return self._send_json(
+                    409,
+                    {"error": "config.yaml has unapplied changes: apply or discard them first", "error_code": "pending_edits"},
+                )
+            MOCK_CONFIG = copy.deepcopy(MOCK_REVERTED_CONFIG)
+            _persist_mock_config()
+            MOCK_REVERTED_CONFIG = None
+            MOCK_LAST_REVERT = None
+            return self._send_json(200, {"result": "restored"})
+        if path == "/api/v1/apply/reverted/dismiss":
+            MOCK_REVERTED_CONFIG = None
+            MOCK_LAST_REVERT = None
+            return self._send_json(200, {"result": "dismissed"})
         if path == "/api/v1/config/discard":
             if MOCK_BAK is None:
                 return self._send_json(
@@ -1609,10 +1701,37 @@ class Handler(BaseHTTPRequestHandler):
                 400, {"error": "could not restore previous applied configuration"}
             )
         if path == "/api/v1/reload":
+            try:
+                body = json.loads(raw_body) if raw_body.lstrip().startswith(b"{") else {}
+                timeout = int(body.get("confirm_timeout_seconds") or 0)
+            except (ValueError, TypeError):
+                return self._send_json(400, {"error": "invalid reload body", "error_code": "invalid_reload_body"})
+            if timeout and not 10 <= timeout <= 3600:
+                return self._send_json(400, {"error": "invalid reload body", "error_code": "invalid_reload_body"})
+            if MOCK_SESSION is not None and not timeout:
+                return self._send_json(
+                    409,
+                    {"error": "an Apply is waiting for confirmation", "error_code": "apply_session_active"},
+                )
+            if timeout:
+                if MOCK_SESSION is None:
+                    MOCK_SESSION = {
+                        "started_at": time.time(),
+                        "baseline": copy.deepcopy(MOCK_CONFIG_BASELINE),
+                        "applied_sha": MOCK_APPLIED_SHA,
+                        "bak": copy.deepcopy(MOCK_BAK),
+                        "bak_slots": copy.deepcopy(MOCK_BAK_SLOTS),
+                    }
+                    MOCK_REVERTED_CONFIG = None
+                    MOCK_LAST_REVERT = None
+                MOCK_SESSION["timeout"] = timeout
+                MOCK_SESSION["deadline"] = time.time() + timeout
             MOCK_APPLIED_SHA = _disk_config_sha()
             MOCK_CONFIG_BASELINE = copy.deepcopy(MOCK_CONFIG)
             _mock_record_applied_snapshot()
             _push_mock_event("reload_ok", "reload")
+            if timeout:
+                return self._send_json(200, {"result": "reloaded", "session": _mock_session_view()})
             return self._send_json(200, {"result": "reloaded"})
         if path == "/api/v1/update-geo":
             _push_mock_event("update_geo_ok", "update-geo")

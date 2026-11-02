@@ -4,6 +4,7 @@ import { beginLoading } from "../core/loading.js";
 import { api, getApiBase, headersDownload, responseEtag } from "../core/api.js";
 import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit, putConfigAtRevision, isConfigRevisionMismatch } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
 import {
   fetchUIPrefsFromServer,
   migrateFromLocalStorageIfEmpty,
@@ -137,6 +138,39 @@ async function setMetricsCollection(on) {
   }
 }
 
+/** Instant switch: writes only its own field, as Geoblocking's switches do. */
+async function setApplyConfirm(on) {
+  const input = $("settings-apply-confirm");
+  const err = $("settings-apply-confirm-msg");
+  const write = (value) => (cfg) => {
+    if (!cfg.apply) cfg.apply = {};
+    cfg.apply.confirm = value;
+  };
+  const confirmation = (value) => "Revert Apply unless confirmed: " + (value ? "on" : "off");
+  err.textContent = "";
+  input.disabled = true;
+  try {
+    await saveConfigEdit(write(on));
+    setApiStatus(true);
+    refreshPendingBadge();
+    showUndoToast(confirmation(on), {
+      page: "settings",
+      edit: write(!on),
+      afterSave: (cfg, focus) => {
+        refreshPendingBadge();
+        input.checked = !!(cfg.apply && cfg.apply.confirm);
+        if (focus) input.focus();
+      },
+      message: () => confirmation(!on),
+    });
+  } catch (e) {
+    input.checked = !on;
+    reportBesideControl(err, String(e.message || e));
+  } finally {
+    input.disabled = false;
+  }
+}
+
 /** Save bar action. Validates everything before writing anything. */
 async function saveSettingsForm() {
   const cidrRaw = $("peer-subnet-cidr").value.trim();
@@ -255,6 +289,7 @@ async function loadSettingsPage() {
         state.settingsPublicInterfaceLoaded = String((cfg.network && cfg.network.public_interface) || "").trim();
         pubIfEl.value = state.settingsPublicInterfaceLoaded;
         pubIfEl.placeholder = "eth0";
+        $("settings-apply-confirm").checked = !!(cfg.apply && cfg.apply.confirm);
       }
     } catch (e) {
       state.settingsPublicInterfaceLoaded = null;
@@ -376,6 +411,8 @@ export function initSettingsPage() {
       else void setMetricsCollection(metricsToggle.checked);
     });
   }
+  const applyConfirmToggle = $("settings-apply-confirm");
+  applyConfirmToggle.addEventListener("change", () => void setApplyConfirm(applyConfirmToggle.checked));
   registerModalCloser($("config-upload-modal"), closeConfigUploadModal);
   const settingsTabPrefs = $("settings-tab-prefs-btn");
   const settingsTabMaint = $("settings-tab-maint-btn");

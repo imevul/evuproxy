@@ -126,6 +126,20 @@
             <button type="button" id="apply-bar-apply" class="evu-btn evu-btn--primary evu-btn--sm">Apply</button>
           </div>
         </div>
+        <div id="apply-session" class="evu-alert apply-session" role="group" aria-labelledby="apply-session-title" hidden>
+          <div class="evu-alert__body apply-session__body">
+            <p class="evu-alert__title" id="apply-session-title"></p>
+            <p id="apply-session-detail" class="apply-session__detail"></p>
+            <p id="apply-session-note" class="msg apply-session__note"></p>
+            <span id="apply-session-status" class="evu-sr-only" role="status"></span>
+          </div>
+          <div class="apply-session__actions">
+            <button type="button" id="apply-session-keep" class="evu-btn evu-btn--primary evu-btn--sm" hidden>Keep changes</button>
+            <button type="button" id="apply-session-revert" class="evu-btn evu-btn--outline evu-btn--sm" hidden>Revert now</button>
+            <button type="button" id="apply-session-restore" class="evu-btn evu-btn--outline evu-btn--sm" hidden>Restore as unapplied changes</button>
+            <button type="button" id="apply-session-dismiss" class="evu-btn evu-btn--ghost evu-btn--sm" hidden>Dismiss</button>
+          </div>
+        </div>
         <div id="apply-result" class="apply-result" tabindex="0" role="group" aria-label="Apply result" hidden>
           <div class="apply-result__head">
             <ol id="apply-progress" class="apply-progress" aria-label="Apply progress" hidden>
@@ -282,6 +296,23 @@
               </div>
               <p class="hint meta hint--tight">Runs the <code class="inline">evuproxy metrics</code> service on the host and enables the Ping column on Peers.</p>
               <p id="settings-metrics-collection-msg" class="msg err switch-error" role="alert"></p>
+            </div>
+            <div class="field settings-prefs-switch">
+              <div class="toggle-switch-row">
+                <span class="toggle-switch-text" id="settings-apply-confirm-desc">Revert Apply unless confirmed</span>
+                <label class="evu-switch toggle-switch">
+                  <input
+                    type="checkbox"
+                    id="settings-apply-confirm"
+                    class="evu-switch__input toggle-switch-input"
+                    autocomplete="off"
+                    aria-labelledby="settings-apply-confirm-desc"
+                  />
+                  <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+              <p class="hint meta hint--tight">After each Apply here, asks you to keep the changes. If you can't answer because the change locked you out, the host goes back to the last confirmed config by itself. Needs systemd and a root API. Takes effect from the next Apply. The command line and scripts choose for themselves.</p>
+              <p id="settings-apply-confirm-msg" class="msg err switch-error" role="alert"></p>
             </div>
             <div class="btn-row stack-gap">
               <button type="button" class="evu-btn evu-btn--outline" id="settings-download-yaml">Download config.yaml</button>

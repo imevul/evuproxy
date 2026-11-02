@@ -19,6 +19,32 @@ type Config struct {
 	CrowdSec    CrowdSec    `yaml:"crowdsec,omitempty" json:"crowdsec,omitempty"`
 	InputAllows []AllowRule `yaml:"input_allows" json:"input_allows"`
 	Peers       []Peer      `yaml:"peers" json:"peers"`
+	// Apply is left out of existing configs, which keeps Apply one-way until it is turned on.
+	Apply ApplySettings `yaml:"apply,omitempty" json:"apply,omitempty"`
+}
+
+// Limits on how long an Apply can wait for confirmation before reverting.
+const (
+	DefaultConfirmTimeoutSeconds = 60
+	MinConfirmTimeoutSeconds     = 10
+	MaxConfirmTimeoutSeconds     = 3600
+)
+
+// ApplySettings controls how the web UI applies config. POST /reload and `evuproxy
+// reload` don't read it: they choose per call, so scripts keep their behavior.
+type ApplySettings struct {
+	// Confirm makes the web UI's Apply revert by itself unless it is confirmed in time.
+	Confirm bool `yaml:"confirm,omitempty" json:"confirm,omitempty"`
+	// ConfirmTimeoutSeconds is how long to wait for confirmation (0 = DefaultConfirmTimeoutSeconds).
+	ConfirmTimeoutSeconds int `yaml:"confirm_timeout_seconds,omitempty" json:"confirm_timeout_seconds,omitempty"`
+}
+
+// EffectiveConfirmTimeoutSeconds returns the configured wait, or the default when unset.
+func (a ApplySettings) EffectiveConfirmTimeoutSeconds() int {
+	if a.ConfirmTimeoutSeconds == 0 {
+		return DefaultConfirmTimeoutSeconds
+	}
+	return a.ConfirmTimeoutSeconds
 }
 
 type WireGuard struct {
@@ -205,6 +231,9 @@ func ParseRouteProtocols(s string) ([]string, error) {
 }
 
 func (c *Config) Validate() error {
+	if t := c.Apply.ConfirmTimeoutSeconds; t != 0 && (t < MinConfirmTimeoutSeconds || t > MaxConfirmTimeoutSeconds) {
+		return fmt.Errorf("apply.confirm_timeout_seconds must be between %d and %d", MinConfirmTimeoutSeconds, MaxConfirmTimeoutSeconds)
+	}
 	if c.WireGuard.Interface == "" {
 		return fmt.Errorf("wireguard.interface is required")
 	}
