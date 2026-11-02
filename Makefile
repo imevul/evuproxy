@@ -1,6 +1,6 @@
 .PHONY: all up down dev dev-fresh playwright-deps playwright-visual a11y ui-behavior \
 	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
-	check fmt vet test test-race deadcode e2e
+	check fmt vet test test-race deadcode e2e e2e-stress
 
 # Run from the repository root. Requires Go 1.25+, Docker, and `docker compose` (v2).
 
@@ -37,6 +37,10 @@ deadcode:
 # against production. See devtools/e2e/README.md.
 e2e:
 	./devtools/e2e/run.sh
+
+# The same harness under load, kept out of `make e2e` because it is slower and timing-sensitive.
+e2e-stress:
+	./devtools/e2e/run.sh stress
 
 CROWDSEC_DIR := contrib/crowdsec
 
