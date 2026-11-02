@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Replace an installed evuproxy.service with the repo's template, unless someone has
-# changed the installed file. Run by scripts/update.sh; does not reload systemd.
+# changed the installed file. Run by scripts/rebuild.sh; does not reload systemd.
 # Usage: update-boot-unit.sh TEMPLATE INSTALLED
 
 # Every evuproxy.service we have shipped, as installed. Add the new hash whenever

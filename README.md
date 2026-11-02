@@ -89,7 +89,7 @@ cd /path/to/evuproxy   # repository root
 ./scripts/update.sh
 ```
 
-The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.25+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/`, replaces an unmodified `evuproxy.service` with the current one (it warns and leaves yours alone if you changed it), restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file.
+The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.25+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/` (`rebuild.sh --install` also replaces an unmodified `evuproxy.service` with the current one, and warns and leaves yours alone if you changed it), restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file.
 
 **Limitations**
 

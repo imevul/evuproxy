@@ -44,6 +44,7 @@ ssh_authorized_keys:
 packages:
   - nftables
   - wireguard-tools
+  - git
 EOF
 cat >meta-data <<EOF
 instance-id: evuproxy-rollback-vm
@@ -456,6 +457,63 @@ check "the VM comes back" reboot_and_wait
 check "the firewall is the baseline" live_rules_allow_ssh
 check "the edits are still unapplied" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# failed-then-retried"
 vm mv /usr/bin/wg.real /usr/bin/wg
+
+log "=== 15. The update that brings in --boot installs it before restarting the unit ==="
+wait_for_api || die "API did not come back"
+reset_host baseline
+use_old_unit() { vm "sed -i 's/ --boot//' /etc/systemd/system/evuproxy.service && systemctl daemon-reload && systemctl restart evuproxy.service"; }
+unit_has_boot() { vm "grep -q 'reload --boot' /etc/systemd/system/evuproxy.service && systemctl show -p ExecStart evuproxy.service | grep -q 'reload --boot'"; }
+use_old_unit || die "old unit"
+scp_vm /scripts/update.sh /scripts/rebuild.sh /scripts/update-boot-unit.sh root@127.0.0.1:/root/ || die "copy scripts"
+# A clone on the old release, about to pull this one. Bash keeps running the update.sh it
+# opened, and this update.sh has the same body as the old one. The old rebuild.sh mustn't
+# run, so it fails. The go stand-in "builds" the binary already installed.
+vm bash -s <<'EOF' || die "update flow setup"
+set -e
+printf '#!/bin/sh\ncp /usr/local/bin/evuproxy evuproxy\n' >/usr/local/bin/go
+chmod 755 /usr/local/bin/go
+git config --global user.email vm@example.invalid
+git config --global user.name vm
+git init -q --bare -b main /root/origin.git
+git clone -q /root/origin.git /root/evuproxy 2>/dev/null
+cd /root/evuproxy
+mkdir scripts
+cp /root/update.sh scripts/update.sh
+printf '#!/bin/sh\nexit 1\n' >scripts/rebuild.sh
+chmod 755 scripts/rebuild.sh
+git add .
+git commit -qm old
+git push -qu origin main
+git clone -q /root/origin.git /root/next
+cd /root/next
+mkdir templates
+cp /root/rebuild.sh /root/update-boot-unit.sh scripts/
+EOF
+scp_vm /templates/evuproxy.service root@127.0.0.1:/root/next/templates/ || die "copy template"
+vm "cd /root/next && git add . && git commit -qm new && git push -q" || die "push new release"
+put_config "$LOCKED_RULES" saved-before-update
+vm /root/evuproxy/scripts/update.sh
+check "update.sh succeeds" test $? -eq 0
+check "the pull brought in the new rebuild.sh" vm grep -q update-boot-unit /root/evuproxy/scripts/rebuild.sh
+check "the unit has --boot, and systemd has loaded it" unit_has_boot
+check "SSH still works: the update's restart kept the edits off the host" ssh_works
+check "the firewall is the baseline" live_rules_allow_ssh
+check "the edits are still unapplied" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# saved-before-update"
+check "the VM comes back past them" reboot_and_wait
+check "the firewall is still the baseline" live_rules_allow_ssh
+
+wait_for_api || die "API did not come back"
+reset_host baseline
+use_old_unit || die "old unit"
+put_config "$OPEN_RULES" window-during-refresh
+api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":20}' >/dev/null
+check "a session is waiting" test "$(session_phase)" = active
+check "rebuild.sh --install succeeds in the window" vm "cd /root/evuproxy && scripts/rebuild.sh --install"
+check "the unit has --boot" unit_has_boot
+check "the session is still active" test "$(session_phase)" = active
+sleep 25
+check "its timer still reverts" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+check "and clears the session" test "$(session_phase)" = none
 
 log "=== RESULT: $failures failed ==="
 if [ "$failures" -ne 0 ]; then
