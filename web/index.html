@@ -474,7 +474,7 @@
                     </label>
                   </div>
                 </div>
-                <p id="peer-editor-msg" class="msg" aria-live="polite"></p>
+                <p id="peer-editor-msg" class="msg err editor-msg" role="alert"></p>
                 <div class="btn-row">
                   <button type="button" class="evu-btn evu-btn--primary" id="peer-save">Save</button>
                   <button type="button" class="evu-btn evu-btn--outline" id="peer-cancel">Cancel</button>
@@ -812,7 +812,7 @@
                 </section>
               </div>
               <div class="route-editor-actions">
-                <p id="route-editor-msg" class="msg" aria-live="polite"></p>
+                <p id="route-editor-msg" class="msg err editor-msg" role="alert"></p>
                 <div class="btn-row">
                   <button type="button" class="evu-btn evu-btn--primary" id="route-save">Save route</button>
                   <button type="button" class="evu-btn evu-btn--outline" id="route-cancel">Cancel</button>
@@ -942,7 +942,7 @@
                   </label>
                 </div>
               </div>
-              <p id="inbound-editor-msg" class="msg" aria-live="polite"></p>
+              <p id="inbound-editor-msg" class="msg err editor-msg" role="alert"></p>
               <div class="btn-row">
                 <button type="button" class="evu-btn evu-btn--primary" id="inbound-save">Save rule</button>
                 <button type="button" class="evu-btn evu-btn--outline" id="inbound-cancel">Cancel</button>
@@ -1407,8 +1407,10 @@
           <!-- Announced separately from the visible count: that updates on every
                keystroke, which is too chatty to be a live region itself. -->
           <p id="logs-count-status" class="evu-sr-only" role="status" aria-live="polite"></p>
-          <div id="logs-table-wrap" class="table-wrap logs-table-wrap" hidden></div>
-          <pre id="logs-pre" class="code-block logs-pre" hidden></pre>
+          <div id="logs-view">
+            <div id="logs-table-wrap" class="table-wrap logs-table-wrap" hidden></div>
+            <pre id="logs-pre" class="code-block logs-pre" hidden></pre>
+          </div>
           <p id="logs-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>

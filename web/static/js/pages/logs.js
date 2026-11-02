@@ -1,7 +1,9 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
+import { saveConfigEdit } from "../core/config_save.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
 import { openConfirmModal } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
@@ -390,11 +392,7 @@ export async function refreshLogsPage() {
   const src = $("logs-source");
   const countEl = $("logs-count");
   setLogsMsg("");
-  if (pre) pre.textContent = "";
-  if (wrap) wrap.innerHTML = "";
-  if (countEl) countEl.textContent = "";
-  if (src) src.textContent = "";
-  state.lastFirewallLogEntries = [];
+  const doneLoading = beginLoading("logs-view");
   try {
     // Logs must not depend on /config: a config read failure used to blank the
     // whole page. Break-glass coverage is best-effort from a parallel config fetch.
@@ -441,6 +439,9 @@ export async function refreshLogsPage() {
       pre.hidden = state.logsViewMode !== "raw";
     }
     if (countEl) countEl.textContent = "";
+    if (src) src.textContent = "";
+  } finally {
+    doneLoading();
   }
 }
 
@@ -464,21 +465,22 @@ function confirmAddBreakGlass(ip) {
       state.logsRefreshSeq++;
       setLogsMsg("…");
       try {
-        const cfg = await api("/v1/config");
-        if (!cfg.geo) cfg.geo = {};
-        const list = Array.isArray(cfg.geo.break_glass_cidrs) ? cfg.geo.break_glass_cidrs.slice() : [];
-        if (ipv4CoveredByCIDRList(ip, list)) {
-          state.logsRefreshSeq++;
-          state.lastConfig = cfg;
+        state.lastConfig = await api("/v1/config");
+        let alreadyCovered = false;
+        await saveConfigEdit((cfg) => {
+          if (!cfg.geo) cfg.geo = {};
+          const list = Array.isArray(cfg.geo.break_glass_cidrs) ? cfg.geo.break_glass_cidrs.slice() : [];
+          alreadyCovered = ipv4CoveredByCIDRList(ip, list);
+          if (alreadyCovered) return false;
+          list.push(cidr);
+          cfg.geo.break_glass_cidrs = list;
+        });
+        state.logsRefreshSeq++;
+        if (alreadyCovered) {
           setLogsMsg(ip + " is already covered by the break-glass list.");
           renderLogsView();
           return;
         }
-        list.push(cidr);
-        cfg.geo.break_glass_cidrs = list;
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-        state.logsRefreshSeq++;
-        state.lastConfig = cfg;
         setLogsMsg("");
         setApiStatus(true);
         await refreshPendingBadge();

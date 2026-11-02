@@ -171,6 +171,11 @@ button {
   color: var(--evuproxy-danger-text);
 }
 
+/* Editor modals only use this for save conflicts, so it reserves no space until then. */
+.msg.editor-msg:empty {
+  display: none;
+}
+
 .code-block {
   margin: 0.75rem 0 0;
   padding: 0.75rem;
@@ -190,6 +195,38 @@ button {
 .table-wrap {
   overflow-x: auto;
   margin-top: 0.5rem;
+}
+
+/*
+ * Set by core/loading.js only once a load has run past its delay. Old content stays
+ * usable while it dims, so keep it light. Muted text such as table headers sits just
+ * above AA at full opacity, so it dips below AA for as long as this lasts. An empty
+ * region gets the skeleton instead.
+ */
+.is-loading {
+  opacity: 0.75;
+  transition: opacity var(--evu-duration-fast) var(--evu-ease-out);
+}
+
+.loading-skeleton {
+  display: block;
+  grid-column: 1 / -1;
+  margin-top: 0.5rem;
+}
+
+.loading-skeleton__row {
+  display: block;
+  height: 2rem;
+  margin-bottom: 0.5rem;
+  border-radius: 4px;
+  background: var(--evu-border);
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-loading {
+    transition: none;
+  }
 }
 
 table.data {

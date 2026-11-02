@@ -63,7 +63,8 @@ func ValidateConfig(c *config.Config) *ValidateResult {
 }
 
 // ValidateConfigWithWarnings runs ValidateConfig and appends lockout warnings for clientIP.
-func ValidateConfigWithWarnings(c *config.Config, clientIP ClientIPInfo, geoReader *geoip2.Reader, fromDraft bool) *ValidateResult {
+// applied is the last applied config (see LoadAppliedConfig), or nil when unknown.
+func ValidateConfigWithWarnings(c, applied *config.Config, clientIP ClientIPInfo, geoReader *geoip2.Reader, fromDraft bool) *ValidateResult {
 	res := ValidateConfig(c)
 	res.DetectedClientIP = clientIP.IP
 	res.IPDetectionSource = clientIP.Source
@@ -73,6 +74,7 @@ func ValidateConfigWithWarnings(c *config.Config, clientIP ClientIPInfo, geoRead
 	// address, and skipping the whole evaluation when the address is unknown hid
 	// it. LockoutWarnings itself skips the address-specific checks on an empty IP.
 	res.Warnings = LockoutWarnings(c, clientIP.IP, geoReader)
+	res.Warnings = append(res.Warnings, InputAllowLockoutWarnings(c, applied, clientIP.ConnPort)...)
 	if clientIP.IP == "" {
 		// Reported as a lockout risk so the caller treats "we could not check" as
 		// needing the same acknowledgement as a risk we did find — a clean result
@@ -135,7 +137,7 @@ func ValidateConfigFileCLI(cfgPath string, jsonOut bool, clientIP ClientIPInfo, 
 		}
 		return 1, err
 	}
-	res := ValidateConfigWithWarnings(c, clientIP, geoReader, false)
+	res := ValidateConfigWithWarnings(c, LoadAppliedConfig(cfgPath), clientIP, geoReader, false)
 	if jsonOut {
 		printValidateJSON(res)
 		if !res.OK {

@@ -15,8 +15,10 @@ import {
   rowErrorHtml,
   restoreRowSwitchFocus,
 } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api, apiBlob } from "../core/api.js";
 import { showToast } from "../core/toast.js";
+import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
 import {
   PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC,
@@ -29,6 +31,8 @@ import {
   closeModal,
   openConfirmModal,
   registerModalCloser,
+  registerModalForm,
+  dismissModal,
 } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -232,14 +236,19 @@ function disableDependentRoutes(cfg, deps) {
   }
 }
 
+/** Peers are found by key, so a rename elsewhere does not stop an edit from applying. */
+function peerIdentity(p) {
+  return String(p.public_key || "");
+}
+
 async function patchPeerDisabled(index, disabled) {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.peers || cfg.peers[index] === undefined) return;
+  const cfg = state.lastConfig;
+  if (!cfg || !cfg.peers || cfg.peers[index] === undefined) return;
   const peer = cfg.peers[index];
-  const finish = async (nextCfg, confirmation) => {
+  const identity = peerIdentity(peer);
+  const finish = async (edit, confirmation) => {
     try {
-      await api("/v1/config", { method: "PUT", body: JSON.stringify(nextCfg) });
-      state.lastConfig = nextCfg;
+      const nextCfg = await saveConfigEdit(edit);
       setPeersMsg("");
       setApiStatus(true);
       refreshPendingBadge();
@@ -259,11 +268,11 @@ async function patchPeerDisabled(index, disabled) {
         message: dependentRoutesConfirmMessage(peer.name || "peer", deps),
         confirmLabel: "Disable peer and routes",
         onConfirm: async () => {
-          const c = JSON.parse(JSON.stringify(state.lastConfig));
-          if (!c.peers || c.peers[index] === undefined) return;
-          disableDependentRoutes(c, dependentRoutesForPeer(c, c.peers[index]));
-          c.peers[index].disabled = true;
-          await finish(c, "Peer and its routes disabled");
+          await finish((c) => {
+            const i = findConfigRow(c.peers, index, identity, peerIdentity, "peer");
+            disableDependentRoutes(c, dependentRoutesForPeer(c, c.peers[i]));
+            c.peers[i].disabled = true;
+          }, "Peer and its routes disabled");
         },
         onCancel: () => {
           renderPeersTable(state.lastConfig, state.lastPeerWgStats);
@@ -273,13 +282,16 @@ async function patchPeerDisabled(index, disabled) {
       return;
     }
   }
-  cfg.peers[index].disabled = disabled;
-  await finish(cfg, disabled ? "Peer disabled" : "Peer enabled");
+  await finish((c) => {
+    const i = findConfigRow(c.peers, index, identity, peerIdentity, "peer");
+    c.peers[i].disabled = disabled;
+  }, disabled ? "Peer disabled" : "Peer enabled");
 }
 
 export async function refreshPeersPage() {
   setPeersMsg("");
   stopPeersPingPolling();
+  const doneLoading = beginLoading("peers-table-wrap");
   try {
     const [cfgOut, stOut] = await Promise.allSettled([api("/v1/config"), api("/v1/stats")]);
     if (cfgOut.status !== "fulfilled") {
@@ -300,7 +312,10 @@ export async function refreshPeersPage() {
       state.lastPeerPingByTunnel = null;
     }
     renderPeersTable(state.lastConfig, state.lastPeerWgStats, pingMap !== null ? pingMap : state.lastPeerPingByTunnel);
-    if (showPeersMetricsColumn()) {
+    // The operator can leave or come back while this loads: no timer for a page
+    // they left, and only one if overlapping refreshes both land here.
+    stopPeersPingPolling();
+    if (showPeersMetricsColumn() && !$("page-peers").hidden) {
       state.peersPingTimer = setInterval(async () => {
         try {
           const m = await fetchPeerMetricsMap();
@@ -315,6 +330,8 @@ export async function refreshPeersPage() {
     setApiStatus(false, String(e.message || e));
     setPeersMsg(String(e.message || e), true);
     $("peers-table-wrap").innerHTML = "";
+  } finally {
+    doneLoading();
   }
 }
 
@@ -401,11 +418,16 @@ async function openPeerQRModal() {
   }
 }
 
+/** JSON of the peer open in the editor, to detect it changing elsewhere before Save. */
+let peerEditBase = null;
+
 function openPeerEditor(index) {
   const cfg = state.lastConfig;
   if (!cfg || !cfg.peers[index]) return;
   resetPeerOnboardExtras();
+  $("peer-editor-msg").textContent = "";
   const p = cfg.peers[index];
+  peerEditBase = JSON.stringify(p);
   $("peer-edit-index").value = String(index);
   $("peer-editor-title").textContent = "Edit peer";
   $("peer-f-name").value = p.name || "";
@@ -469,8 +491,6 @@ function resetPeerOnboardExtras() {
 }
 
 async function savePeerEditor() {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.peers) cfg.peers = [];
   const idxRaw = $("peer-edit-index").value;
   const peer = {
     name: $("peer-f-name").value.trim(),
@@ -490,11 +510,14 @@ async function savePeerEditor() {
     return;
   }
   setEditorMsg("peer-editor-msg", "");
-  if (idxRaw === "") cfg.peers.push(peer);
-  else cfg.peers[+idxRaw] = peer;
+  const base = peerEditBase;
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      if (!c.peers) c.peers = [];
+      if (idxRaw === "") c.peers.push(peer);
+      // The form replaces the whole row, so only a row still as it was when opened is safe to overwrite.
+      else c.peers[findConfigRow(c.peers, +idxRaw, base, JSON.stringify, "peer")] = peer;
+    });
     setPeersMsg("");
     closePeerEditor();
     renderPeersTable(cfg);
@@ -502,7 +525,15 @@ async function savePeerEditor() {
     refreshPendingBadge();
     showToast((idxRaw === "" ? "Peer added." : "Peer saved.") + " Review it on Pending changes, then Apply to host.");
   } catch (e) {
-    setEditorMsg("peer-editor-msg", String(e.message || e));
+    if (e instanceof ConfigMergeError) {
+      setEditorMsg(
+        "peer-editor-msg",
+        e.message + " Your values are still in this form: note them, press Cancel, and edit the latest version."
+      );
+      renderPeersTable(state.lastConfig);
+    } else {
+      setEditorMsg("peer-editor-msg", String(e.message || e));
+    }
   }
 }
 
@@ -511,6 +542,7 @@ async function removePeer(index) {
   if (!cfg || !cfg.peers || !cfg.peers[index]) return;
   const peer = cfg.peers[index];
   const peerName = peer.name;
+  const identity = peerIdentity(peer);
   const deps = dependentRoutesForPeer(cfg, peer);
   const baseMsg =
     "Remove \"" +
@@ -526,16 +558,12 @@ async function removePeer(index) {
     message,
     confirmLabel: deps.length ? "Disable routes and remove" : "Remove",
     onConfirm: async () => {
-      const c = JSON.parse(JSON.stringify(state.lastConfig));
-      if (!c.peers) return;
-      const i = c.peers.findIndex((p) => p.name === peerName);
-      if (i < 0) return;
-      const depNow = dependentRoutesForPeer(c, c.peers[i]);
-      disableDependentRoutes(c, depNow);
-      c.peers.splice(i, 1);
       try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
-        state.lastConfig = c;
+        const c = await saveConfigEdit((draft) => {
+          const i = findConfigRow(draft.peers, index, identity, peerIdentity, "peer");
+          disableDependentRoutes(draft, dependentRoutesForPeer(draft, draft.peers[i]));
+          draft.peers.splice(i, 1);
+        });
         setPeersMsg("");
         renderPeersTable(c);
         setApiStatus(true);
@@ -547,6 +575,7 @@ async function removePeer(index) {
         );
       } catch (e) {
         setPeersMsg(String(e.message || e), true);
+        renderPeersTable(state.lastConfig);
       }
     },
   });
@@ -920,8 +949,13 @@ function extractOnboardConfFromOutput() {
   return out.slice(idx).trim();
 }
 
+/** A generated keypair is a default, not something the operator would lose. */
+const GENERATED_KEY_FIELDS = ["peer-f-pub", "onboard-client-priv"];
+
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initPeersPage() {
+  const peerModal = $("peer-modal");
+  const peerForm = registerModalForm(peerModal);
   $("peers-refresh").addEventListener("click", refreshPeersPage);
   registerModalCloser($("peer-qr-modal"), closePeerQRModal);
   const peerTabFieldsBtn = $("peer-tab-fields-btn");
@@ -964,6 +998,7 @@ export function initPeersPage() {
       const kp = await generatePeerKeypair();
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
+      peerForm.mark(GENERATED_KEY_FIELDS);
     } catch (e) {
       setPeersMsg(String(e.message || e), true);
     }
@@ -973,7 +1008,7 @@ export function initPeersPage() {
     if (first) requestAnimationFrame(() => first.focus());
   });
   $("peer-save").addEventListener("click", savePeerEditor);
-  $("peer-cancel").addEventListener("click", closePeerEditor);
+  $("peer-cancel").addEventListener("click", () => dismissModal(peerModal));
 
   $("onboard-client-priv-toggle").addEventListener("click", () => {
     const inp = $("onboard-client-priv");
@@ -1000,6 +1035,7 @@ export function initPeersPage() {
       const kp = await generatePeerKeypair();
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
+      peerForm.mark(GENERATED_KEY_FIELDS);
       setOnboardMsg("New keypair generated.");
       void rebuildOnboardingEncryptedBundle(false);
     } catch (e) {
@@ -1112,7 +1148,6 @@ export function initPeersPage() {
   const peerDisabled = $("peer-f-disabled");
   if (peerDisabled) peerDisabled.addEventListener("change", onPeerModalFieldActivity);
 
-  const peerModal = $("peer-modal");
   const peerBackdrop = peerModal && peerModal.querySelector(".modal-backdrop");
-  if (peerBackdrop) peerBackdrop.addEventListener("click", closePeerEditor);
+  if (peerBackdrop) peerBackdrop.addEventListener("click", () => dismissModal(peerModal));
 }
