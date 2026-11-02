@@ -1,5 +1,6 @@
 import { state, defaultPeerSubnetCidr, contentWidthKey, contentWidthCssValues } from "../core/state.js";
 import { $, setApiStatus } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api, getApiBase, headersDownload, responseEtag } from "../core/api.js";
 import { saveConfigEdit, putConfigAtRevision, isConfigRevisionMismatch } from "../core/config_save.js";
 import {
@@ -89,6 +90,15 @@ const SETTINGS_NOTES_FIELDS = ["config-notes-body"];
 const settingsForm = createFormTrackerByIds([...SETTINGS_PREF_FIELDS, ...SETTINGS_NOTES_FIELDS]);
 
 export async function refreshSettingsPage() {
+  const doneLoading = beginLoading("settings-tab-prefs-panel", "settings-tab-maint-panel");
+  try {
+    await loadSettingsPage();
+  } finally {
+    doneLoading();
+  }
+}
+
+async function loadSettingsPage() {
   const msg = $("settings-prefs-msg");
   if (msg) {
     msg.textContent = "";

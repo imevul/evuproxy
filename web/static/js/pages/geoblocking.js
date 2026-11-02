@@ -7,6 +7,7 @@ import {
   writeRateLimitFields,
   readRateLimitFromForm,
 } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { saveConfigEdit, ConfigMergeError } from "../core/config_save.js";
 import { parseSourceAllowListInput } from "../core/net.js";
@@ -21,6 +22,7 @@ async function refreshGeoZonesTable() {
   if (!wrap || !msg) return;
   msg.textContent = "";
   msg.classList.remove("err");
+  const doneLoading = beginLoading("geo-zones-table-wrap");
   try {
     const s = await api("/v1/geo/summary");
     if (!s.enabled) {
@@ -71,6 +73,8 @@ async function refreshGeoZonesTable() {
     msg.textContent = String(e.message || e);
     msg.classList.add("err");
     wrap.innerHTML = "";
+  } finally {
+    doneLoading();
   }
 }
 
@@ -556,14 +560,10 @@ async function geoIPCheckUseMine() {
   }
 }
 
-/**
- * @param {{ resetTab?: boolean }} [opts] `resetTab` on route entry only — the
- *   Refresh button is in the shared footer, so resetting there would throw the
- *   operator off the tab whose data they just reloaded.
- */
-export async function refreshGeoblockingPage(opts) {
+export async function refreshGeoblockingPage() {
   setGeoMsg("");
   clearGeoIPCheckResult();
+  const doneLoading = beginLoading("geo-tab-default-panel", "geo-tab-advanced-panel");
   // The catalog is a static asset used only to show country names. Loading it
   // first inside the same try meant a missing file failed the whole page and
   // reported the API as down; names then fall back to ISO codes instead.
@@ -579,8 +579,9 @@ export async function refreshGeoblockingPage(opts) {
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setGeoMsg(String(e.message || e), true);
+  } finally {
+    doneLoading();
   }
-  if (opts && opts.resetTab) setGeoEditorTab("default");
   syncAdvancedTabsGating();
   void refreshGeoZonesTable();
 }

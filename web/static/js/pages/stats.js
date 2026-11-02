@@ -1,5 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus, downloadTextFile, metricsPeersToCsv } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 
 /* ——— Stats ——— */
@@ -32,6 +33,7 @@ export async function refreshStatsPage() {
   const nftW = $("stats-nft-wrap");
   setStatsMsg("");
   state.lastMetricsPeersExport = null;
+  const doneLoading = beginLoading("stats-wg-wrap", "stats-nft-wrap");
   try {
     const [st, mp] = await Promise.all([
       api("/v1/stats"),
@@ -79,6 +81,8 @@ export async function refreshStatsPage() {
     setStatsMsg(String(e.message || e), true);
     wgW.innerHTML = "";
     nftW.innerHTML = "";
+  } finally {
+    doneLoading();
   }
 }
 

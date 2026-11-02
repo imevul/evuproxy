@@ -1,6 +1,8 @@
 import { state } from "./state.js";
 import { $ } from "./dom.js";
-import { ensureApiGate, applyNavRestriction } from "./api.js";
+import { ensureApiGate, applyNavRestriction, token } from "./api.js";
+import { setGeoEditorTab } from "./advanced.js";
+import { beginLoading } from "./loading.js";
 import { ensureUIPrefs } from "./prefs.js";
 import { anyOpenModalDirty, closeAllModals, closeConfirmModal, confirmDiscard } from "./modal.js";
 import { pageForm } from "./dirty.js";
@@ -37,6 +39,22 @@ const pages = [
   "logs",
 ];
 
+/* What each page refreshes, so it reads as busy from the click, before its own load starts. */
+const pageLoadRegions = {
+  overview: ["overview-cards"],
+  settings: ["settings-tab-prefs-panel", "settings-tab-maint-panel"],
+  peers: ["peers-table-wrap"],
+  routes: ["routes-table-wrap"],
+  topology: ["topology-graph-wrap"],
+  inbound: ["inbound-table-wrap"],
+  geoblocking: ["geo-tab-default-panel", "geo-tab-advanced-panel"],
+  pending: ["pending-diff-panel"],
+  stats: ["stats-wg-wrap", "stats-nft-wrap"],
+  logs: ["logs-view"],
+};
+
+/* Bumped by every navigate() past the guard, so a slower earlier one stops once it wakes up. */
+let navSeq = 0;
 /** The page on screen, once a navigation has got past the unsaved-edits guard. */
 let currentRoute = null;
 /** The hash of `currentRoute`, to put back when the operator stays on the page. */
@@ -67,44 +85,7 @@ function discardEditsFor(target) {
   if (target !== currentRoute) closeAllModals();
 }
 
-/** @param {{ discard?: boolean }} [opts] `discard` once the operator has agreed to lose edits. */
-export async function navigate(name, opts) {
-  if (!pages.includes(name)) name = "overview";
-  if (!(opts && opts.discard) && hasUnsavedEdits(name)) {
-    const target = name;
-    confirmDiscard(() => {
-      discardEditsFor(target);
-      return navigate(target, { discard: true });
-    }, restoreCommittedHash);
-    return;
-  }
-  state.hashNavParams = parseHashNavParams();
-  closeConfirmModal();
-  if (name !== "routes") {
-    closeRouteProbeModal();
-    closeRouteEditor();
-  }
-  if (name !== "inbound") closeInboundEditor();
-  if (name !== "peers") {
-    stopPeersPingPolling();
-    closePeerEditor();
-  }
-  if (name !== "topology") {
-    stopTopologyPolling();
-  }
-  if (name !== "overview" && name !== "token") {
-    const ok = await ensureApiGate();
-    if (!ok) name = "overview";
-  }
-  if (name !== currentRoute) {
-    // The form stays filled in while hidden, so it must not read as dirty until
-    // the page has reloaded it on the next visit.
-    const leaving = pageForm(currentRoute);
-    if (leaving) leaving.clear();
-    currentRoute = name;
-  }
-  applyNavRestriction();
-  await ensureUIPrefs();
+function showPage(name) {
   document.querySelectorAll(".page").forEach((p) => {
     p.hidden = true;
   });
@@ -124,47 +105,101 @@ export async function navigate(name, opts) {
   if (curPath !== name) {
     selfSetHash = "#/" + name;
     location.hash = selfSetHash;
-    state.hashNavParams = parseHashNavParams();
   }
+  state.hashNavParams = parseHashNavParams();
   committedHash = location.hash;
-  if (name === "overview") {
-    await refreshOverviewPage();
-    restartOverviewEventsPolling();
-    restartOverviewLatencyPolling();
-  } else {
+}
+
+/** @param {{ discard?: boolean }} [opts] `discard` once the operator has agreed to lose edits. */
+export async function navigate(name, opts) {
+  if (!pages.includes(name)) name = "overview";
+  if (!(opts && opts.discard) && hasUnsavedEdits(name)) {
+    const target = name;
+    confirmDiscard(() => {
+      discardEditsFor(target);
+      return navigate(target, { discard: true });
+    }, restoreCommittedHash);
+    return;
+  }
+  const seq = ++navSeq;
+  // No token means the gate cannot pass and needs no request to say so.
+  if (name !== "overview" && name !== "token" && !token().trim()) name = "overview";
+  closeConfirmModal();
+  if (name !== "routes") {
+    closeRouteProbeModal();
+    closeRouteEditor();
+  }
+  if (name !== "inbound") closeInboundEditor();
+  if (name !== "peers") {
+    stopPeersPingPolling();
+    closePeerEditor();
+  }
+  stopTopologyPolling();
+  if (name !== currentRoute) {
+    // The form stays filled in while hidden, so it must not read as dirty until
+    // the page has reloaded it on the next visit.
+    const leaving = pageForm(currentRoute);
+    if (leaving) leaving.clear();
+    currentRoute = name;
+  }
+  if (name !== "overview") {
     stopOverviewEventsPolling();
     stopOverviewLatencyPolling();
   }
-  if (name === "settings") {
-    await refreshSettingsPage();
-    setSettingsEditorTab("prefs");
-  }
-  if (name === "token") {
-    refreshTokenPage();
-    await ensureApiGate();
-  }
-  if (name === "peers") {
-    await refreshPeersPage();
-    applyHashPeerRouteHighlight();
-  }
-  if (name === "routes") {
-    await refreshRoutesPage();
-    applyHashPeerRouteHighlight();
-  }
-  if (name === "topology") {
-    state.topologyPrevPeerBytes = new Map();
-    void refreshTopologyPage();
-    state.topologyPollTimer = setInterval(() => {
+  // Everything up to the first await runs on the click; the network comes after.
+  showPage(name);
+  if (name === "settings") setSettingsEditorTab("prefs");
+  if (name === "geoblocking") setGeoEditorTab("default");
+  const doneLoading = beginLoading(...(pageLoadRegions[name] || []));
+  try {
+    if (name !== "overview" && name !== "token") {
+      const ok = await ensureApiGate();
+      if (seq !== navSeq) return;
+      if (!ok) {
+        void navigate("overview", { discard: true });
+        return;
+      }
+    }
+    applyNavRestriction();
+    await ensureUIPrefs();
+    if (seq !== navSeq) return;
+    if (name === "overview") {
+      await refreshOverviewPage();
+      if (seq !== navSeq) return;
+      restartOverviewEventsPolling();
+      restartOverviewLatencyPolling();
+    }
+    if (name === "settings") await refreshSettingsPage();
+    if (name === "token") {
+      refreshTokenPage();
+      await ensureApiGate();
+    }
+    if (name === "peers") {
+      await refreshPeersPage();
+      if (seq === navSeq) applyHashPeerRouteHighlight();
+    }
+    if (name === "routes") {
+      await refreshRoutesPage();
+      if (seq === navSeq) applyHashPeerRouteHighlight();
+    }
+    if (name === "topology") {
+      state.topologyPrevPeerBytes = new Map();
       void refreshTopologyPage();
-    }, 4000);
+      state.topologyPollTimer = setInterval(() => {
+        void refreshTopologyPage({ background: true });
+      }, 4000);
+    }
+    if (name === "inbound") refreshInboundPage();
+    if (name === "geoblocking") await refreshGeoblockingPage();
+    if (name === "pending") refreshPendingPage();
+    if (name === "stats") refreshStatsPage();
+    if (name === "logs") refreshLogsPage();
+    if (seq !== navSeq) return;
+    refreshPendingBadge();
+    void refreshSidebarAbout();
+  } finally {
+    doneLoading();
   }
-  if (name === "inbound") refreshInboundPage();
-  if (name === "geoblocking") await refreshGeoblockingPage({ resetTab: true });
-  if (name === "pending") refreshPendingPage();
-  if (name === "stats") refreshStatsPage();
-  if (name === "logs") refreshLogsPage();
-  refreshPendingBadge();
-  void refreshSidebarAbout();
 }
 
 function applyHashPeerRouteHighlight() {

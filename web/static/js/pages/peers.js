@@ -12,6 +12,7 @@ import {
   markFieldInvalid,
   clearFieldInvalid,
 } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api, apiBlob } from "../core/api.js";
 import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
@@ -282,6 +283,7 @@ async function patchPeerDisabled(index, disabled) {
 export async function refreshPeersPage() {
   setPeersMsg("");
   stopPeersPingPolling();
+  const doneLoading = beginLoading("peers-table-wrap");
   try {
     const [cfgOut, stOut] = await Promise.allSettled([api("/v1/config"), api("/v1/stats")]);
     if (cfgOut.status !== "fulfilled") {
@@ -302,7 +304,10 @@ export async function refreshPeersPage() {
       state.lastPeerPingByTunnel = null;
     }
     renderPeersTable(state.lastConfig, state.lastPeerWgStats, pingMap !== null ? pingMap : state.lastPeerPingByTunnel);
-    if (showPeersMetricsColumn()) {
+    // The operator can leave or come back while this loads: no timer for a page
+    // they left, and only one if overlapping refreshes both land here.
+    stopPeersPingPolling();
+    if (showPeersMetricsColumn() && !$("page-peers").hidden) {
       state.peersPingTimer = setInterval(async () => {
         try {
           const m = await fetchPeerMetricsMap();
@@ -317,6 +322,8 @@ export async function refreshPeersPage() {
     setApiStatus(false, String(e.message || e));
     setPeersMsg(String(e.message || e), true);
     $("peers-table-wrap").innerHTML = "";
+  } finally {
+    doneLoading();
   }
 }
 
