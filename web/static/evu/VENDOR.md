@@ -35,6 +35,13 @@ White on the dark `--destructive` is 4.04:1, under the 4.5:1 that `.evu-btn--dan
 text needs. The app darkens the fill with `--evuproxy-danger-fill` in
 [`../style/tokens.css`](../style/tokens.css). Drop it if upstream fixes the token.
 
+### Closed drawer's shadow (worked around in app CSS, not patched here)
+
+Below 768px, `layouts.css` gives `.evu-sidebar` its shadow while it is closed too, so the
+shadow bleeds over the left edge of the page. [`../style/mobile.css`](../style/mobile.css)
+applies it only while open. Drop the override if upstream moves the shadow to
+`.is-nav-open`.
+
 ## Sync notes (f3739a5)
 
 - New `--control-border` / `--evu-control-border` token, and motion tokens (`--evu-ease-out`, `--evu-duration-press`, `--evu-duration-fast`, `--evu-duration-enter`).

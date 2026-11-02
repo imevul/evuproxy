@@ -7,6 +7,7 @@ import { saveConfigEdit } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
 import { refreshPendingBadge } from "./pending.js";
+import { prepareTableCards } from "../core/table_sort.js";
 
 /* ——— Logs ——— */
 const LOG_PREFIX_GEO = "evuproxy-geo-block";
@@ -376,6 +377,7 @@ function renderLogsView() {
     "</tr></thead><tbody>" +
     rows +
     "</tbody></table>";
+  prepareTableCards(wrap);
 }
 
 function setLogsMsg(text, isErr) {

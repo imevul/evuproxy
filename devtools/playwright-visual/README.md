@@ -49,7 +49,7 @@ Compare e.g. `screenshots/visual-before/overview-dark.png` against `screenshots/
 
 ## Accessibility (`make a11y`)
 
-Runs axe-core against WCAG 2.0/2.1 A and AA on all 11 routes in both schemes.
+Runs axe-core against WCAG 2.0/2.1 A and AA on all 11 routes in both schemes, at desktop size and again at 375×812.
 
 - **Fails** on `critical` and `serious` violations.
 - **Logs** `moderate` / `minor` findings to the console without failing, so advisory rules stay visible but do not block.

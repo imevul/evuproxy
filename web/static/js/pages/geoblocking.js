@@ -15,6 +15,7 @@ import { parseSourceAllowListInput } from "../core/net.js";
 import { setGeoEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
 import { openModal, closeModal, confirmDiscard, dismissModal, registerModalForm } from "../core/modal.js";
 import { createSaveBar } from "../core/save_bar.js";
+import { prepareTableCards } from "../core/table_sort.js";
 import { refreshPendingBadge } from "./pending.js";
 
 async function refreshGeoZonesTable() {
@@ -70,6 +71,7 @@ async function refreshGeoZonesTable() {
       rows +
       "</tbody></table>" +
       foot;
+    prepareTableCards(wrap);
   } catch (e) {
     msg.textContent = String(e.message || e);
     msg.classList.add("err");

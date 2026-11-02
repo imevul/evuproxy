@@ -30,11 +30,13 @@
   <link rel="stylesheet" href="/static/style/features/logs.css" />
   <link rel="stylesheet" href="/static/style/features/peers.css" />
   <link rel="stylesheet" href="/static/style/features/routes.css" />
+  <link rel="stylesheet" href="/static/style/mobile.css" />
 </head>
 <body class="app evu-shell evu-shell--sidebar">
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="evu-backdrop" id="sidebar-backdrop" hidden></div>
   <header class="evu-app-header">
+    <button type="button" class="evu-shell__menu-btn" id="shell-menu-toggle" aria-label="Open navigation" aria-expanded="false">☰</button>
     <div class="evu-brand">
       <span class="evu-brand__mark" aria-hidden="true">
         <svg class="evu-brand__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -115,10 +117,6 @@
     </aside>
 
     <div class="evu-main">
-      <div class="evu-main__topbar">
-        <button type="button" class="evu-shell__menu-btn" id="shell-menu-toggle" aria-label="Open navigation" aria-expanded="false">☰</button>
-        <span class="evu-brand__name">EvuProxy</span>
-      </div>
       <main class="evu-main__inner content" id="main-content" tabindex="-1">
       <div id="apply-region" class="apply-region">
         <div id="apply-bar" class="apply-bar" role="group" aria-label="Unapplied changes" hidden>

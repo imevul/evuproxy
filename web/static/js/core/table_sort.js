@@ -53,12 +53,37 @@ export function sortHeaderHtml(tableId, col, label) {
   );
 }
 
+/*
+ * Lets style/mobile.css draw a rendered table's rows as cards on a phone. Each cell gets
+ * its column's name to show as a label. `display: block` drops a table's native roles,
+ * so explicit ones keep it a table for screen readers. None of this renders on wider
+ * screens, where the same roles are already implied.
+ */
+export function prepareTableCards(wrap) {
+  const table = wrap.querySelector("table.data");
+  if (!table) return;
+  table.setAttribute("role", "table");
+  table.setAttribute("data-cards", "");
+  table.querySelectorAll("thead, tbody").forEach((group) => group.setAttribute("role", "rowgroup"));
+  table.querySelectorAll("tr").forEach((tr) => tr.setAttribute("role", "row"));
+  const headers = [...table.querySelectorAll("thead th")];
+  headers.forEach((th) => th.setAttribute("role", "columnheader"));
+  table.querySelectorAll("tbody tr").forEach((tr) => {
+    [...tr.cells].forEach((td, i) => {
+      td.setAttribute("role", "cell");
+      // A colspan cell is a message across the row, not a value of one column.
+      if (td.colSpan === 1 && headers[i]) td.setAttribute("data-label", headers[i].textContent.trim());
+    });
+  });
+}
+
 /** Replaces a table, keeping its scroll position and focus on a sort button. Polls re-render under the user. */
 export function setTableHtml(wrap, html) {
   const focused = document.activeElement;
   const focusCol = focused && wrap.contains(focused) ? focused.getAttribute("data-sort-col") : null;
   const { scrollTop, scrollLeft } = wrap;
   wrap.innerHTML = html;
+  prepareTableCards(wrap);
   wrap.scrollTop = scrollTop;
   wrap.scrollLeft = scrollLeft;
   if (focusCol) {
