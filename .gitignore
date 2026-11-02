@@ -16,7 +16,8 @@ contrib/crowdsec/vendor/
 local_docs/
 
 # Dev mock API persisted config (docker-compose.dev.yml bind-mount)
-docker/mock-api/state/
+docker/mock-api/state/*
+!docker/mock-api/state/.gitkeep
 
 # Python (e.g. docker/mock-api when run locally)
 __pycache__/
