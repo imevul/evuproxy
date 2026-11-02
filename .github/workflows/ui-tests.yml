@@ -60,3 +60,30 @@ jobs:
             devtools/playwright-visual/playwright-report/
             devtools/playwright-visual/test-results/
           retention-days: 14
+
+  visual-baseline:
+    # Not a required check for its first cycle, decided on ENG-148. Don't add it to the
+    # required checks before the follow-up issue to ENG-188 says so.
+    name: visual baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PWTRACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare screenshots with the baseline
+        # Everything runs in the Playwright image. Native runners render differently.
+        run: make visual-check
+      - name: Show mock stack logs
+        if: failure()
+        run: docker compose -p evuproxy-visual -f docker-compose.dev.yml -f devtools/playwright-visual/docker-compose.visual.yml logs --no-color mock-api evuproxy-ui
+      - name: Upload diff images, report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-baseline
+          path: |
+            devtools/playwright-visual/screenshots/visual-diff/
+            devtools/playwright-visual/playwright-report/
+            devtools/playwright-visual/test-results/
+          retention-days: 14

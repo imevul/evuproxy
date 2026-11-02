@@ -1,13 +1,15 @@
 /**
- * Removes run-to-run differences from the screenshots, for measuring a visual
- * baseline (ENG-148). Off unless PW_FREEZE_CACHE names a JSON file; smoke-visual
+ * Removes run-to-run differences from the screenshots, for the visual baseline
+ * (ENG-148, ENG-188). Off unless PW_FREEZE_CACHE names a JSON file; smoke-visual
  * then behaves as before.
  *
  * PW_FREEZE_CSS adds CSS to every page, for testing what a comparison catches.
  *
- * The first request for each API call or font goes to the network and is stored in
- * that file, and every later run replays it. The cache has to be a file, not memory:
- * the mock's byte counters keep moving, so a per-process cache would differ per run.
+ * API calls and fonts are replayed from that file. With PW_FREEZE_RECORD=1, a request
+ * that isn't in the file goes to the network and is stored; otherwise it is blocked and
+ * fails the test (see assertNoCacheMisses), because live data would bring the flakiness
+ * back. The cache has to be a file, not memory: the mock's byte counters keep moving,
+ * so a per-process cache would differ per run.
  */
 import * as fs from "fs";
 
@@ -25,6 +27,8 @@ interface Stored {
 type Cache = Record<string, Stored>;
 
 const cachePath = (): string => process.env.PW_FREEZE_CACHE?.trim() || "";
+
+const misses = new Set<string>();
 
 function readCache(): Cache {
   try {
@@ -47,6 +51,11 @@ async function replay(route: Route): Promise<void> {
     });
     return;
   }
+  if (process.env.PW_FREEZE_RECORD !== "1") {
+    misses.add(key);
+    await route.abort();
+    return;
+  }
   const res = await route.fetch();
   const body = await res.body();
   // Workers are 1, so read-modify-write cannot race.
@@ -56,8 +65,23 @@ async function replay(route: Route): Promise<void> {
     contentType: res.headers()["content-type"] ?? "",
     body: body.toString("base64"),
   };
-  fs.writeFileSync(cachePath(), JSON.stringify(cache));
+  // One sorted entry per line, so a refreshed cache shows which keys changed in review.
+  const lines = Object.keys(cache)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}: ${JSON.stringify(cache[k])}`);
+  fs.writeFileSync(cachePath(), `{\n${lines.join(",\n")}\n}\n`);
   await route.fulfill({ response: res, body });
+}
+
+/** Fails the current test if it asked for anything the cache doesn't have, naming each key. */
+export function assertNoCacheMisses(): void {
+  if (misses.size === 0) return;
+  const keys = [...misses].map((k) => `  ${k}`).join("\n");
+  misses.clear();
+  throw new Error(
+    `Requests missing from the replay cache, blocked instead of fetched:\n${keys}\n` +
+      "If this API change is intended, regenerate with `make visual-baseline`."
+  );
 }
 
 /** Fixed clock, replayed API and fonts, fixed peer keys. Call before page scripts run. */

@@ -7,7 +7,10 @@
  */
 import { test } from "@playwright/test";
 
+import { assertNoCacheMisses } from "./freeze";
 import { ROUTES, SCHEMES, capture, gotoRoute, seed } from "./helpers";
+
+test.afterEach(() => assertNoCacheMisses());
 
 test.describe("routes (full-page screenshots)", () => {
   for (const scheme of SCHEMES) {
