@@ -82,6 +82,38 @@ export async function seed(page: Page, opts: SeedOptions): Promise<void> {
   await page.emulateMedia({ colorScheme: opts.scheme });
 }
 
+/**
+ * The size that was unusable before ENG-144, on top of a real mock config: 40 peers,
+ * 31 routes on the first ten of them (every third route named), 30 inbound rules.
+ */
+export function largeConfig(base: any) {
+  const peers = Array.from({ length: 40 }, (_, i) => ({
+    name: `peer-${String(i + 1).padStart(2, "0")}`,
+    public_key: `${String(i + 1).padStart(2, "0")}${"A".repeat(41)}=`,
+    tunnel_ip: `10.100.0.${i + 2}/32`,
+  }));
+  const routes = Array.from({ length: 31 }, (_, i) => ({
+    ...(i % 3 === 0 ? { name: `service-${String(31 - i).padStart(2, "0")}` } : {}),
+    proto: i % 2 ? "udp" : "tcp",
+    // Descending and of mixed width, so a text sort and a numeric sort disagree.
+    ports: [String(30000 - i * 900)],
+    target_ip: `10.100.0.${(i % 10) + 2}`,
+    disabled: false,
+  }));
+  const inputAllows = Array.from({ length: 30 }, (_, i) => ({
+    proto: "tcp",
+    dport: String(9000 - i * 100),
+    note: `rule ${i}`,
+  }));
+  return {
+    ...base,
+    peers,
+    input_allows: inputAllows,
+    forwarding: { ...base.forwarding, routes },
+    geo: { ...base.geo, enabled: false },
+  };
+}
+
 export function hashUrl(origin: string, route: string): string {
   const o = origin.replace(/\/+$/, "");
   return `${o}/#/${route}`;

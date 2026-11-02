@@ -16,10 +16,12 @@ import {
   rowErrorHtml,
   restoreRowSwitchFocus,
   focusTableRow,
+  rowIndexAfterRemoval,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, apiBlob } from "../core/api.js";
 import { showToast } from "../core/toast.js";
+import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
@@ -111,6 +113,24 @@ function peerPingMsCell(peer, pingByTunnel) {
   return '<td class="mono peer-ping-cell" title="' + escapeHtml(err) + '">—</td>';
 }
 
+/** Latency to sort on; null for every state the cell draws as "—" or "…". */
+function peerPingMs(peer, pingByTunnel) {
+  if (peer.disabled || !pingByTunnel) return null;
+  const th = tunnelHostOnly(peer.tunnel_ip);
+  const row = th ? pingByTunnel.get(th) : null;
+  return row && row.ok ? Number(row.latency_ms) : null;
+}
+
+/** Sort value for the Status column: Online, then Offline, then Unknown. Disabled peers have no status. */
+function peerStatusRank(p, pubMap) {
+  if (p.disabled) return null;
+  const row = pubMap.get(String(p.public_key || "").trim());
+  if (!row) return 2;
+  const h = row.latest_handshake_unix;
+  if (!h || h <= 0) return 1;
+  return Math.floor(Date.now() / 1000) - h <= PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC ? 0 : 1;
+}
+
 function peerConnectionStatusHtml(p, pubMap) {
   if (p.disabled) {
     return '<span class="peer-status peer-status-na" title="Peer disabled in config">—</span>';
@@ -163,9 +183,15 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       : "";
   const pubMap = wgPeerPubKeyMap(wgStats);
   const pingOn = showPeersMetricsColumn();
-  const pingHead = pingOn ? "<th scope=\"col\">Ping</th>" : "";
-  const rows = cfg.peers
-    .map((p, i) => {
+  const pingHead = pingOn ? sortHeaderHtml("peers", "ping", "Ping") : "";
+  const rows = sortedRows("peers", cfg.peers, {
+    name: (p) => p.name,
+    tunnel: (p) => p.tunnel_ip,
+    ping: (p) => peerPingMs(p, pingByTunnel),
+    status: (p) => peerStatusRank(p, pubMap),
+    enabled: (p) => (p.disabled ? 0 : 1),
+  })
+    .map(({ item: p, index: i }) => {
       const f = [p.name, p.tunnel_ip, p.public_key].join(" ").toLowerCase();
       const pingCell = peerPingMsCell(p, pingByTunnel);
       return (
@@ -177,7 +203,11 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       );
     })
     .join("");
-  wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th scope="col">Name</th><th scope="col">Tunnel IP</th><th scope="col">Public key</th>${pingHead}<th scope="col">Status</th><th scope="col">Enabled</th><th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
+  setTableHtml(
+    wrap,
+    `${wgWarn}<table class="data"><thead><tr>${sortHeaderHtml("peers", "name", "Name")}${sortHeaderHtml("peers", "tunnel", "Tunnel IP")}<th scope="col">Public key</th>${pingHead}${sortHeaderHtml("peers", "status", "Status")}${sortHeaderHtml("peers", "enabled", "Enabled")}<th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`
+  );
+  bindSortHeaders(wrap, "peers", () => renderPeersTable(cfg, wgStats, pingByTunnel));
   bindTunnelIpCopyButtons(wrap, setPeersMsg);
   wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
     b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
@@ -582,12 +612,13 @@ async function removePeer(index) {
       cascaded = disableDependentRoutes(draft, draft.peers[removedAt]);
       [removed] = draft.peers.splice(removedAt, 1);
     });
+    const focusAt = rowIndexAfterRemoval(wrap, row, removedAt);
     await fadeOutRow(row);
     setPeersMsg("");
     renderPeersTable(c);
     setApiStatus(true);
     refreshPendingBadge();
-    focusTableRow(wrap, removedAt, $("peers-add-start"));
+    focusTableRow(wrap, focusAt, $("peers-add-start"));
     const name = removed.name || "peer";
     let undone = "";
     showUndoToast(

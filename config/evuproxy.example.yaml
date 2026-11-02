@@ -19,6 +19,11 @@ network:
 
 # Each target_ip must match a non-disabled peer tunnel_ip (host IPv4 only).
 # Set disabled: true on a route to keep it in config but omit it from nftables until re-enabled.
+# Optional name: a label shown first in the web UI (up to 64 characters), e.g.
+#   - name: Minecraft
+#     proto: tcp
+#     ports: ["25565"]
+#     target_ip: 10.100.0.2
 # Start empty; add routes after you define peers.
 forwarding:
   routes: []

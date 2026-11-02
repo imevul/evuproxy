@@ -408,7 +408,7 @@
             <label class="evu-sr-only" for="peers-filter">Filter peers</label>
             <input type="search" id="peers-filter" class="table-filter evu-input" data-filter-table="peers-table-wrap" placeholder="Filter peers (press /)" autocomplete="off" spellcheck="false" />
           </div>
-          <div id="peers-table-wrap" class="table-wrap"></div>
+          <div id="peers-table-wrap" class="table-wrap table-wrap--sticky"></div>
           <p id="peers-msg" class="msg" aria-live="polite"></p>
         </div>
 
@@ -615,7 +615,7 @@
             <label class="evu-sr-only" for="routes-filter">Filter routes</label>
             <input type="search" id="routes-filter" class="table-filter evu-input" data-filter-table="routes-table-wrap" placeholder="Filter routes (press /)" autocomplete="off" spellcheck="false" />
           </div>
-          <div id="routes-table-wrap" class="table-wrap"></div>
+          <div id="routes-table-wrap" class="table-wrap table-wrap--sticky"></div>
           <p id="routes-msg" class="msg" aria-live="polite"></p>
         </div>
 
@@ -677,6 +677,10 @@
                 <a href="#/settings">Settings</a> to edit source lists, port maps, route geo, and rate limits.
               </p>
               <div id="route-tab-default-panel" role="tabpanel" aria-labelledby="route-tab-default-btn">
+                <div class="field">
+                  <label for="route-f-name">Name <span class="meta">(optional)</span></label>
+                  <input type="text" id="route-f-name" maxlength="64" placeholder="Minecraft" autocomplete="off" />
+                </div>
                 <div class="field">
                   <span class="field-label" id="route-proto-label">Protocol</span>
                   <div class="evu-check-group" role="group" aria-labelledby="route-proto-label">
@@ -829,6 +833,13 @@
             >
               Center
             </button>
+            <span id="topology-scale-controls" class="topology-scale-controls" hidden>
+              <label class="evu-sr-only" for="topology-filter">Filter routes and peers</label>
+              <input type="search" id="topology-filter" class="table-filter evu-input" placeholder="Filter routes and peers (press /)" autocomplete="off" spellcheck="false" />
+              <button type="button" class="evu-btn evu-btn--ghost" id="topology-expand-all">Expand all</button>
+              <button type="button" class="evu-btn evu-btn--ghost" id="topology-collapse-all">Collapse all</button>
+              <span id="topology-scale-summary" class="meta" role="status"></span>
+            </span>
           </div>
           <div class="topology-legend" role="list">
             <span class="topology-legend-item" role="listitem"><span class="topology-legend-card topology-legend-card--on" aria-hidden="true"></span> Enabled route / online peer</span>
@@ -871,7 +882,7 @@
             <button type="button" class="evu-btn evu-btn--primary" id="inbound-add">Add rule</button>
             <button type="button" class="evu-btn evu-btn--ghost" id="inbound-refresh">Refresh</button>
           </div>
-          <div id="inbound-table-wrap" class="table-wrap"></div>
+          <div id="inbound-table-wrap" class="table-wrap table-wrap--sticky"></div>
           <p id="inbound-msg" class="msg" aria-live="polite"></p>
         </div>
 
@@ -1612,6 +1623,7 @@
           that carry traffic to each peer.
         </p>
         <p>An edge is drawn as traffic when the peer is online and its byte counters moved since the last refresh; otherwise it stays idle. Scroll to zoom, drag the background to pan, and use <strong>Center</strong> to reset.</p>
+        <p>With many routes the graph groups them by peer, collapsed, so it stays readable: open a peer with its arrow, or filter to find a route. Scrolling then moves through the graph, and Ctrl+scroll zooms.</p>
       </div>
     </template>
 

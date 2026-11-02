@@ -31,27 +31,141 @@ function peerWgTopologyState(peer, st) {
   return "off";
 }
 
-function buildTopologyPeerSlots(cfg) {
-  const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
+function topologyPeerForHost(peers, host) {
+  for (const p of peers) {
+    if (tunnelToHost(p.tunnel_ip) === host) return p;
+  }
+  return null;
+}
+
+function topologyPeerKey(peer, host) {
+  return peer ? String(peer.public_key || "").trim() || "peer-empty-key" : "orphan:" + host;
+}
+
+function buildTopologyPeerSlots(cfg, routes) {
   const peers = cfg.peers || [];
   const slots = [];
   const seen = new Set();
   for (let i = 0; i < routes.length; i++) {
     const r = routes[i];
     const host = String(r.target_ip || "").trim();
-    let peer = null;
-    for (const p of peers) {
-      if (tunnelToHost(p.tunnel_ip) === host) {
-        peer = p;
-        break;
-      }
-    }
-    const key = peer ? String(peer.public_key || "").trim() || "peer-empty-key" : "orphan:" + host;
+    const peer = topologyPeerForHost(peers, host);
+    const key = topologyPeerKey(peer, host);
     if (seen.has(key)) continue;
     seen.add(key);
-    slots.push({ peer, orphanHost: peer ? "" : host, anchorRouteIndex: i });
+    slots.push({ peer, orphanHost: peer ? "" : host, anchorRouteIndex: i, key });
   }
   return slots;
+}
+
+/* ——— Large configs ——— */
+
+/** From here the whole graph no longer fits at a size anyone can read. Below it, nothing changes. */
+const TOPO_SCALE_ROUTES = 16;
+/** Width of the columns as drawn, in viewBox units. */
+const TOPO_GRAPH_W = 780;
+
+function topologyGroupExpanded(key) {
+  return state.topologyFilter.trim() ? !state.topologyFilterCollapsed.has(key) : state.topologyExpanded.has(key);
+}
+
+function setTopologyGroupExpanded(key, open) {
+  const filtering = !!state.topologyFilter.trim();
+  const set = filtering ? state.topologyFilterCollapsed : state.topologyExpanded;
+  if (open === filtering) set.delete(key);
+  else set.add(key);
+}
+
+function routeMatchesTopologyFilter(r, peer, q) {
+  const text = [
+    r.name,
+    routeProtoPlainText(r.proto),
+    (r.ports || []).join(", "),
+    r.target_ip,
+    peer ? peer.name : "",
+    peer ? peer.tunnel_ip : "",
+  ].join(" ");
+  return text.toLowerCase().includes(q);
+}
+
+/** Routes per peer, sorted by peer name so one can be found by eye. Peers with no route matching the filter are left out. */
+function buildTopologyGroups(cfg) {
+  const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
+  const peers = cfg.peers || [];
+  const q = state.topologyFilter.trim().toLowerCase();
+  const groups = new Map();
+  for (const r of routes) {
+    const host = String(r.target_ip || "").trim();
+    const peer = topologyPeerForHost(peers, host);
+    const key = topologyPeerKey(peer, host);
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, label: peer ? String(peer.name || "") : host, routes: [] };
+      groups.set(key, g);
+    }
+    if (!q || routeMatchesTopologyFilter(r, peer, q)) g.routes.push(r);
+  }
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  return [...groups.values()].filter((g) => g.routes.length).sort((a, b) => collator.compare(a.label, b.label));
+}
+
+/** What the graph draws per row: a route, or one stand-in for the routes of a collapsed peer. */
+function topologyScaleRows(groups) {
+  const rows = [];
+  for (const g of groups) {
+    if (topologyGroupExpanded(g.key)) {
+      rows.push(...g.routes);
+    } else {
+      rows.push({
+        topologyGroupCount: g.routes.length,
+        proto: "",
+        ports: g.routes.flatMap((r) => r.ports || []),
+        target_ip: g.routes[0].target_ip,
+        disabled: g.routes.every((r) => r.disabled),
+      });
+    }
+  }
+  return rows;
+}
+
+function routeCountText(n) {
+  return n + (n === 1 ? " route" : " routes");
+}
+
+function topologyScaleSummaryText(groups, totalRoutes) {
+  const shown = groups.reduce((n, g) => n + g.routes.length, 0);
+  return state.topologyFilter.trim()
+    ? shown + " of " + routeCountText(totalRoutes) + " match, on " + groups.length + " peer(s)"
+    : routeCountText(totalRoutes) + " on " + groups.length + " peer(s)";
+}
+
+function syncTopologyScaleControls(atScale, groups, totalRoutes) {
+  const controls = $("topology-scale-controls");
+  if (!controls) return;
+  controls.hidden = !atScale;
+  if (!atScale) {
+    $("topology-filter").value = "";
+    return;
+  }
+  const text = topologyScaleSummaryText(groups, totalRoutes);
+  // A status region: only a real change should be read out, not every poll.
+  const summary = $("topology-scale-summary");
+  if (summary.textContent !== text) summary.textContent = text;
+}
+
+/** viewBox at one screen pixel per unit, shrinking only if the wrap is narrower than the graph. */
+function topologyScaleViewBox() {
+  const wrap = $("topology-graph-wrap");
+  const w = (wrap && wrap.clientWidth) || TOPO_GRAPH_W;
+  const h = (wrap && wrap.clientHeight) || 480;
+  const vw = Math.max(TOPO_GRAPH_W, w);
+  return { vw, vh: Math.round((h * vw) / w) };
+}
+
+function redrawTopology() {
+  const last = state.topologyLastRender;
+  if (!last) return;
+  renderTopologyGraph(last.cfg, last.st, last.activeKeys, last.pingByTunnel);
 }
 
 function peerSlotIndexForRoute(routes, slots, host) {
@@ -77,15 +191,20 @@ function routeTopologyProtoUpperEscaped(r) {
 function routeTopologyPortsDisplayEscaped(r) {
   const ports = (r.ports || []).map((x) => String(x).trim()).filter(Boolean);
   if (ports.length === 0) return escapeHtml("—");
+  if (r.topologyGroupCount) return escapeHtml(ports[0] + (ports.length > 1 ? ", ..." : ""));
   if (ports.length <= 2) return escapeHtml(ports.join(", "));
   return escapeHtml(ports.slice(0, 2).join(", ") + ", ...");
 }
 
 function routeTopologyAriaLabel(r) {
-  const proto = routeProtoPlainText(r.proto);
   const portsJoined = (r.ports || []).map((x) => String(x).trim()).filter(Boolean).join(", ");
   const ports = portsJoined || "—";
-  let s = "Forwarding route, " + proto + ", ports " + ports;
+  if (r.topologyGroupCount) {
+    return escapeHtml(routeCountText(r.topologyGroupCount) + " collapsed, ports " + ports + (r.disabled ? " (all disabled)" : ""));
+  }
+  const proto = routeProtoPlainText(r.proto);
+  const name = String(r.name || "").trim();
+  let s = "Forwarding route" + (name ? " " + name : "") + ", " + proto + ", ports " + ports;
   if (r.disabled) s += " (disabled)";
   return escapeHtml(s);
 }
@@ -137,15 +256,22 @@ function estimateTopologyRouteChipWidthPx(r, routeX, peerX) {
 }
 
 function buildTopologyRouteCardInnerHtml(r, protoEsc, portsEsc, aria, routeOutlineCls) {
+  const name = String(r.name || "").trim();
+  // A name replaces the protocol on the card; the protocol stays in the title and the label.
+  const lead = r.topologyGroupCount
+    ? '<span class="topology-route-proto">' + escapeHtml(routeCountText(r.topologyGroupCount)) + "</span>"
+    : name
+      ? '<span class="topology-route-name" title="' + escapeHtml(name) + " (" + protoEsc + ')">' + escapeHtml(name) + "</span>"
+      : '<span class="topology-route-proto">' + protoEsc + "</span>";
   return (
     '<div class="topology-node topology-node--route' +
     (r.disabled ? " topology-node--disabled" : "") +
     routeOutlineCls +
     '" role="group" aria-label="' +
     aria +
-    '"><div class="topology-route-split"><span class="topology-route-proto">' +
-    protoEsc +
-    '</span><span class="topology-node-vbar" aria-hidden="true"></span><span class="topology-route-ports">' +
+    '"><div class="topology-route-split">' +
+    lead +
+    '<span class="topology-node-vbar" aria-hidden="true"></span><span class="topology-route-ports">' +
     portsEsc +
     "</span></div></div>"
   );
@@ -186,7 +312,8 @@ function applyTopologyPanZoomTransform(svg) {
 }
 
 function resetTopologyView() {
-  state.topologyPanX = 0;
+  // At scale, the top of the graph at a readable size, rather than all of it as a sliver.
+  state.topologyPanX = state.topologyAtScale ? (topologyScaleViewBox().vw - TOPO_GRAPH_W) / 2 : 0;
   state.topologyPanY = 0;
   state.topologyZoomK = 1;
   state.topologyPanDrag = null;
@@ -230,6 +357,31 @@ function topologyEventHitsForeignObject(e) {
   return false;
 }
 
+function clampTopologyPanY(y, viewH) {
+  const lowest = Math.min(0, viewH - state.topologyContentH * state.topologyZoomK);
+  return Math.min(0, Math.max(lowest, y));
+}
+
+/** The limit a redraw applies, used by gestures too so the next poll has nothing to move. */
+function limitTopologyPanY(y) {
+  return state.topologyAtScale ? clampTopologyPanY(y, topologyScaleViewBox().vh) : y;
+}
+
+/** Moves a card reached by keyboard into view; the browser cannot scroll inside an SVG for us. */
+function revealTopologyNode(svg, node) {
+  const fo = node.closest("foreignObject");
+  if (!fo || !state.topologyAtScale) return;
+  const { vh } = topologyScaleViewBox();
+  const k = state.topologyZoomK;
+  const top = +fo.getAttribute("y") * k + state.topologyPanY;
+  const bottom = top + +fo.getAttribute("height") * k;
+  if (top >= 0 && bottom <= vh) return;
+  state.topologyPanY = clampTopologyPanY(state.topologyPanY + (top < 0 ? -top : vh - bottom), vh);
+  applyTopologyPanZoomTransform(svg);
+}
+
+let restoringTopologyFocus = false;
+
 function initTopologyViewport() {
   const svg = $("topology-svg");
   if (!svg || svg.dataset.topologyViewportBound === "1") return;
@@ -240,6 +392,16 @@ function initTopologyViewport() {
     (e) => {
       if (!svg.querySelector("#topology-pan-zoom-layer")) return;
       e.preventDefault();
+      // A tall graph has to scroll like a page. Pinch gestures also arrive as ctrl+wheel.
+      if (state.topologyAtScale && !e.ctrlKey && !e.metaKey) {
+        const { vw, vh } = topologyScaleViewBox();
+        const wrap = $("topology-graph-wrap");
+        const unit = (e.deltaMode === 1 ? 16 : 1) * (vw / ((wrap && wrap.clientWidth) || vw));
+        state.topologyPanX -= e.deltaX * unit;
+        state.topologyPanY = clampTopologyPanY(state.topologyPanY - e.deltaY * unit, vh);
+        applyTopologyPanZoomTransform(svg);
+        return;
+      }
       const p = topologySvgPointFromClient(svg, e.clientX, e.clientY);
       if (!p) return;
       const mx = p.x;
@@ -251,9 +413,9 @@ function initTopologyViewport() {
       const k1 = state.topologyZoomK;
       if (Math.abs(k2 - k1) < 1e-9) return;
       const r = k2 / k1;
-      state.topologyPanX = mx - r * (mx - state.topologyPanX);
-      state.topologyPanY = my - r * (my - state.topologyPanY);
       state.topologyZoomK = k2;
+      state.topologyPanX = mx - r * (mx - state.topologyPanX);
+      state.topologyPanY = limitTopologyPanY(my - r * (my - state.topologyPanY));
       applyTopologyPanZoomTransform(svg);
     },
     { passive: false }
@@ -285,7 +447,7 @@ function initTopologyViewport() {
     const u = topologySvgPointFromClient(svg, e.clientX, e.clientY);
     if (!u) return;
     state.topologyPanX = state.topologyPanDrag.tx0 + (u.x - state.topologyPanDrag.u0.x);
-    state.topologyPanY = state.topologyPanDrag.ty0 + (u.y - state.topologyPanDrag.u0.y);
+    state.topologyPanY = limitTopologyPanY(state.topologyPanDrag.ty0 + (u.y - state.topologyPanDrag.u0.y));
     applyTopologyPanZoomTransform(svg);
   });
 
@@ -302,26 +464,77 @@ function initTopologyViewport() {
 
   svg.addEventListener("pointerup", endPan);
   svg.addEventListener("pointercancel", endPan);
+
+  svg.addEventListener("click", (e) => {
+    const btn = e.target.closest && e.target.closest("[data-topo-toggle]");
+    if (!btn) return;
+    const key = btn.getAttribute("data-topo-toggle");
+    setTopologyGroupExpanded(key, !topologyGroupExpanded(key));
+    redrawTopology();
+  });
+  svg.addEventListener("focusin", (e) => {
+    // Keyboard moves only. A redraw restoring focus must not pull the graph back to the toggle, and
+    // moving a toggle out from under a mouse press would make the click miss it.
+    if (restoringTopologyFocus || !e.target.matches(":focus-visible")) return;
+    if (e.target.closest("[data-topo-toggle]")) revealTopologyNode(svg, e.target);
+  });
+
+  const wrap = $("topology-graph-wrap");
+  if (wrap && typeof ResizeObserver === "function") {
+    new ResizeObserver(() => {
+      if (!state.topologyAtScale) return;
+      const before = svg.viewBox.baseVal.width;
+      const { vw, vh } = topologyScaleViewBox();
+      svg.setAttribute("viewBox", "0 0 " + vw + " " + vh);
+      state.topologyPanX += (vw - before) / 2;
+      state.topologyPanY = clampTopologyPanY(state.topologyPanY, vh);
+      applyTopologyPanZoomTransform(svg);
+    }).observe(wrap);
+  }
 }
 
 function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
   if (pingByTunnel === undefined) pingByTunnel = null;
   const svg = $("topology-svg");
   if (!svg) return;
-  const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
-  const slots = buildTopologyPeerSlots(cfg);
+  state.topologyLastRender = { cfg, st, activeKeys: activePeerKeys, pingByTunnel };
+  const configRoutes = (cfg.forwarding && cfg.forwarding.routes) || [];
+  const atScale = configRoutes.length >= TOPO_SCALE_ROUTES;
+  if (!atScale) state.topologyFilter = "";
+  const groups = atScale ? buildTopologyGroups(cfg) : [];
+  const routesByGroup = new Map(groups.map((g) => [g.key, g.routes.length]));
+  // Before the graph is measured: the controls take a line of the toolbar.
+  syncTopologyScaleControls(atScale, groups, configRoutes.length);
+  // An image has no interactive parts, and the collapse toggles have to be reachable.
+  svg.setAttribute("role", atScale ? "group" : "img");
+  if (atScale !== state.topologyAtScale) {
+    state.topologyAtScale = atScale;
+    resetTopologyView();
+  }
+  const routes = atScale ? topologyScaleRows(groups) : configRoutes;
+  const slots = buildTopologyPeerSlots(cfg, routes);
   if (!routes.length) {
+    const emptyText = atScale ? "No routes match this filter" : "No routes in config";
     svg.setAttribute("viewBox", "0 0 780 120");
     svg.innerHTML =
-      '<title id="topology-svg-title">No routes in config</title><g id="topology-pan-zoom-layer" class="topology-pan-zoom-layer">' +
+      '<title id="topology-svg-title">' +
+      emptyText +
+      '</title><g id="topology-pan-zoom-layer" class="topology-pan-zoom-layer">' +
       '<rect class="topology-grid-bg" x="0" y="0" width="780" height="120" fill="#000000" fill-opacity="0" stroke="none" aria-hidden="true" />' +
-      '<text x="390" y="60" text-anchor="middle" class="topology-empty-text">No routes in config</text></g>';
-    applyTopologyPanZoomTransform(svg);
+      '<text x="390" y="60" text-anchor="middle" class="topology-empty-text">' +
+      emptyText +
+      "</text></g>";
+    // The pan is for the graph's own viewBox, and would move this message out of view.
+    if (!atScale) applyTopologyPanZoomTransform(svg);
     return;
   }
 
+  // Focus on a toggle would be lost with the markup; polls redraw under it too.
+  const focusedEl = document.activeElement;
+  const focusedToggle = focusedEl && svg.contains(focusedEl) ? focusedEl.getAttribute("data-topo-toggle") : null;
+
   const rowGapSamePeer = 52;
-  const rowGapNewPeer = 92;
+  const rowGapNewPeer = atScale ? 66 : 92;
   const peerNodeH = 58;
   const routeNodeH = 34;
   const rowH = Math.max(routeNodeH, peerNodeH);
@@ -343,7 +556,8 @@ function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
   const srvW = 176;
   const srvX = 36;
   const srvCx = srvX + srvW;
-  const srvCy = totalH / 2;
+  // At scale the middle of the graph is far off screen; keep the host at the top with the first rows.
+  const srvCy = atScale ? pad + peerNodeH / 2 + 14 : totalH / 2;
   const routeX = 268;
   const peerX = 492;
   const peerW = 200;
@@ -477,6 +691,18 @@ function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
     const namePlain = peer ? String(peer.name || "").trim() || "Peer" : "Unknown target";
     const subPlain = peer ? String(peer.tunnel_ip || "").trim() : String(s.orphanHost || "").trim();
     const peerAria = escapeHtml(namePlain + ", " + subPlain + ", ping " + pingParts.display);
+    const groupOpen = atScale && topologyGroupExpanded(s.key);
+    const toggleHtml = atScale
+      ? '<button type="button" class="topology-peer-toggle" data-topo-toggle="' +
+        escapeHtml(s.key) +
+        '" aria-expanded="' +
+        groupOpen +
+        '" aria-label="' +
+        escapeHtml((groupOpen ? "Collapse " : "Expand ") + routeCountText(routesByGroup.get(s.key) || 0) + " to " + namePlain) +
+        '"><span aria-hidden="true">' +
+        (groupOpen ? "▾" : "▸") +
+        "</span></button>"
+      : "";
 
     nodes.push(
       '<foreignObject x="' +
@@ -491,7 +717,9 @@ function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
         peerOutlineCls +
         '" role="group" aria-label="' +
         peerAria +
-        '"><div class="topology-peer-split"><div class="topology-peer-main"><p class="topology-node-title">' +
+        '"><div class="topology-peer-split">' +
+        toggleHtml +
+        '<div class="topology-peer-main"><p class="topology-node-title">' +
         title +
         '</p><p class="topology-node-meta mono">' +
         sub +
@@ -504,14 +732,22 @@ function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
   }
 
   const online = slots.filter((s) => s.peer && peerWgTopologyState(s.peer, st) === "on").length;
+  // At scale `routes` holds stand-ins for collapsed peers, so it does not count routes.
   const summary =
-    routes.length +
-    " route(s), " +
-    slots.length +
-    " peer target(s), " +
+    (atScale
+      ? topologyScaleSummaryText(groups, configRoutes.length)
+      : routes.length + " route(s), " + slots.length + " peer target(s)") +
+    ", " +
     online +
     " online peer link(s)";
-  svg.setAttribute("viewBox", "0 0 780 " + totalH);
+  if (atScale) {
+    const { vw, vh } = topologyScaleViewBox();
+    svg.setAttribute("viewBox", "0 0 " + vw + " " + vh);
+    state.topologyContentH = totalH;
+    state.topologyPanY = clampTopologyPanY(state.topologyPanY, vh);
+  } else {
+    svg.setAttribute("viewBox", "0 0 780 " + totalH);
+  }
   svg.innerHTML =
     '<title id="topology-svg-title">' +
     escapeHtml(summary) +
@@ -523,6 +759,14 @@ function renderTopologyGraph(cfg, st, activePeerKeys, pingByTunnel) {
     nodes.join("") +
     "</g></g>";
   applyTopologyPanZoomTransform(svg);
+  if (focusedToggle) {
+    const again = svg.querySelector('[data-topo-toggle="' + CSS.escape(focusedToggle) + '"]');
+    if (again) {
+      restoringTopologyFocus = true;
+      again.focus({ preventScroll: true });
+      restoringTopologyFocus = false;
+    }
+  }
 }
 
 /**
@@ -581,4 +825,24 @@ export function initTopologyPage() {
   initTopologyViewport();
   const topoCenter = $("topology-center");
   if (topoCenter) topoCenter.addEventListener("click", resetTopologyView);
+  const topoFilter = $("topology-filter");
+  if (topoFilter) {
+    topoFilter.addEventListener("input", () => {
+      state.topologyFilter = topoFilter.value;
+      state.topologyFilterCollapsed.clear();
+      // A new result set starts from the top, or it can sit entirely above the view.
+      state.topologyPanY = 0;
+      redrawTopology();
+    });
+  }
+  const setAllGroups = (open) => {
+    const last = state.topologyLastRender;
+    if (!last) return;
+    for (const g of buildTopologyGroups(last.cfg)) setTopologyGroupExpanded(g.key, open);
+    redrawTopology();
+  };
+  const expandAll = $("topology-expand-all");
+  if (expandAll) expandAll.addEventListener("click", () => setAllGroups(true));
+  const collapseAll = $("topology-collapse-all");
+  if (collapseAll) collapseAll.addEventListener("click", () => setAllGroups(false));
 }

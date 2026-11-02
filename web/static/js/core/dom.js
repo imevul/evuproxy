@@ -183,11 +183,27 @@ export function focusTableRow(wrap, index, fallback, { force = false } = {}) {
   if (!wrap) return;
   const rows = [...wrap.querySelectorAll("tbody tr[data-row]")].filter((tr) => tr.getClientRects().length > 0);
   const target =
+    // Exact first: in a sorted table the rows are not drawn in index order.
+    rows.find((tr) => +tr.getAttribute("data-row") === index) ||
     rows.find((tr) => +tr.getAttribute("data-row") >= index) ||
     rows.pop() ||
     wrap.querySelector(".evu-empty button") ||
     fallback;
   if (target) target.focus();
+}
+
+/**
+ * The index focusTableRow needs to land beside a removed row: the next row as drawn, else
+ * the previous one, as an index once `removedAt` is gone. Read before the table re-renders.
+ * In a sorted table that row can be anywhere in config, so `removedAt` alone would jump.
+ */
+export function rowIndexAfterRemoval(wrap, row, removedAt) {
+  const rows = [...wrap.querySelectorAll("tbody tr[data-row]")].filter((tr) => tr.getClientRects().length > 0);
+  const at = rows.indexOf(row);
+  const neighbour = at >= 0 ? rows[at + 1] || rows[at - 1] : null;
+  if (!neighbour) return removedAt;
+  const i = +neighbour.getAttribute("data-row");
+  return i > removedAt ? i - 1 : i;
 }
 
 export function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {

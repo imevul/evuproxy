@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -97,6 +98,19 @@ func validPeerName(name string) error {
 	}
 	if !rePeerName.MatchString(name) {
 		return fmt.Errorf("invalid peer name %q (1–64 chars: letters, digits, space, _ . + @ / -)", name)
+	}
+	return nil
+}
+
+// maxRouteNameRunes caps forwarding.routes[].name, which is display text only.
+const maxRouteNameRunes = 64
+
+func validRouteName(name string) error {
+	if hasControlChars(name) {
+		return fmt.Errorf("name cannot contain newlines or control characters")
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(name)) > maxRouteNameRunes {
+		return fmt.Errorf("name is longer than %d characters", maxRouteNameRunes)
 	}
 	return nil
 }

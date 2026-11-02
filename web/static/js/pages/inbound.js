@@ -10,11 +10,13 @@ import {
   rowErrorHtml,
   restoreRowSwitchFocus,
   focusTableRow,
+  rowIndexAfterRemoval,
   fadeOutRow,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
+import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
 import { openModal, closeModal, dismissModal, registerModalForm } from "../core/modal.js";
@@ -89,8 +91,13 @@ function renderInboundTable(cfg) {
     if (addBtn) addBtn.addEventListener("click", () => openInboundEditor(-1));
     return;
   }
-  const rows = rules
-    .map((r, i) => {
+  const rows = sortedRows("inbound", rules, {
+    proto: (r) => String(r.proto || "").toLowerCase(),
+    ports: (r) => dportDisplay(r.dport),
+    note: (r) => r.note,
+    enabled: (r) => (r.disabled ? 0 : 1),
+  })
+    .map(({ item: r, index: i }) => {
       const aria =
         "Enabled: INPUT " +
         String(r.proto || "").toLowerCase() +
@@ -102,7 +109,11 @@ function renderInboundTable(cfg) {
       );
     })
     .join("");
-  wrap.innerHTML = `<table class="data"><thead><tr><th scope="col">Proto</th><th scope="col">Port(s)</th><th scope="col">Note</th><th scope="col">Enabled</th><th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
+  setTableHtml(
+    wrap,
+    `<table class="data"><thead><tr>${sortHeaderHtml("inbound", "proto", "Proto")}${sortHeaderHtml("inbound", "ports", "Port(s)")}${sortHeaderHtml("inbound", "note", "Note")}${sortHeaderHtml("inbound", "enabled", "Enabled")}<th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`
+  );
+  bindSortHeaders(wrap, "inbound", () => renderInboundTable(cfg));
   wrap.querySelectorAll("[data-inbound-edit]").forEach((b) => {
     b.addEventListener("click", () => openInboundEditor(+b.getAttribute("data-inbound-edit")));
   });
@@ -249,12 +260,13 @@ async function removeInboundRule(index) {
       removedAt = findConfigRow(draft.input_allows, index, identity, inboundRuleIdentity, "inbound rule");
       [removed] = draft.input_allows.splice(removedAt, 1);
     });
+    const focusAt = rowIndexAfterRemoval(wrap, row, removedAt);
     await fadeOutRow(row);
     setInboundMsg("");
     renderInboundTable(c);
     setApiStatus(true);
     refreshPendingBadge();
-    focusTableRow(wrap, removedAt, $("inbound-add"));
+    focusTableRow(wrap, focusAt, $("inbound-add"));
     const proto = String(removed.proto || "").toLowerCase() || "—";
     const note = String(removed.note || "").trim();
     const label = proto + " " + (dportDisplay(removed.dport) || "—") + (note ? " (" + note + ")" : "");
