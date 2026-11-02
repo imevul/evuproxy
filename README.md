@@ -30,7 +30,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
   ```bash
    evuproxy reload --config /etc/evuproxy/config.yaml
   ```
-4. On boot, `evuproxy.service` reapplies the same. Geo zones refresh via `evuproxy-geo.timer`. With **geo enabled**, the first `reload` attempts to download country zones if files are missing; ensure outbound HTTPS is allowed.
+4. On boot, `evuproxy.service` reapplies the same. With [`apply.confirm`](docs/config.md#confirm-or-revert-apply) on, as in the seeded config, that is the last applied config: edits you saved but never applied stay unapplied until you run `evuproxy reload`. Geo zones refresh via `evuproxy-geo.timer`. With **geo enabled**, the first `reload` attempts to download country zones if files are missing; ensure outbound HTTPS is allowed.
 5. **WireGuard on the backend peer**: use a narrow **`AllowedIPs`** (tunnel subnet only, not `0.0.0.0/0`) so local LAN routing stays direct.
 6. **Peer (client) install (Linux):** [scripts/peer-install.sh](scripts/peer-install.sh) installs `wireguard-tools`, writes `/etc/wireguard/<iface>.conf`, and enables `wg-quick`. The admin UI **Onboarding** tab usually delivers an **encrypted bundle** snippet: **`curl … \| sudo bash`** runs [**`install-peer-tool.sh`**](scripts/install-peer-tool.sh), which installs **`evuproxy-peer-apply`**; that tool decrypts the bundle and fetches **`peer-install.sh`** (see **[Peer onboarding script URLs (optional)](#peer-onboarding-script-urls-optional)** for pinning or replacing URLs). When you download **`scripts/peer-install.sh`** manually instead, save it under a temp name, **`sha256sum`** it, and compare against **SHA256SUMS** on the matching [GitHub Release](https://github.com/imevul/evuproxy/releases) (same tag or commit as the raw URL) before **`sudo`**.
 
@@ -52,6 +52,7 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 | Command                           | Purpose                                                                                                  |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `evuproxy reload`                 | Regenerate `/etc/wireguard/<iface>.conf`, nftables tables `inet evuproxy` / `ip evuproxy`, load geo sets; refresh systemd-networkd `Unmanaged=yes` drop-in when netplan/networkd is in use |
+| `evuproxy reload --boot`          | What `evuproxy.service` runs: with `apply.confirm` on in the last applied config, apply that config and leave edits in `config.yaml` unapplied ([details](docs/config.md#confirm-or-revert-apply)) |
 | `evuproxy ensure-wg-networkd`     | Install `/etc/systemd/network/00-<iface>.network` (`Unmanaged=yes`) if networkd/netplan is in use; prints the path (used by install/update) |
 | `evuproxy update-geo`             | Refresh IPDeny country files and reload nftables geo **in both** inet and ip tables                      |
 | `evuproxy status`                 | `wg show` + `nft list table inet evuproxy`                                                               |
@@ -88,19 +89,19 @@ cd /path/to/evuproxy   # repository root
 ./scripts/update.sh
 ```
 
-The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.25+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/`, restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file.
+The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.25+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/`, replaces an unmodified `evuproxy.service` with the current one (it warns and leaves yours alone if you changed it), restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file.
 
 **Limitations**
 
 - **`config.yaml` is yours:** the updater does not migrate, merge, or validate configuration. New releases may require new fields, renames, or stricter validation—read [CHANGELOG.md](CHANGELOG.md) and compare with [config/evuproxy.example.yaml](config/evuproxy.example.yaml), then run **`evuproxy reload`** (or fix issues before reloading) so you are not locked out.
 - **Local git changes:** `git pull` fails if you have uncommitted edits in the clone; commit, stash, or discard them first.
-- **Binary-only installs** (prebuilt `evuproxy` copied to `/usr/local/bin` without this repo) are not updated by this script—replace the binary from a [release](https://github.com/imevul/evuproxy/releases) and restart services manually.
+- **Binary-only installs** (prebuilt `evuproxy` copied to `/usr/local/bin` without this repo) are not updated by this script—replace the binary from a [release](https://github.com/imevul/evuproxy/releases) and restart services manually. Also install the release's `templates/evuproxy.service`, or a reboot keeps applying unconfirmed edits with `apply.confirm` on.
 - **Peers and other hosts** are unchanged; client WireGuard configs are not updated by `update.sh`.
 
 **Backup and rollback**
 
 - Before updating, take a **config backup**: `evuproxy backup --dest /var/backups/evuproxy-pre-update.tgz` (or use the HTTP API—see [docs/http-api.md](docs/http-api.md) for path allowlisting), and/or copy `/etc/evuproxy/config.yaml` somewhere safe.
-- If something goes wrong after upgrade, **stop** the services, **restore** the archive with `evuproxy restore --archive …` (then `reload`), or put back the saved `config.yaml` and reinstall the **previous** binary (e.g. from an older GitHub release or `git checkout <tag>` + `sudo ./scripts/rebuild.sh --install`).
+- If something goes wrong after upgrade, **stop** the services, **restore** the archive with `evuproxy restore --archive …` (then `reload`), or put back the saved `config.yaml` and reinstall the **previous** binary (e.g. from an older GitHub release or `git checkout <tag>` + `sudo ./scripts/rebuild.sh --install`). Going back past the release that added **`reload --boot`**? Install that release's `templates/evuproxy.service` too and run `systemctl daemon-reload`: older binaries reject the flag, and `evuproxy.service` would fail at the next boot, leaving the host without its firewall.
 - Keeping a copy of the old **`evuproxy` binary** under another name makes rollback faster than rebuilding from git history.
 
 ## Uninstall

@@ -67,6 +67,22 @@ func reload(ctx context.Context, cfgPath string, progress func(step string)) err
 	if err != nil {
 		return err
 	}
+	if err := applyToHost(ctx, c, cfgPath, progress); err != nil {
+		return err
+	}
+	if err := state.RecordAppliedConfigHash(cfgPath); err != nil {
+		return fmt.Errorf("record apply state: %w", err)
+	}
+	if err := state.RecordAppliedConfigSnapshot(cfgPath); err != nil {
+		return fmt.Errorf("record config snapshot: %w", err)
+	}
+	afterApply(c, cfgPath)
+	return nil
+}
+
+// applyToHost writes generated artifacts for c and applies them. cfgPath only says where
+// they and the host's state live: nothing here reads config.yaml.
+func applyToHost(ctx context.Context, c *config.Config, cfgPath string, progress func(step string)) error {
 	base := filepath.Dir(cfgPath)
 	genDir := filepath.Join(base, GeneratedDir)
 	if err := os.MkdirAll(genDir, 0o755); err != nil {
@@ -156,18 +172,14 @@ func reload(ctx context.Context, cfgPath string, progress func(step string)) err
 	for _, w := range WireGuardHostWarnings(ctx, c, cfgPath) {
 		slog.Warn(w.Message, "code", w.Code)
 	}
+	return nil
+}
 
-	if err := state.RecordAppliedConfigHash(cfgPath); err != nil {
-		return fmt.Errorf("record apply state: %w", err)
-	}
-	if err := state.RecordAppliedConfigSnapshot(cfgPath); err != nil {
-		return fmt.Errorf("record config snapshot: %w", err)
-	}
+func afterApply(c *config.Config, cfgPath string) {
 	if c.CrowdSec.Enabled {
 		slog.Warn("crowdsec enabled: ensure CrowdSec nftables bouncer populates @crowdsec_block_v4 in table inet evuproxy (see contrib/crowdsec/)")
 		tryRestartCrowdsecBouncer(cfgPath)
 	}
-	return nil
 }
 
 // ensureGeoZones downloads zone files when any required one (global countries

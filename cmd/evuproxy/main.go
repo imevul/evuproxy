@@ -72,10 +72,14 @@ func cmdVersion() *cobra.Command {
 
 func cmdReload() *cobra.Command {
 	var confirmWithin time.Duration
+	var boot bool
 	c := &cobra.Command{
 		Use:   "reload",
 		Short: "Regenerate and apply WireGuard + nftables from config",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if boot {
+				return apply.ReloadAtBoot(cmd.Context(), cfgPath)
+			}
 			if confirmWithin == 0 {
 				return apply.Reload(cmd.Context(), cfgPath)
 			}
@@ -91,6 +95,8 @@ func cmdReload() *cobra.Command {
 		},
 	}
 	c.Flags().DurationVar(&confirmWithin, "confirm-within", 0, "revert automatically unless `evuproxy reload-confirm` runs within this time (e.g. 60s)")
+	c.Flags().BoolVar(&boot, "boot", false, "what evuproxy.service runs: with apply.confirm on in the last applied config, apply that config and leave edits in config.yaml unapplied")
+	c.MarkFlagsMutuallyExclusive("boot", "confirm-within")
 	return c
 }
 

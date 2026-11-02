@@ -238,7 +238,7 @@ Non-disabled peers must have a non-empty `name`, `public_key`, and `tunnel_ip`.
 
 ## Applying changes
 
-After editing `config.yaml`, run **`evuproxy reload --config /etc/evuproxy/config.yaml`** (or use the HTTP API) so WireGuard and nftables are regenerated. The admin UI can edit and save via **`PUT /api/v1/config`** (YAML is rewritten from the structured config; comments and unknown keys are not preserved).
+After editing `config.yaml`, run **`evuproxy reload --config /etc/evuproxy/config.yaml`** (or use the HTTP API) so WireGuard and nftables are regenerated. A reboot doesn't do this for you when [confirm mode](#confirm-or-revert-apply) is on. The admin UI can edit and save via **`PUT /api/v1/config`** (YAML is rewritten from the structured config; comments and unknown keys are not preserved).
 
 ### Confirm or revert (`apply`)
 
@@ -253,20 +253,33 @@ apply:
 | `confirm` | bool (optional) | If `true`, the web UI's **Apply** reverts by itself unless you confirm it in time. Left out or `false`: Apply is one-way, and a lockout risk needs an acknowledgement. |
 | `confirm_timeout_seconds` | int (optional) | How long to wait, **10** to **3600**. Default **60**. |
 
-[`config/evuproxy.example.yaml`](../config/evuproxy.example.yaml) turns it on, so new installs have it. Upgrading leaves an existing `config.yaml` alone, so existing installs keep a one-way Apply until you turn it on, with this setting or under **Settings → Preferences**. Only the web UI reads this setting. **`evuproxy reload`** and **`POST /api/v1/reload`** are one-way unless each call asks otherwise, so scripts and the boot unit behave as before. The setting takes effect from the next Apply.
+[`config/evuproxy.example.yaml`](../config/evuproxy.example.yaml) turns it on, so new installs have it. Upgrading leaves an existing `config.yaml` alone, so existing installs keep a one-way Apply until you turn it on, with this setting or under **Settings → Preferences**. The web UI and the boot unit read this setting. **`evuproxy reload`** and **`POST /api/v1/reload`** are one-way unless each call asks otherwise, so scripts behave as before. The setting takes effect from the next Apply.
+
+**At boot:** **`evuproxy.service`** runs **`evuproxy reload --boot`**, at every boot and every **`systemctl restart evuproxy`**. Nobody is there to confirm then, so if the last applied config (**`config.yaml.bak`**) has **`confirm: true`**, that config is what goes live, and any edits stay in **`config.yaml`** as unapplied changes.
+
+| At boot | What goes live |
+|---------|----------------|
+| Last applied config has **`confirm: true`** | That config. **`config.yaml`** isn't touched, and if it differs, the journal warns. This includes an edit that turns **`confirm`** off, a failed Apply's edits, and **`peer-add`** or **`peer-remove`** without **`--apply`**. |
+| Last applied config has **`confirm`** off or left out | **`config.yaml`**, as it always has. An edit that only turns **`confirm`** on is applied too. |
+| **`config.yaml.bak`** is missing, invalid or not what was last applied, as on a first boot | **`config.yaml`**, with a warning in the journal, because the alternative is a host with no firewall. |
+| The last applied config fails to apply | Nothing else is tried: **`evuproxy.service`** fails and the error is in its journal. It doesn't fall back to the unconfirmed edits. |
+
+So with confirm on, editing **`config.yaml`** by hand and rebooting no longer applies the edit, and this also holds back edits that tighten security: a peer you removed keeps its access until you apply. To apply edits, run **`evuproxy reload`** (one-way) or **`evuproxy reload --confirm-within 60s`**, or use **Apply** in the UI. To see what is waiting, use **Pending changes** in the UI or compare **`config.yaml`** with **`config.yaml.bak`**.
+
+**`scripts/update.sh`** replaces an installed **`evuproxy.service`** that it recognizes as one we shipped. If you've changed that file, or a drop-in sets **`ExecStart`**, it leaves your version alone and warns unless it already has **`--boot`**. **`scripts/install.sh`** always installs the current unit. Going back to an older binary needs the older unit too, because older binaries don't know **`--boot`** and **`evuproxy.service`** would fail.
 
 Confirm mode needs **systemd** and an API running as **root**. Without them Apply stops with an error and changes nothing; turn the setting off to go back to a one-way Apply. It also needs a known-good config to go back to, so run **`evuproxy reload`** once first (a host that has booted with **`evuproxy.service`** enabled already has).
 
-**How it works:** before touching the firewall, the Apply arms a transient systemd timer that runs **`evuproxy reload-revert`**. The timer is independent of the API, so a stopped API or a change that cuts your connection doesn't stop it. A revert restores **`config.yaml`** and the **`.bak`** history to how they were before the Apply and re-runs the normal reload. The rejected config is kept as **`config.yaml.reverted`**, since **`evuproxy.service`** would otherwise apply it again at the next boot.
+**How it works:** before touching the firewall, the Apply arms a transient systemd timer that runs **`evuproxy reload-revert`**. The timer is independent of the API, so a stopped API or a change that cuts your connection doesn't stop it. A revert restores **`config.yaml`** and the **`.bak`** history to how they were before the Apply and re-runs the normal reload. The rejected config is kept as **`config.yaml.reverted`**, so the next **`evuproxy reload`** doesn't apply it again.
 
 | Situation | What happens |
 |-----------|--------------|
 | Confirmed | Stops the timer. The Apply becomes the new last confirmed config. Connections the firewall already accepted can outlive the change, so an open SSH session or the web UI's open page is not proof that a change is safe: try a new connection before confirming. |
 | Time runs out | Reverts. |
 | Apply again in the window | Restarts the wait. The revert target stays the last confirmed config. |
-| One-way reload in the window | Refused: **`evuproxy reload`** exits with an error and **`POST /reload`** answers **409**, because the timer would silently undo it. **`peer-add --apply`** and the like are refused the same way, after saving. So is **`POST /restore`** / **`evuproxy restore`**. |
+| One-way reload in the window | Refused: **`evuproxy reload`** exits with an error and **`POST /reload`** answers **409**, because the timer would silently undo it. **`systemctl restart evuproxy`** fails the same way. **`peer-add --apply`** and the like are refused the same way, after saving. So is **`POST /restore`** / **`evuproxy restore`**. |
 | API restart in the window | Nothing changes: the session is on disk and the timer keeps running. If **`systemctl`** can't say whether the timer is armed, the session stands, and a one-way reload stays refused. |
-| Reboot in the window | Transient timers don't survive a reboot, so **`evuproxy reload`** at boot (or **`evuproxy serve`** at startup) reverts first. The session records its boot, so this doesn't depend on **`systemctl`** answering. |
+| Reboot in the window | Transient timers don't survive a reboot, so **`evuproxy reload --boot`** at boot (or **`evuproxy serve`** at startup) reverts first. The session records its boot, so this doesn't depend on **`systemctl`** answering. |
 | An Apply fails in the window | Reverts the host straight away, and leaves your edits in **`config.yaml`** as unapplied changes. |
 | A revert fails | Tries three times, firewall before WireGuard, then records the failure in **`evuproxy reload-status`** and the audit events, and the UI shows it. **`config.yaml`** is already the baseline, so a reboot won't bring the rejected config back. A revert that was killed partway reads as failed too. Retry with **`evuproxy reload-revert`** or **`evuproxy reload`**. If the Apply itself had failed, **`evuproxy reload-revert`** puts your edits back in **`config.yaml`** as unapplied changes, while **`evuproxy reload`**, a reboot or an API restart keeps them in **`config.yaml.reverted`** with **`last_revert.reason`** **`failed_apply`**. |
 
