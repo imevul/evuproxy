@@ -13,9 +13,10 @@ import {
   clearFieldInvalid,
 } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { saveConfigEdit, findConfigRow, ConfigMergeError } from "../core/config_save.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
 import { setRouteEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
-import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
+import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 function expandRoutePortTokens(portsArr) {
@@ -260,9 +261,13 @@ function renderRoutesTable(cfg) {
   applyPeersRoutesTableFilter();
 }
 
+/** JSON of the route open in the editor, to detect it changing elsewhere before Save. */
+let routeEditBase = null;
+
 function openRouteEditor(index) {
   const cfg = state.lastConfig;
   if (!cfg) return;
+  $("route-editor-msg").textContent = "";
   if (!cfg.forwarding.routes) cfg.forwarding.routes = [];
   peerTunnelIPv4Options(cfg);
   const dis = $("route-f-disabled");
@@ -283,6 +288,7 @@ function openRouteEditor(index) {
   } else {
     const r = cfg.forwarding.routes[index];
     if (!r) return;
+    routeEditBase = JSON.stringify(r);
     $("route-edit-index").value = String(index);
     $("route-editor-title").textContent = "Edit route";
     setRouteProtoCheckboxes(r.proto);
@@ -414,12 +420,15 @@ function loadRoutePortMapsToForm(r) {
 }
 
 async function patchRouteDisabled(index, disabled) {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.forwarding || !cfg.forwarding.routes || cfg.forwarding.routes[index] === undefined) return;
-  cfg.forwarding.routes[index].disabled = disabled;
+  const cur = state.lastConfig;
+  if (!cur || !cur.forwarding || !cur.forwarding.routes || cur.forwarding.routes[index] === undefined) return;
+  const identity = routeIdentity(cur.forwarding.routes[index]);
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      const routes = c.forwarding && c.forwarding.routes;
+      const i = findConfigRow(routes, index, identity, routeIdentity, "route");
+      routes[i].disabled = disabled;
+    });
     setRoutesMsg("");
     setApiStatus(true);
     refreshPendingBadge();
@@ -431,9 +440,6 @@ async function patchRouteDisabled(index, disabled) {
 }
 
 async function saveRouteEditor() {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.forwarding) cfg.forwarding = {};
-  if (!cfg.forwarding.routes) cfg.forwarding.routes = [];
   const proto = routeProtoFromCheckboxes();
   const ports = parsePortsList($("route-f-ports").value);
   const target = $("route-f-target").value.trim();
@@ -474,18 +480,29 @@ async function saveRouteEditor() {
   if (routeRL) entry.rate_limit = routeRL;
   else delete entry.rate_limit;
   const idxRaw = $("route-edit-index").value;
-  if (idxRaw === "") cfg.forwarding.routes.push(entry);
-  else cfg.forwarding.routes[+idxRaw] = entry;
+  const base = routeEditBase;
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      if (!c.forwarding) c.forwarding = {};
+      if (!c.forwarding.routes) c.forwarding.routes = [];
+      const routes = c.forwarding.routes;
+      if (idxRaw === "") routes.push(entry);
+      // The form replaces the whole row, so only a row still as it was when opened is safe to overwrite.
+      else routes[findConfigRow(routes, +idxRaw, base, JSON.stringify, "route")] = entry;
+    });
     setRoutesMsg("Routes saved. Open Pending changes to review nftables, then Apply to host.");
     closeRouteEditor();
     renderRoutesTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
   } catch (e) {
-    setRoutesMsg(String(e.message || e), true);
+    if (e instanceof ConfigMergeError) {
+      $("route-editor-msg").textContent =
+        e.message + " Your values are still in this form: note them, press Cancel, and edit the latest version.";
+      renderRoutesTable(state.lastConfig);
+    } else {
+      setRoutesMsg(String(e.message || e), true);
+    }
   }
 }
 
@@ -497,19 +514,6 @@ function routeIdentity(r) {
     "\0" +
     String(r.target_ip || "")
   );
-}
-
-function resolveListIndex(list, openIndex, identity, identityOf) {
-  // Prefer the open-time index when it still matches (handles duplicate keys).
-  if (!list) return -1;
-  if (list[openIndex] != null && identityOf(list[openIndex]) === identity) return openIndex;
-  const matches = [];
-  for (let i = 0; i < list.length; i++) {
-    if (identityOf(list[i]) === identity) matches.push(i);
-  }
-  if (matches.length === 1) return matches[0];
-  if (matches.length === 0) return -1;
-  return -2; // ambiguous after list churn
 }
 
 async function removeRoute(index) {
@@ -533,30 +537,20 @@ async function removeRoute(index) {
       " from the saved config? The host is not updated until you apply on Pending changes.",
     confirmLabel: "Remove",
     onConfirm: async () => {
-      // Re-resolve: list may have changed while the dialog was open.
-      const c = JSON.parse(JSON.stringify(state.lastConfig));
-      if (!c.forwarding || !c.forwarding.routes) return;
-      const i = resolveListIndex(c.forwarding.routes, openIndex, identity, routeIdentity);
-      if (i === -1) {
-        setRoutesMsg("That route is no longer in the saved config.", true);
-        renderRoutesTable(c);
-        return;
-      }
-      if (i === -2) {
-        setRoutesMsg("Could not uniquely identify that route; refresh and try again.", true);
-        renderRoutesTable(c);
-        return;
-      }
-      c.forwarding.routes.splice(i, 1);
       try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
-        state.lastConfig = c;
+        // Re-resolve in the edit: the list may have changed while the dialog was open, or since this tab loaded.
+        const c = await saveConfigEdit((draft) => {
+          const routes = draft.forwarding && draft.forwarding.routes;
+          const i = findConfigRow(routes, openIndex, identity, routeIdentity, "route");
+          routes.splice(i, 1);
+        });
         setRoutesMsg("Route removed from config. Apply on Pending changes when ready.");
         renderRoutesTable(c);
         setApiStatus(true);
         refreshPendingBadge();
       } catch (e) {
         setRoutesMsg(String(e.message || e), true);
+        renderRoutesTable(state.lastConfig);
       }
     },
   });
@@ -595,11 +589,12 @@ export function initRoutesPage() {
   if (routeTabDefault) routeTabDefault.addEventListener("click", () => setRouteEditorTab("default"));
   if (routeTabAdvanced) routeTabAdvanced.addEventListener("click", () => setRouteEditorTab("advanced"));
   $("route-save").addEventListener("click", saveRouteEditor);
-  $("route-cancel").addEventListener("click", closeRouteEditor);
 
   const routeModal = $("route-modal");
+  registerModalForm(routeModal);
+  $("route-cancel").addEventListener("click", () => dismissModal(routeModal));
   const routeBackdrop = routeModal && routeModal.querySelector(".modal-backdrop");
-  if (routeBackdrop) routeBackdrop.addEventListener("click", closeRouteEditor);
+  if (routeBackdrop) routeBackdrop.addEventListener("click", () => dismissModal(routeModal));
   const routeProbeModal = $("route-probe-modal");
   const routeProbeBackdrop = routeProbeModal && routeProbeModal.querySelector(".modal-backdrop");
   if (routeProbeBackdrop) routeProbeBackdrop.addEventListener("click", closeRouteProbeModal);

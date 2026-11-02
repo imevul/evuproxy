@@ -2,7 +2,8 @@ import { state } from "./state.js";
 import { $ } from "./dom.js";
 import { ensureApiGate, applyNavRestriction } from "./api.js";
 import { ensureUIPrefs } from "./prefs.js";
-import { closeConfirmModal } from "./modal.js";
+import { anyOpenModalDirty, closeAllModals, closeConfirmModal, confirmDiscard } from "./modal.js";
+import { pageForm } from "./dirty.js";
 import { refreshSidebarAbout } from "./sidebar.js";
 import {
   refreshOverviewPage,
@@ -36,8 +37,47 @@ const pages = [
   "logs",
 ];
 
-export async function navigate(name) {
+/** The page on screen, once a navigation has got past the unsaved-edits guard. */
+let currentRoute = null;
+/** The hash of `currentRoute`, to put back when the operator stays on the page. */
+let committedHash = "";
+/** A hash `navigate` set itself: its hashchange must not navigate a second time. */
+let selfSetHash = null;
+
+/**
+ * Whether going to `target` would lose edits. With no target (the tab closing),
+ * every open dialog counts. Coming back to the current route keeps its dialogs
+ * open but reloads its page form, so only the form counts then.
+ */
+export function hasUnsavedEdits(target) {
+  const form = pageForm(currentRoute);
+  if (form && form.isDirty()) return true;
+  return target !== currentRoute && anyOpenModalDirty();
+}
+
+function restoreCommittedHash() {
+  if (location.hash === committedHash) return;
+  // replaceState fires no hashchange, so this cannot re-enter navigate.
+  history.replaceState(null, "", location.pathname + location.search + committedHash);
+}
+
+function discardEditsFor(target) {
+  const form = pageForm(currentRoute);
+  if (form) form.clear();
+  if (target !== currentRoute) closeAllModals();
+}
+
+/** @param {{ discard?: boolean }} [opts] `discard` once the operator has agreed to lose edits. */
+export async function navigate(name, opts) {
   if (!pages.includes(name)) name = "overview";
+  if (!(opts && opts.discard) && hasUnsavedEdits(name)) {
+    const target = name;
+    confirmDiscard(() => {
+      discardEditsFor(target);
+      return navigate(target, { discard: true });
+    }, restoreCommittedHash);
+    return;
+  }
   state.hashNavParams = parseHashNavParams();
   closeConfirmModal();
   if (name !== "routes") {
@@ -55,6 +95,13 @@ export async function navigate(name) {
   if (name !== "overview" && name !== "token") {
     const ok = await ensureApiGate();
     if (!ok) name = "overview";
+  }
+  if (name !== currentRoute) {
+    // The form stays filled in while hidden, so it must not read as dirty until
+    // the page has reloaded it on the next visit.
+    const leaving = pageForm(currentRoute);
+    if (leaving) leaving.clear();
+    currentRoute = name;
   }
   applyNavRestriction();
   await ensureUIPrefs();
@@ -75,8 +122,11 @@ export async function navigate(name) {
   const hqi = hraw.indexOf("?");
   const curPath = (hqi >= 0 ? hraw.slice(0, hqi) : hraw).replace(/^\//, "").split("/")[0] || "overview";
   if (curPath !== name) {
-    location.hash = "#/" + name;
+    selfSetHash = "#/" + name;
+    location.hash = selfSetHash;
+    state.hashNavParams = parseHashNavParams();
   }
+  committedHash = location.hash;
   if (name === "overview") {
     await refreshOverviewPage();
     restartOverviewEventsPolling();
@@ -148,6 +198,11 @@ function applyHashPeerRouteHighlight() {
 }
 
 export async function onHash() {
+  const isOwnHash = selfSetHash !== null && location.hash === selfSetHash;
+  selfSetHash = null;
+  // This page is already loading. A second load could land after the operator
+  // starts typing and overwrite their edits.
+  if (isOwnHash) return;
   const raw = (location.hash || "#/overview").replace(/^#/, "");
   const qi = raw.indexOf("?");
   const pathPart = qi >= 0 ? raw.slice(0, qi) : raw;

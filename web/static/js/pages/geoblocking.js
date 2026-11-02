@@ -8,9 +8,11 @@ import {
   readRateLimitFromForm,
 } from "../core/dom.js";
 import { api } from "../core/api.js";
+import { saveConfigEdit, ConfigMergeError } from "../core/config_save.js";
 import { parseSourceAllowListInput } from "../core/net.js";
 import { setGeoEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
-import { openModal, closeModal } from "../core/modal.js";
+import { openModal, closeModal, confirmDiscard, dismissModal, registerModalForm } from "../core/modal.js";
+import { registerPageForm } from "../core/dirty.js";
 import { refreshPendingBadge } from "./pending.js";
 
 async function refreshGeoZonesTable() {
@@ -90,7 +92,14 @@ function geoblockingFormSnapshotForCompare() {
     global_deny: parseSourceAllowListInput(($("geo-f-global-deny") && $("geo-f-global-deny").value) || "")
       .map((c) => c.toLowerCase())
       .sort(),
+    rate_limit: rateLimitForCompare(readRateLimitFromForm("geo")),
+    crowdsec: !!($("geo-f-crowdsec-enabled") && $("geo-f-crowdsec-enabled").checked),
   };
+}
+
+function rateLimitForCompare(rl) {
+  const r = rl || {};
+  return [r.tcp_syn_per_second || 0, r.max_conn_per_ip || 0, r.udp_per_second || 0];
 }
 
 function geoblockingServerSnapshotForCompare() {
@@ -115,21 +124,23 @@ function geoblockingServerSnapshotForCompare() {
       .map((c) => String(c).trim().toLowerCase())
       .filter(Boolean)
       .sort(),
+    rate_limit: rateLimitForCompare(fwd.rate_limit),
+    crowdsec: !!(state.lastConfig.crowdsec || {}).enabled,
   };
+}
+
+/** The one dirty state for this form: the indicator and the leave guard both read it. */
+function isGeoFormDirty() {
+  if (!state.geoFormLoaded) return false;
+  const srv = geoblockingServerSnapshotForCompare();
+  if (!srv) return false;
+  return JSON.stringify(geoblockingFormSnapshotForCompare()) !== JSON.stringify(srv);
 }
 
 function syncGeoUnsavedIndicator() {
   const el = $("geo-unsaved-msg");
   if (!el) return;
-  const srv = geoblockingServerSnapshotForCompare();
-  if (!srv) {
-    el.hidden = true;
-    el.textContent = "";
-    return;
-  }
-  const cur = geoblockingFormSnapshotForCompare();
-  const dirty = JSON.stringify(cur) !== JSON.stringify(srv);
-  if (dirty) {
+  if (isGeoFormDirty()) {
     el.hidden = false;
     el.textContent = "You have unsaved changes — click Save to write them to the server config.";
   } else {
@@ -158,6 +169,7 @@ async function geoAddDetectedIP() {
     const parts = parseSourceAllowListInput(bg.value);
     if (!parts.includes(cidr)) parts.push(cidr);
     bg.value = parts.join(", ");
+    syncGeoUnsavedIndicator();
     setGeoMsg("Added " + cidr + " to break-glass.");
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
@@ -279,7 +291,11 @@ function renderGeoTags() {
   syncGeoUnsavedIndicator();
 }
 
+/** geoFormOwnedJson of the config the form was filled from. */
+let geoFormBase = null;
+
 function geoFormFromConfig(cfg) {
+  geoFormBase = geoFormOwnedJson(cfg);
   const g = (cfg && cfg.geo) || {};
   const en = $("geo-f-enabled");
   const sn = $("geo-f-set-name");
@@ -304,8 +320,8 @@ function geoFormFromConfig(cfg) {
   state.geoSelectedCodes = Array.isArray(g.countries)
     ? g.countries.map((c) => String(c).trim().toLowerCase()).filter(Boolean)
     : [];
+  state.geoFormLoaded = true;
   renderGeoTags();
-  syncGeoUnsavedIndicator();
 }
 
 function openGeoCountryModal() {
@@ -378,10 +394,26 @@ function renderGeoModalList(filterRaw) {
   });
 }
 
+/** The parts of the config this form overwrites; everything else merges on a conflict. */
+function geoFormOwnedJson(cfg) {
+  const fwd = (cfg && cfg.forwarding) || {};
+  return JSON.stringify([
+    (cfg && cfg.geo) || {},
+    fwd.source_deny_cidrs || [],
+    fwd.rate_limit || {},
+    (cfg && cfg.crowdsec) || {},
+  ]);
+}
+
 /** Config that Save would write — used by Save and by the IP check preview. */
 function geoDraftFromForm() {
   if (!state.lastConfig) return null;
   const cfg = JSON.parse(JSON.stringify(state.lastConfig));
+  applyGeoFormTo(cfg);
+  return cfg;
+}
+
+function applyGeoFormTo(cfg) {
   if (!cfg.geo) cfg.geo = {};
   const g = cfg.geo;
   g.enabled = $("geo-f-enabled") && $("geo-f-enabled").checked;
@@ -399,21 +431,30 @@ function geoDraftFromForm() {
   const csOn = $("geo-f-crowdsec-enabled") && $("geo-f-crowdsec-enabled").checked;
   if (csOn) cfg.crowdsec = { enabled: true };
   else delete cfg.crowdsec;
-  return cfg;
 }
 
 async function saveGeoblocking() {
-  const cfg = geoDraftFromForm();
-  if (!cfg) return;
+  if (!state.lastConfig) return;
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      if (geoFormOwnedJson(c) !== geoFormBase) {
+        // Accept what is there now as the new base, so a second Save is a deliberate overwrite.
+        geoFormBase = geoFormOwnedJson(c);
+        throw new ConfigMergeError(
+          "Geoblocking settings were changed elsewhere, so your changes were not saved. " +
+            "Your values are still in the form: Save again to overwrite the other change, or Refresh to load it."
+        );
+      }
+      applyGeoFormTo(c);
+    });
+    geoFormBase = geoFormOwnedJson(cfg);
     setGeoMsg("Saved. Review Pending changes, then Apply to host.");
     setApiStatus(true);
     refreshPendingBadge();
     syncGeoUnsavedIndicator();
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
+    syncGeoUnsavedIndicator();
   }
 }
 
@@ -559,6 +600,13 @@ async function geoUpdateLists() {
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initGeoblockingPage() {
+  registerPageForm("geoblocking", {
+    isDirty: isGeoFormDirty,
+    clear() {
+      state.geoFormLoaded = false;
+      syncGeoUnsavedIndicator();
+    },
+  });
   const geoAddIP = $("geo-add-detected-ip");
   if (geoAddIP) geoAddIP.addEventListener("click", () => void geoAddDetectedIP());
 
@@ -567,7 +615,10 @@ export function initGeoblockingPage() {
     if (btn) btn.addEventListener("click", () => setGeoEditorTab(name));
   }
   $("geo-save").addEventListener("click", saveGeoblocking);
-  $("geo-refresh").addEventListener("click", () => void refreshGeoblockingPage());
+  $("geo-refresh").addEventListener("click", () => {
+    if (isGeoFormDirty()) confirmDiscard(() => refreshGeoblockingPage());
+    else void refreshGeoblockingPage();
+  });
   $("geo-update-lists").addEventListener("click", geoUpdateLists);
   const geoEn = $("geo-f-enabled");
   if (geoEn) geoEn.addEventListener("change", syncGeoUnsavedIndicator);
@@ -581,6 +632,12 @@ export function initGeoblockingPage() {
   if (geoBreakGlass) geoBreakGlass.addEventListener("input", syncGeoUnsavedIndicator);
   const geoGlobalDeny = $("geo-f-global-deny");
   if (geoGlobalDeny) geoGlobalDeny.addEventListener("input", syncGeoUnsavedIndicator);
+  for (const id of ["geo-f-rate-tcp-syn", "geo-f-rate-max-conn", "geo-f-rate-udp"]) {
+    const rateField = $(id);
+    if (rateField) rateField.addEventListener("input", syncGeoUnsavedIndicator);
+  }
+  const geoCrowdsec = $("geo-f-crowdsec-enabled");
+  if (geoCrowdsec) geoCrowdsec.addEventListener("change", syncGeoUnsavedIndicator);
   const geoModeBlock = $("geo-mode-block");
   const geoModeAllow = $("geo-mode-allow");
   if (geoModeBlock) {
@@ -598,9 +655,18 @@ export function initGeoblockingPage() {
   const geoTagsEdit = $("geo-tags-edit");
   if (geoTagsEdit) geoTagsEdit.addEventListener("click", openGeoCountryModal);
   const geoModalBackdrop = $("geo-modal-backdrop");
-  if (geoModalBackdrop) geoModalBackdrop.addEventListener("click", closeGeoCountryModal);
+  const geoCountryModal = $("geo-country-modal");
+  // The picker's draft lives in state, because search re-renders its checkboxes.
+  registerModalForm(geoCountryModal, () => {
+    const selected = new Set(state.geoSelectedCodes);
+    return (
+      selected.size !== state.geoModalDraft.size ||
+      Array.from(state.geoModalDraft).some((c) => !selected.has(c))
+    );
+  });
+  if (geoModalBackdrop) geoModalBackdrop.addEventListener("click", () => dismissModal(geoCountryModal));
   const geoModalCancel = $("geo-modal-cancel");
-  if (geoModalCancel) geoModalCancel.addEventListener("click", closeGeoCountryModal);
+  if (geoModalCancel) geoModalCancel.addEventListener("click", () => dismissModal(geoCountryModal));
   const geoModalSave = $("geo-modal-save");
   if (geoModalSave) {
     geoModalSave.addEventListener("click", () => {

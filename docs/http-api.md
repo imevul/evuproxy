@@ -72,7 +72,7 @@ All paths below are under **`/api/v1`** unless noted.
 
 | Method        | Path                                                            | Purpose                                                                                                                                                   |
 | ------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET` / `PUT` | `/config`                                                       | Read or replace full config. **`PUT`** accepts JSON, validates, writes **YAML** to disk; **does not** reload WireGuard/nftables until **`POST /reload`**. Does not modify **`config.yaml.bak`** or **`config.yaml.bak.N`**. |
+| `GET` / `PUT` | `/config`                                                       | Read or replace full config. **`PUT`** accepts JSON, validates, writes **YAML** to disk; **does not** reload WireGuard/nftables until **`POST /reload`**. Does not modify **`config.yaml.bak`** or **`config.yaml.bak.N`**. **`GET`** returns an **`ETag`**; **`PUT`** accepts **`If-Match`** and answers **409** on a stale revision (see [Config revisions](#config-revisions-etag--if-match)). |
 | `POST`        | `/config/discard`                                               | Replace **`config.yaml`** with **`config.yaml.bak`** when they differ (validates `.bak`). **400** if no `.bak`, already in sync, or invalid backup. Does not reload the host. |
 | `POST`        | `/config/restore-previous-applied`                              | Replace **`config.yaml`** with the first **`config.yaml.bak.N`** (`N` = 1…5) whose contents differ from **`config.yaml.bak`**. Does not rotate or modify any **`.bak*`** files. **400** if no such history entry or invalid YAML. Does not reload the host. |
 | `GET`         | `/pending`                                                      | Compare on-disk config to last successful apply. **`nftables`** is the **generated ruleset text** from the current on-disk config. **`nftables_baseline`** is the contents of **`generated/nftables.nft`** when **`os.ReadFile`** succeeds (typically the ruleset last written by **`POST /reload`**); if the file is missing or unreadable (permissions, I/O), it is an empty string. **`discard_available`**: **`config.yaml.bak`** exists and its raw bytes differ from **`config.yaml`**. **`restore_previous_applied_available`**: **`.bak`** exists and some **`.bak.N`** differs from **`.bak`**. |
@@ -109,6 +109,24 @@ All paths below are under **`/api/v1`** unless noted.
 | `lockout_risk_check_unavailable` | The client IPv4 address could not be detected, so the address-specific checks did not run. |
 
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
+
+### Config revisions (`ETag` / `If-Match`)
+
+**`PUT /config`** replaces the whole file, so a client holding an old copy would revert everything saved since it read it. Send a revision to detect that:
+
+- **`GET /config`** returns the current revision in the **`ETag`** response header (a quoted SHA-256 of **`config.yaml`**). The body is unchanged, so it can still be sent back as the **`PUT`** body. A successful **`PUT`** returns the new revision the same way.
+- **`PUT /config`** with **`If-Match: "<revision>"`** saves only if the file still has that revision. Otherwise it writes nothing and answers **HTTP 409** with **`error_code`:** `config_revision_mismatch`. Fetch the config again, reapply your change, and retry. The check runs before validation, so a stale draft gets **409** rather than **400**.
+- **`PUT /config`** with **no `If-Match`** (or **`If-Match: *`**) is an **unconditional save**: last write wins, exactly as before revisions existed. Existing scripts and automation keep working, but can overwrite concurrent changes, so send **`If-Match`** when other clients may be editing. A header that is present but names no revision gets **409**.
+
+Revisions hash the file, so anything that changes it moves the revision: **`evuproxy`** CLI commands, hand edits, **`POST /config/discard`**, **`POST /config/restore-previous-applied`**, **`POST /restore`**. **`POST /reload`** does not change it. Saving identical content produces the same revision.
+
+```bash
+etag=$(curl -sS -D - -o config.json -H "X-API-Token: $TOKEN" http://127.0.0.1:9847/api/v1/config | awk 'tolower($1)=="etag:" {print $2}' | tr -d '\r')
+# ...edit config.json...
+curl -sS -X PUT -H "X-API-Token: $TOKEN" -H "If-Match: $etag" -d @config.json http://127.0.0.1:9847/api/v1/config
+```
+
+The admin UI always sends **`If-Match`**. On **409** it reapplies the single edit (a switch, a row Remove, one form) to the fresh config and retries. If that edit no longer applies, for example because the same row changed elsewhere, it says so and leaves your input in place. With **`--cors-origins`**, **`If-Match`** is an allowed request header and **`ETag`** is exposed to the browser.
 
 Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**, **`route_target_peer_disabled`**, or **`config_invalid`**) with HTTP **400** in addition to **`error`**. **`route_target_peer_disabled`** means an enabled route’s `target_ip` does not match any non-disabled peer (common when disabling a peer that still has forwards).
 

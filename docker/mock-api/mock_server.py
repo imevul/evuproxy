@@ -297,6 +297,21 @@ def _disk_config_sha() -> str:
     return _config_sha(MOCK_CONFIG)
 
 
+def _config_etag() -> str:
+    return '"%s"' % _disk_config_sha()
+
+
+def _if_match_ok(values: list[str] | None) -> bool:
+    """Match parseIfMatch: no header or * is unconditional; otherwise some tag must be current."""
+    if not values:
+        return True
+    tags = [t.strip() for v in values for t in v.split(",")]
+    if "*" in tags:
+        return True
+    current = _disk_config_sha()
+    return any(t.removeprefix("W/").strip('"') == current for t in tags)
+
+
 def _mock_record_applied_snapshot() -> None:
     """Match RecordAppliedConfigSnapshot: rotate .bak chain when applied config differs from .bak."""
     global MOCK_BAK, MOCK_BAK_SLOTS
@@ -1096,11 +1111,15 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         print("%s - %s" % (self.address_string(), fmt % args))
 
-    def _send_json(self, code: int, body: object) -> None:
+    def _send_json(
+        self, code: int, body: object, headers: dict[str, str] | None = None
+    ) -> None:
         data = json.dumps(body).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -1137,7 +1156,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/v1/overview":
             return self._send_json(200, _overview_from_config(MOCK_CONFIG))
         if path == "/api/v1/config":
-            return self._send_json(200, copy.deepcopy(MOCK_CONFIG))
+            return self._send_json(
+                200,
+                copy.deepcopy(MOCK_CONFIG),
+                {"ETag": _config_etag(), "Cache-Control": "no-store"},
+            )
         if path == "/api/v1/metrics":
             return self._send_json(
                 200,
@@ -1310,6 +1333,14 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             return self._send_json(400, {"error": "invalid json body"})
         global MOCK_CONFIG
+        if not _if_match_ok(self.headers.get_all("If-Match")):
+            return self._send_json(
+                409,
+                {
+                    "error": "configuration changed since it was loaded; fetch it again and reapply your change",
+                    "error_code": "config_revision_mismatch",
+                },
+            )
         MOCK_CONFIG = copy.deepcopy(body)
         _persist_mock_config()
         return self._send_json(
@@ -1318,6 +1349,7 @@ class Handler(BaseHTTPRequestHandler):
                 "result": "saved",
                 "hint": "Review and apply from GET /api/v1/pending or POST /api/v1/reload",
             },
+            {"ETag": _config_etag()},
         )
 
     def do_POST(self) -> None:
