@@ -695,6 +695,67 @@ held "cat >/etc/evuproxy/config.yaml" < <(write_config "$PANEL_RULES" baseline)
 held evuproxy reload || die "recovery"
 close_held_shell
 
+log "=== 16. The geo timer doesn't load unapplied countries ==="
+scp_vm /templates/evuproxy-geo.service root@127.0.0.1:/etc/systemd/system/ || die "copy geo unit"
+vm systemctl daemon-reload
+# $1: countries. $2: comment. $3: confirm setting. Small zones, to go easy on IPDeny.
+put_geo_config() {
+	write_config "$OPEN_RULES" "$2" |
+		sed "s/^  enabled: false/  enabled: true\n  countries: [$1]\n  zone_dir: \/etc\/evuproxy\/geo-zones/; s/confirm: true/confirm: $3/" |
+		vm "cat >/etc/evuproxy/config.yaml"
+}
+live_geo() { vm nft list set inet evuproxy geo_v4; }
+run_geo_unit() { vm systemctl start evuproxy-geo.service; }
+geo_unit_warned() { vm "journalctl -n 20 --no-pager -u evuproxy-geo.service | grep -q 'unapplied geo changes'"; }
+put_geo_config li baseline-li true
+vm evuproxy reload || die "geo baseline reload (needs ipdeny.com)"
+before=$(live_geo)
+log "live set before: $(wc -l <<<"$before") lines"
+check "the applied country is in the live set" test -n "$before"
+
+put_geo_config ad saved-ad true
+check "evuproxy-geo.service succeeds" run_geo_unit
+check "the live sets don't change" test "$(live_geo)" = "$before"
+check "the journal says what it left out" geo_unit_warned
+check "config.yaml still holds the edit" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# saved-ad"
+check "config.yaml.bak is still the applied config" test "$(vm tail -1 /etc/evuproxy/config.yaml.bak)" = "# baseline-li"
+check "the held-back zone is on disk for the next Apply" vm test -s /etc/evuproxy/geo-zones/ad.zone
+
+resp=$(api -X POST "$api_url/update-geo")
+log "POST /update-geo: $resp"
+check "POST /update-geo reports the held-back change" test "$(jq -r .geo_changes_held_back <<<"$resp")" = true
+check "and leaves the live sets alone" test "$(live_geo)" = "$before"
+check "a hand-run update-geo succeeds" vm evuproxy update-geo
+check "and leaves the live sets alone" test "$(live_geo)" = "$before"
+
+check "an Apply is what changes them" vm evuproxy reload
+applied=$(live_geo)
+check "the sets really differ, so the checks above mean something" test "$applied" != "$before"
+resp=$(api -X POST "$api_url/update-geo")
+check "nothing is held back now" test "$(jq -r .geo_changes_held_back <<<"$resp")" = false
+
+put_geo_config li saved-li-in-window true
+api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":20}' >/dev/null
+check "a session is waiting" test "$(session_phase)" = active
+in_window=$(live_geo)
+check "POST /update-geo is refused in the window" test "$(api -o /dev/null -w '%{http_code}' -X POST "$api_url/update-geo")" = 409
+vm systemctl start evuproxy-geo.service 2>/dev/null
+check "so is evuproxy-geo.service" test $? -ne 0
+check "the window's live sets are left alone" test "$(live_geo)" = "$in_window"
+sleep 25
+check "its timer still reverts" test "$(session_phase)" = none
+check "to the sets of the last confirmed config" test "$(live_geo)" = "$applied"
+
+vm systemctl reset-failed evuproxy-geo.service
+put_geo_config li confirm-off-baseline false
+vm evuproxy reload || die "confirm-off geo reload"
+off_before=$(live_geo)
+put_geo_config ad confirm-off-edit false
+check "confirm off: evuproxy-geo.service succeeds" run_geo_unit
+check "confirm off: config.yaml's countries go live, as before" test "$(live_geo)" = "$applied"
+check "confirm off: which is a change" test "$(live_geo)" != "$off_before"
+reset_host baseline
+
 log "=== RESULT: $failures failed ==="
 if [ "$failures" -ne 0 ]; then
 	vm journalctl --no-pager -n 40 -u 'evuproxy*' || true

@@ -3,6 +3,8 @@ package apply
 import (
 	"context"
 	"net"
+
+	"github.com/imevul/evuproxy/internal/config"
 )
 
 // CommandRunner mirrors the internal subprocess seam so tests in other
@@ -27,6 +29,13 @@ func SwapWireGuardConfigDirForTest(dir string) (restore func()) {
 	prev := wireguardConfigDir
 	wireguardConfigDir = dir
 	return func() { wireguardConfigDir = prev }
+}
+
+// SwapGeoZoneDownloadForTest keeps zone downloads off the network. Test use only.
+func SwapGeoZoneDownloadForTest(fn func(ctx context.Context, c *config.Config) error) (restore func()) {
+	prev := downloadGeoZones
+	downloadGeoZones = fn
+	return func() { downloadGeoZones = prev }
 }
 
 // SwapSystemdNetworkDirForTest redirects Unmanaged=yes drop-in writes. Test use only.

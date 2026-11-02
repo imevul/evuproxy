@@ -94,6 +94,13 @@ export function applyErrorText(e) {
   return text === "reload failed" ? "Apply failed" : text;
 }
 
+/** The toast for a POST /update-geo answer. With confirm on, it leaves unapplied geo changes out. */
+export function geoUpdatedMessage(res) {
+  return res && res.geo_changes_held_back
+    ? "Geo lists updated. Your unapplied geo changes go live when you Apply."
+    : "Geo lists updated on host";
+}
+
 /** What last loaded the geo lists. The API records an Apply as "reload". */
 export function geoSourceLabel(source) {
   return source === "reload" ? "Apply" : source;
