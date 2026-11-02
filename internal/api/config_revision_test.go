@@ -9,7 +9,57 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/imevul/evuproxy/internal/state"
 )
+
+func TestPending_appliedConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "c.yaml")
+	writeMinimalConfigPort(t, cfgPath, 51829)
+	s := &Server{Token: "tok", Config: cfgPath, Listen: "127.0.0.1:0"}
+	ts := httptest.NewServer(s.Routes())
+	t.Cleanup(ts.Close)
+
+	pending := func() map[string]any {
+		t.Helper()
+		resp := doAuthed(t, http.MethodGet, ts.URL+"/api/v1/pending", "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET /pending status %d", resp.StatusCode)
+		}
+		return decodeJSONMap(t, resp)
+	}
+
+	// The key is present and null, so the UI can tell this from an API older than the field.
+	got, present := pending()["applied_config"]
+	if !present || got != nil {
+		t.Fatalf("applied_config = %v (present %v), want null before any apply", got, present)
+	}
+
+	if err := state.RecordAppliedConfigHash(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.RecordAppliedConfigSnapshot(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	writeMinimalConfigPort(t, cfgPath, 51830)
+
+	m := pending()
+	if m["pending"] != true {
+		t.Fatal("expected pending after saving over the applied config")
+	}
+	applied, ok := m["applied_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("applied_config = %v, want an object", m["applied_config"])
+	}
+	// Same field names as GET /config, which holds the saved side of the comparison.
+	_, cfg := getConfigRevision(t, ts.URL)
+	if port := cfg["wireguard"].(map[string]any)["listen_port"]; port != float64(51830) {
+		t.Fatalf("GET /config listen_port = %v, want the saved 51830", port)
+	}
+	if port := applied["wireguard"].(map[string]any)["listen_port"]; port != float64(51829) {
+		t.Fatalf("applied_config listen_port = %v, want the applied 51829", port)
+	}
+}
 
 func getConfigRevision(t *testing.T, base string) (etag string, cfg map[string]any) {
 	t.Helper()

@@ -6,6 +6,49 @@
   margin-top: 0.75rem;
 }
 
+.pending-changes {
+  margin-top: 1rem;
+}
+
+.pending-changes-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.pending-change {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--evu-border);
+}
+
+.pending-change:last-child {
+  border-bottom: 1px solid var(--evu-border);
+}
+
+/* Peer names and CIDR lists can be long and unbroken. */
+.pending-change__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pending-change .evu-btn {
+  flex: none;
+}
+
+.pending-raw-diff {
+  margin-top: 1rem;
+}
+
+.pending-raw-diff > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.25rem 0;
+}
+
 .pending-validate-panel {
   margin: 0 0 1rem;
 }

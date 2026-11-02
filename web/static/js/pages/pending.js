@@ -7,6 +7,9 @@ import { showToast } from "../core/toast.js";
 import { setTitlePendingCount } from "../core/title.js";
 import { openConfirmModal } from "../core/modal.js";
 import { fetchValidateResult, lockoutRisks, lockoutSignature } from "../core/lockout.js";
+import { saveConfigEdit } from "../core/config_save.js";
+import { describeConfigChanges, revertChange, reapplyChange } from "../core/config_changes.js";
+import { showUndoToast } from "../core/undo.js";
 
 /**
  * One warning or error from /validate.
@@ -523,6 +526,108 @@ function changeCount(n) {
   return n === 1 ? "1 change" : n + " changes";
 }
 
+/** What the Changes list is showing, by position. Revert buttons refer to these. */
+let listedChanges = [];
+/** One revert at a time: the list re-renders after each, so positions would move. */
+let revertBusy = false;
+
+function setChangesMsg(text, isErr) {
+  const el = $("pending-changes-msg");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("err", !!isErr);
+}
+
+/**
+ * `applied_config` is null when the host's config is not known, and absent on an API
+ * older than this UI (the two deploy separately). The rules diff is then the only review,
+ * so it opens by itself.
+ */
+function renderChangesList(p, cfg) {
+  const section = $("pending-changes");
+  const list = $("pending-changes-list");
+  const note = $("pending-changes-note");
+  const rawDiff = $("pending-raw-diff");
+  if (!section || !list || !note) return;
+  const comparable = !!p.applied_config;
+  listedChanges = p.pending && comparable ? describeConfigChanges(p.applied_config, cfg) : [];
+  list.innerHTML = "";
+  listedChanges.forEach((change, i) => {
+    const li = document.createElement("li");
+    li.className = "pending-change";
+    const text = document.createElement("span");
+    text.className = "pending-change__text";
+    text.textContent = change.text;
+    const revert = document.createElement("button");
+    revert.type = "button";
+    revert.className = "evu-btn evu-btn--outline evu-btn--sm";
+    revert.textContent = "Revert";
+    revert.setAttribute("aria-label", "Revert: " + change.text);
+    revert.dataset.changeRevert = String(i);
+    li.append(text, revert);
+    list.appendChild(li);
+  });
+  section.classList.toggle("is-hidden", !p.pending);
+  list.classList.toggle("is-hidden", !listedChanges.length);
+  note.classList.toggle("is-hidden", !p.pending || !!listedChanges.length);
+  if (p.pending && !comparable) {
+    note.textContent =
+      "The config last applied to this host is not available to compare, so changes cannot be listed. Review the generated nftables below.";
+  } else if (p.pending) {
+    note.textContent = "The saved settings match what was applied. Only comments or formatting in the file differ.";
+  }
+  if (rawDiff && p.pending && !comparable) rawDiff.open = true;
+}
+
+/**
+ * Where focus goes once a row has left the list: the row now in its place, else the heading.
+ * With nothing left pending the Changes section is hidden and cannot take focus, so the page heading does.
+ */
+function focusChangeAt(index) {
+  const buttons = document.querySelectorAll("#pending-changes-list [data-change-revert]");
+  const heading = $("pending-changes").classList.contains("is-hidden") ? "pending-page-title" : "pending-changes-title";
+  const target = buttons[Math.min(index, buttons.length - 1)] || $(heading);
+  if (target) target.focus();
+}
+
+async function afterChangesSaved(focusIndex) {
+  await refreshPendingPage();
+  await refreshPendingBadge();
+  if (focusIndex !== null) focusChangeAt(focusIndex);
+}
+
+async function revertListedChange(index) {
+  const change = listedChanges[index];
+  if (revertBusy || !change) return;
+  revertBusy = true;
+  setChangesMsg("");
+  try {
+    let reverted = false;
+    await saveConfigEdit((draft) => {
+      reverted = revertChange(draft, change);
+      return reverted;
+    });
+    setApiStatus(true);
+    await afterChangesSaved(index);
+    if (!reverted) {
+      showToast("Already gone: " + change.text + ".");
+      return;
+    }
+    showUndoToast("Reverted: " + change.text + ".", {
+      page: "pending",
+      edit: (draft) => reapplyChange(draft, change),
+      afterSave: (_cfg, focus) => void afterChangesSaved(focus ? index : null),
+      message: () => "Back in place: " + change.text + ".",
+    });
+  } catch (e) {
+    // The save may have adopted fresh config, and this message has no time limit, unlike a toast.
+    await afterChangesSaved(index);
+    setChangesMsg("Could not revert: " + String(e.message || e), true);
+  } finally {
+    revertBusy = false;
+  }
+}
+
 /** Counts for a confirmation, fresh because the page may be stale. The dialog can go without them. */
 async function fetchPendingCounts() {
   try {
@@ -584,13 +689,16 @@ export async function refreshPendingPage() {
   const panel = $("pending-diff-panel");
   if (!status || !panel) return;
   setPendingMsg("");
+  setChangesMsg("");
   // The config may have changed since the last check (another tab, another
   // page in this one, or an apply that just landed).
   invalidatePendingValidate();
-  const doneLoading = beginLoading("pending-diff-panel");
+  const doneLoading = beginLoading("pending-changes-list", "pending-diff-panel");
   try {
-    const p = await api("/v1/pending");
+    const [p, cfg] = await Promise.all([api("/v1/pending"), api("/v1/config")]);
+    state.lastConfig = cfg;
     setApiStatus(true);
+    renderChangesList(p, cfg);
     if (p.pending) {
       status.textContent =
         "Unapplied changes: the saved config on disk differs from the last successful Apply (nftables / WireGuard).";
@@ -612,6 +720,7 @@ export async function refreshPendingPage() {
     setPendingStatusTone("hidden");
     state.lastPendingBaseline = "";
     state.lastPendingNew = "";
+    renderChangesList({ pending: false });
     const discardErr = $("pending-discard");
     if (discardErr) discardErr.disabled = true;
     const restoreErr = $("pending-restore-previous");
@@ -627,6 +736,10 @@ export async function refreshPendingPage() {
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initPendingPage() {
   $("pending-refresh").addEventListener("click", refreshPendingPage);
+  $("pending-changes-list").addEventListener("click", (e) => {
+    const revert = e.target.closest("[data-change-revert]");
+    if (revert) void revertListedChange(+revert.dataset.changeRevert);
+  });
   const pendingModeUnified = $("pending-mode-unified");
   const pendingModeSplit = $("pending-mode-split");
   if (pendingModeUnified) {
