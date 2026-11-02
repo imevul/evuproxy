@@ -8,7 +8,7 @@ From the repo root, on Linux with Docker and Go 1.25+:
 make e2e
 ```
 
-It takes about a minute and runs automatically on every pull request and push to `main` (`.github/workflows/e2e.yml`). To run one scenario, use `devtools/e2e/run.sh smoke`. It exits with the number of failed checks, or `100` if it could not run or refused to.
+It takes about a minute and runs automatically on every pull request and push to `main` (`.github/workflows/e2e.yml`). To run one scenario, use `devtools/e2e/run.sh smoke`. The heavier [stress test](#stress-test) is separate. It exits with the number of failed checks, or `100` if it could not run or refused to.
 
 ## Never on a production host
 
@@ -43,7 +43,7 @@ The two WAN addresses stand in for clients in two countries. Geo zones `xa` and 
 
 ## Adding a scenario
 
-Each `scenarios/<name>.sh` gets a fresh topology and is picked up automatically. `harness.sh` has the helpers:
+Each `scenarios/<name>.sh` gets a fresh topology and is picked up automatically. A scenario too heavy for every pull request goes in `on-demand/<name>.sh` instead, and only runs when named. `harness.sh` has the helpers:
 
 | Helper | What it does |
 | ------ | ------------ |
@@ -85,3 +85,47 @@ check "the forward answers" reaches "tcp-ok" tcp_reply wan "$CLIENT_IN_ZONE" "$P
 With `AllowedIPs = 0.0.0.0/0` the LAN stays reachable anyway, because connected routes win. The route and `AllowedIPs` checks are what fail then, not the LAN probes.
 
 `devtools/rollback-vm` covers what this can't, because it needs systemd and reboots: confirm-or-revert. The container has no `systemd-run`, so this harness never turns on `apply.confirm`.
+
+## Stress test
+
+```bash
+make e2e-stress
+```
+
+Rate limits and CrowdSec drops under load, with legitimate clients running alongside. It takes a little over two minutes and needs no more than the smoke test does. All load stays inside the container: `on-demand/stress.sh` drives `loadgen/`, which only sends from `wan` through `proxy` to `peer`, and those namespaces have no route out.
+
+It isn't part of `make e2e`, because it takes longer and depends on timing. `.github/workflows/e2e-stress.yml` runs it on demand from the Actions tab, and on pull requests that change `devtools/e2e`, the nftables generator or the ban restore. That job lists every measurement in its summary. Locally, each one is a `RESULT` line in the output: name, measured value and allowed range.
+
+### Thresholds
+
+They are set at the top of `on-demand/stress.sh`, and the run fails if any is missed. The limits are 20 SYN/s with a burst of 40, 100 UDP datagrams/s with a burst of 100, and 5 connections per source. Floods run for 6 seconds at ten times the limit.
+
+| What | Allowed | Measured |
+| ---- | ------- | -------- |
+| Harness with no limits, 200 TCP/s and 1000 UDP/s answered | at least 99% | 100% |
+| TCP flood from one source answered, where rate × time + burst is 160 | 108 to 176 | 159 |
+| UDP flood from one source answered, where rate × time + burst is 700 | 540 to 770 | 699 |
+| TCP flood from 20 sources answered, where the cap is 3200 | 2160 to 3520 | 3180 |
+| Legitimate client beside any flood, ban or reload | at least 95% answered | 100% |
+| A flood's source once it stops | at least 95% answered | 100% |
+| Break-glass source flooding TCP | at least 99% answered | 100% |
+| Connections or UDP flows a source gets with `max_conn_per_ip: 5`, and that stay usable | exactly 5 | 5 |
+| Another source's connections while the first is at its limit | exactly 5 of 5 | 5 |
+| Banned source, from 2 seconds after the ban, UDP and new TCP | 0 | 0 |
+| Banned source's datagrams during a reload, at 1000/s | at most 100 | 7 to 27 |
+| Banned source, from 2 seconds after that reload | 0 | 0 |
+| Traffic after an unban, or after a timed ban expires | at least 95% and 99% | 100% |
+| UDP at 1000/s with 10000 bans in the set | at least 99% answered | 100% |
+
+### How much variation to expect
+
+Almost none in the rate limits, because the kernel's token bucket is exact and the load is paced. Ten runs on an 8-core machine gave the same flood numbers every time, including three runs at once with other jobs on the machine.
+
+The one number that moves is the reload gap, because it depends on how long `evuproxy reload` takes between replacing the table and restoring the bans. Slower CI runners may move more than this machine did, so the bands are left wider than these runs needed: 10% around floods and 5% on legitimate traffic. A failure in the baseline row means the machine couldn't carry the load, so ignore the rest of that run. A flood total outside its band with a good baseline is a real change in the rules.
+
+### What it doesn't cover
+
+- **CrowdSec itself.** It needs the Hub and a journal, so the scenario adds bans to `crowdsec_block_v4` directly, as the bouncer does. Deciding to ban, and the bouncer's polling, aren't tested.
+- **Log volume.** Rate-limit and CrowdSec drops log every packet with no limit of their own. The kernel doesn't log from a network namespace by default, so that cost isn't measured here.
+- **The `input` chain.** Forwarded traffic is measured. The same rules on `input` come after its early established accept and aren't load tested.
+- **Other kernels.** It only checks the kernel it runs on. The numbers above are from 7.0 with nftables 1.0.6.

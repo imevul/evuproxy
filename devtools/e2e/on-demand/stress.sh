@@ -29,7 +29,7 @@ LEGIT_MIN_PCT=95   # of a legitimate client's attempts, through any flood
 BASELINE_MIN_PCT=99 # of the flood itself with no limits: the harness can carry this load
 # Seconds of a run to skip after a ban or reload before asserting on it.
 SETTLE_SECONDS=2
-# Banned datagrams that may pass during a reload: 100ms of the flood. Measured at under 10.
+# Banned datagrams that may pass during a reload: 100ms of the flood. Measured at 7 to 27.
 RELOAD_GAP_MAX=$((UDP_FLOOD / 10))
 
 ATTACKER=$CLIENT_OUT_OF_ZONE
