@@ -138,10 +138,10 @@
                   <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                 </label>
               </div>
-              <p class="meta">When on, public forwards are omitted until you turn this off and reload.</p>
+              <p class="meta">When on, public forwards are omitted until you turn this off and Apply.</p>
             </div>
             <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="btn-reload">Reload config</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="btn-apply">Apply</button>
               <button type="button" class="evu-btn evu-btn--outline" id="btn-geo">Update geo lists</button>
             </div>
             <p id="overview-action-msg" class="msg" aria-live="polite"></p>
@@ -399,7 +399,7 @@
           </button>
         </div>
         <p class="hint">
-          Tunnel endpoints and WireGuard keys for each client. Saves write server YAML; use <strong>Pending changes</strong> to reload the tunnel and firewall rules.
+          Tunnel endpoints and WireGuard keys for each client. Save writes server YAML; <strong>Apply</strong> from <strong>Pending changes</strong> to update the tunnel and firewall rules.
         </p>
         <div class="evu-card card">
           <div class="toolbar">
@@ -606,7 +606,7 @@
           </button>
         </div>
         <p class="hint">
-          WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily; edits apply after <strong>Pending changes</strong> → Apply/reload.
+          WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily; edits take effect after <strong>Apply</strong> on <strong>Pending changes</strong>.
         </p>
         <div class="evu-card card">
           <div class="toolbar">
@@ -1249,10 +1249,10 @@
           </div>
           <div class="toolbar pending-toolbar">
             <button type="button" class="evu-btn evu-btn--outline" id="pending-check-config">Check config</button>
-            <button type="button" class="evu-btn evu-btn--primary" id="pending-apply">Apply to host</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="pending-apply">Apply</button>
             <button type="button" class="evu-btn evu-btn--outline" id="pending-discard" disabled>Discard pending</button>
             <button type="button" class="evu-btn evu-btn--danger-outline" id="pending-restore-previous" disabled>Restore previous applied</button>
-            <button type="button" class="evu-btn evu-btn--outline" id="pending-refresh">Refresh preview</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="pending-refresh">Refresh</button>
           </div>
           <div id="pending-validate-panel" class="evu-alert pending-validate-panel is-hidden" role="group" aria-labelledby="pending-validate-title">
             <div class="evu-alert__body pending-validate-body">
@@ -1532,7 +1532,7 @@
 
     <template id="help-peers-intro">
       <div class="help-modal-body">
-        <p>Saves write YAML on the server only; reload WireGuard and nftables from <strong>Pending changes</strong> when ready.</p>
+        <p>Save writes YAML on the server only; <strong>Apply</strong> from <strong>Pending changes</strong> to update WireGuard and nftables when ready.</p>
         <p>
           <strong>Status:</strong> from host handshake time — roughly <strong>Online</strong> if the latest handshake was within about three minutes, otherwise stale/offline;
           <strong>Unknown</strong> if statistics are unavailable.
@@ -1547,9 +1547,9 @@
       <div class="help-modal-body">
         <p>Routes are <code class="inline">forwarding.routes</code>: WAN TCP/UDP ports mapped to a peer <strong>tunnel IPv4 host</strong>.</p>
         <p>
-          Turning <strong>Enabled</strong> off keeps the route in config but omits it from generated nftables until you enable it again, then Apply/reload.
+          Turning <strong>Enabled</strong> off keeps the route in config but omits it from generated nftables until you enable it again, then Apply.
         </p>
-        <p><strong>Source allowlist</strong> limits which WAN IPv4 sources may reach the forwarded port (<strong>Apply to host</strong> required).</p>
+        <p><strong>Source allowlist</strong> limits which WAN IPv4 sources may reach the forwarded port (<strong>Apply</strong> required).</p>
         <p>
           Geoblocking in <strong>block</strong> mode evaluates country-drop rules before these forwards — a blocked-country source can still be dropped even if allowlisted here.
         </p>
@@ -1577,10 +1577,10 @@
           activity from <code class="inline">state/events.jsonl</code>.
         </p>
         <p>
-          <strong>Reload config</strong> re-applies the saved config to nftables and WireGuard — the same action as Apply on <strong>Pending changes</strong>, including the
+          <strong>Apply</strong> writes the saved config to nftables and WireGuard — the same action as Apply on <strong>Pending changes</strong>, including the
           pre-apply check, so it asks you to confirm if the config could cut off your own access. <strong>Update geo lists</strong> refreshes the on-disk country zone files.
         </p>
-        <p><strong>Maintenance mode</strong> keeps every route in config but omits public forwards from the generated rules until you turn it off and reload.</p>
+        <p><strong>Maintenance mode</strong> keeps every route in config but omits public forwards from the generated rules until you turn it off and Apply.</p>
       </div>
     </template>
 
@@ -1626,7 +1626,7 @@
           is the diff between what is saved and what the host is running.
         </p>
         <p>
-          <strong>Check config</strong> validates the pending ruleset and reports anything that could lock you out of this host; <strong>Apply to host</strong> runs it
+          <strong>Check config</strong> validates the pending ruleset and reports anything that could lock you out of this host; <strong>Apply</strong> runs it
           for real. <strong>Discard pending</strong> throws away unapplied edits and <strong>Restore previous applied</strong> rolls back to the last known-good config.
         </p>
       </div>
@@ -1640,7 +1640,7 @@
         </p>
         <p>
           <strong>nftables counters</strong> lists the packet and byte counters attached to the generated rules, which is the quickest way to confirm a forward or a
-          drop rule is actually being hit. Counters reset when the ruleset is reloaded.
+          drop rule is actually being hit. Counters reset on every Apply.
         </p>
       </div>
     </template>
@@ -1702,7 +1702,7 @@
           Both lists take comma or whitespace separated WAN IPv4 addresses and CIDRs, and apply to this route only. The denylist is evaluated first, then the allowlist,
           then geoblocking, then forwarding.
         </p>
-        <p>An empty allowlist means any source. A non-empty one drops everything else, so a typo here is enough to make the service unreachable — the entries take effect on <strong>Apply to host</strong>.</p>
+        <p>An empty allowlist means any source. A non-empty one drops everything else, so a typo here is enough to make the service unreachable — the entries take effect on <strong>Apply</strong>.</p>
       </div>
     </template>
 
@@ -1731,7 +1731,7 @@
           The public address peers dial to reach this VPN — <code class="inline">host:port</code> or <code class="inline">hostname:port</code>. It is pre-filled when you
           create a peer.
         </p>
-        <p>The port can be omitted if it matches the server listen port, once you have refreshed server details on Overview.</p>
+        <p>The port can be omitted if it matches the server listen port, once server details have loaded on Overview.</p>
         <p>
           Use an address peers can reach with <strong>UDP</strong> on the WireGuard listen port. Do not put a Cloudflare
           <strong>orange-cloud</strong> (proxied) hostname here — DNS will resolve to Cloudflare anycast instead of this VPS, and clients will show
@@ -1767,8 +1767,8 @@
     <template id="help-enabled-omit-nftables">
       <div class="help-modal-body">
         <p>
-          Turning <strong>Enabled</strong> off keeps this entry in the server YAML but omits it from generated nftables until you turn it on again and reload firewall
-          rules from <strong>Pending changes</strong> (Apply/reload).
+          Turning <strong>Enabled</strong> off keeps this entry in the server YAML but omits it from generated nftables until you turn it on again and
+          <strong>Apply</strong> from <strong>Pending changes</strong>.
         </p>
       </div>
     </template>
@@ -1776,8 +1776,8 @@
     <template id="help-enabled-omit-wireguard">
       <div class="help-modal-body">
         <p>
-          Turning <strong>Enabled</strong> off keeps this peer in the server YAML but omits them from WireGuard until you turn it on again and reload the tunnel from
-          <strong>Pending changes</strong>.
+          Turning <strong>Enabled</strong> off keeps this peer in the server YAML but omits them from WireGuard until you turn it on again and
+          <strong>Apply</strong> from <strong>Pending changes</strong>.
         </p>
       </div>
     </template>

@@ -301,7 +301,7 @@ test.describe("draft edits act at once and offer Undo", () => {
 
     await page.locator("label:has(#overview-maintenance-toggle)").click();
 
-    await expect(toast(page)).toContainText("Public port forwards stop when you Reload");
+    await expect(toast(page)).toContainText("Public port forwards stop when you Apply");
     expect((await fetchConfig(request)).forwarding.maintenance_mode).toBe(true);
 
     await undo(page).click();

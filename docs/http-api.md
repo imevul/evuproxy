@@ -98,7 +98,7 @@ All paths below are under **`/api/v1`** unless noted.
 | `POST`        | `/peers/onboard-bundle`                                         | Build an **EVUB** onboarding blob (JSON body: `passphrase`, `peer_private_key`, `peer_tunnel_address`, `server_public_key`, `endpoint`, `allowed_ips`, optional `interface_name`). Returns `{blob_base64}`. Same HTTP caveat as keypair generation. |
 
 
-**`POST /validate` lockout risks:** warnings whose **`code`** starts with **`lockout_risk_`** must be acknowledged in the UI before Apply or Reload config. Nothing on the server refuses the reload.
+**`POST /validate` lockout risks:** warnings whose **`code`** starts with **`lockout_risk_`** must be acknowledged in the UI before Apply. Nothing on the server refuses the reload.
 
 | Code | Meaning |
 |------|---------|

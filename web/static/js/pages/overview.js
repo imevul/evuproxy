@@ -1,6 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiNotConnected, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
-import { eventLabel, timeHtml } from "../core/format.js";
+import { applyErrorText, eventDetail, eventLabel, geoSourceLabel, timeHtml } from "../core/format.js";
 import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
 import { showToast } from "../core/toast.js";
@@ -119,7 +119,7 @@ export async function refreshOverviewEventsList() {
           "</strong> · <span class=\"overview-ev-ts\">" +
           timeHtml(e.ts) +
           "</span>" +
-          (e.detail ? " — " + escapeHtml(e.detail) : "") +
+          (eventDetail(e) ? " — " + escapeHtml(eventDetail(e)) : "") +
           (e.error_code ? " <code class=\"inline\">" + escapeHtml(e.error_code) + "</code>" : "") +
           "</li>"
       )
@@ -624,7 +624,7 @@ function overviewHostGeoCard(o) {
 
     if (src) {
       const srcSpan = document.createElement("span");
-      srcSpan.textContent = "Source: " + src;
+      srcSpan.textContent = "Source: " + geoSourceLabel(src);
       meta.appendChild(srcSpan);
     }
 
@@ -685,7 +685,7 @@ function overviewHostGeoCard(o) {
 function appendApplySummary(root, evs) {
   const line = document.createElement("p");
   line.className = "meta";
-  line.textContent = "No recent reload or geo events in the last fetch.";
+  line.textContent = "No recent apply or geo events in the last fetch.";
   root.appendChild(line);
   const list = evs || [];
   for (const e of list) {
@@ -699,10 +699,10 @@ function appendApplySummary(root, evs) {
       ev === "restore_ok"
     ) {
       line.innerHTML = escapeHtml(eventLabel(ev)) + " · " + timeHtml(e.ts);
-      if (e.detail) {
+      if (eventDetail(e)) {
         const detail = document.createElement("p");
         detail.className = "meta";
-        detail.textContent = e.detail;
+        detail.textContent = eventDetail(e);
         root.appendChild(detail);
       }
       break;
@@ -870,7 +870,7 @@ function buildOverviewAttentionItems(cfg, o, st, met) {
     items.push("Geoblocking is on but geo zone files have never loaded successfully on this host.");
   }
   if (cfg && cfg.forwarding && cfg.forwarding.maintenance_mode) {
-    items.push("Maintenance mode is on — public forwards are disabled until you turn it off and reload.");
+    items.push("Maintenance mode is on — public forwards are disabled until you turn it off and Apply.");
   }
   for (const r of routes) {
     if (r.source_allow_cidrs && r.source_allow_cidrs.length) {
@@ -987,8 +987,8 @@ export function initOverviewPage() {
       };
       const confirmation = (value) =>
         value
-          ? "Maintenance mode saved. Public port forwards stop when you Reload."
-          : "Maintenance mode off. Reload to restore forwards.";
+          ? "Maintenance mode saved. Public port forwards stop when you Apply."
+          : "Maintenance mode off. Apply to restore forwards.";
       setOverviewMsg("…");
       try {
         await saveConfigEdit(saveMaintenance(on));
@@ -1012,12 +1012,12 @@ export function initOverviewPage() {
     });
   }
 
-  const reloadBtn = $("btn-reload");
+  const applyBtn = $("btn-apply");
   // Same host-mutating endpoint as Apply on Pending changes, so it gets the same
   // lockout gate. Leaving this one ungated would make the gate decorative —
   // maintenance mode is itself a lockout risk, and the copy next to this button
   // tells the operator to press it.
-  async function reloadWithLockoutCheck() {
+  async function applyWithLockoutCheck() {
     setOverviewMsg("Checking config…");
     const { res, error } = await fetchValidateResult();
     if (!res) {
@@ -1031,27 +1031,27 @@ export function initOverviewPage() {
     const risks = lockoutRisks(res);
     if (risks.length) {
       const ip = res.detected_client_ip || "unknown";
-      setOverviewMsg("Reload needs confirmation: this config may lock you out.", true);
+      setOverviewMsg("Apply needs confirmation: this config may lock you out.", true);
       openConfirmModal({
-        title: "This reload may lock you out",
+        title: "Applying may lock you out",
         message:
           "Your connection appears as " +
           ip +
           ".\n\n" +
           lockoutRiskLines(risks).join("\n") +
           "\n\nOnly continue if you have another way back into this host.",
-        confirmLabel: "Reload anyway",
+        confirmLabel: "Apply anyway",
         // Re-check on confirm: the dialog can sit open while another tab, the CLI
         // or another operator saves something else. The confirmation covers the
         // risks that were on screen, so a different set has to be read first.
-        onConfirm: () => confirmedReload(lockoutSignature(risks)),
+        onConfirm: () => confirmedApply(lockoutSignature(risks)),
       });
       return;
     }
-    await doReload();
+    await doApply();
   }
 
-  async function confirmedReload(acknowledged) {
+  async function confirmedApply(acknowledged) {
     setOverviewMsg("Checking config…");
     const { res, error } = await fetchValidateResult();
     if (!res) {
@@ -1063,32 +1063,32 @@ export function initOverviewPage() {
       return;
     }
     if (lockoutSignature(lockoutRisks(res)) !== acknowledged) {
-      setOverviewMsg("The config changed since you confirmed. Press Reload config to review again.", true);
+      setOverviewMsg("The config changed since you confirmed. Press Apply to review again.", true);
       return;
     }
-    await doReload();
+    await doApply();
   }
 
-  async function doReload() {
+  async function doApply() {
     setOverviewMsg("…");
     try {
       await api("/v1/reload", { method: "POST" });
       setOverviewMsg("");
       await refreshOverviewPage();
       refreshPendingBadge();
-      showToast("Config reloaded on host");
+      showToast("Applied to host");
     } catch (e) {
-      setOverviewMsg(String(e.message || e), true);
+      setOverviewMsg(applyErrorText(e), true);
     }
   }
 
-  reloadBtn.addEventListener("click", async () => {
-    if (reloadBtn.disabled) return;
-    reloadBtn.disabled = true;
+  applyBtn.addEventListener("click", async () => {
+    if (applyBtn.disabled) return;
+    applyBtn.disabled = true;
     try {
-      await reloadWithLockoutCheck();
+      await applyWithLockoutCheck();
     } finally {
-      reloadBtn.disabled = false;
+      applyBtn.disabled = false;
     }
   });
   $("btn-geo").addEventListener("click", async () => {

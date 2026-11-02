@@ -1,5 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus, clientIPSourceLabel } from "../core/dom.js";
+import { applyErrorText } from "../core/format.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
@@ -491,7 +492,7 @@ function renderPendingDiffPanel() {
   const newText = state.lastPendingNew;
   const baselineHint =
     oldText === "" && newText !== ""
-      ? `<p class="hint pending-diff-baseline-missing">No readable on-disk <code class="inline">generated/nftables.nft</code> (missing, unreadable, or API older than baseline support). The left column compares against an empty baseline; reload the host after a successful apply to populate the file.</p>`
+      ? `<p class="hint pending-diff-baseline-missing">No readable on-disk <code class="inline">generated/nftables.nft</code> (missing, unreadable, or API older than baseline support). The left column compares against an empty baseline; a successful Apply populates the file.</p>`
       : "";
   if (oldText === newText) {
     let body = `<p class="hint pending-diff-same">No differences.</p>`;
@@ -592,7 +593,7 @@ export async function refreshPendingPage() {
     setApiStatus(true);
     if (p.pending) {
       status.textContent =
-        "Unapplied changes: the saved config on disk differs from the last successful reload (nftables / WireGuard).";
+        "Unapplied changes: the saved config on disk differs from the last successful Apply (nftables / WireGuard).";
       setPendingStatusTone("warning");
     } else {
       status.textContent =
@@ -685,7 +686,7 @@ export function initPendingPage() {
         setApiStatus(true);
         showToast("Applied to host");
       } catch (e) {
-        setPendingMsg(String(e.message || e), true);
+        setPendingMsg(applyErrorText(e), true);
       }
     } finally {
       applyBtn.disabled = false;
@@ -700,7 +701,7 @@ export function initPendingPage() {
       openConfirmModal({
         title: "Discard " + what + "?",
         message:
-          "Replace the saved config.yaml with config.yaml.bak (the last applied snapshot). Unsaved edits that differ from that snapshot are lost. The host is not updated until you apply or reload.",
+          "Replace the saved config.yaml with config.yaml.bak (the last applied snapshot). Unsaved edits that differ from that snapshot are lost. The host is not updated until you apply.",
         confirmLabel: "Discard " + what,
         onConfirm: async () => {
           setPendingMsg("…");
@@ -710,7 +711,7 @@ export function initPendingPage() {
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);
-            showToast("Pending changes discarded. Apply or reload when ready.");
+            showToast("Pending changes discarded. Apply when ready.");
           } catch (e) {
             setPendingMsg(String(e.message || e), true);
           }
@@ -727,7 +728,7 @@ export function initPendingPage() {
         title: "Restore previous applied?",
         message:
           (changes ? "This changes " + changeCount(changes) + " in the saved config. " : "") +
-          "Replace config.yaml with the first older snapshot in config.yaml.bak.1 … .bak.5 that differs from config.yaml.bak. Any current config.yaml content is overwritten (including edits not yet applied to the host). The host is not updated until you apply or reload.",
+          "Replace config.yaml with the first older snapshot in config.yaml.bak.1 … .bak.5 that differs from config.yaml.bak. Any current config.yaml content is overwritten (including edits not yet applied to the host). The host is not updated until you apply.",
         confirmLabel: "Restore previous config",
         onConfirm: async () => {
           setPendingMsg("…");
@@ -737,7 +738,7 @@ export function initPendingPage() {
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);
-            showToast("Previous applied config restored. Apply or reload when ready.");
+            showToast("Previous applied config restored. Apply when ready.");
           } catch (e) {
             setPendingMsg(String(e.message || e), true);
           }

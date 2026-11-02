@@ -29,7 +29,7 @@ func LockoutWarnings(c *config.Config, clientIP string, geoReader *geoip2.Reader
 	if c.Forwarding.MaintenanceMode {
 		out = append(out, LockoutWarning{
 			Code:    "lockout_risk_maintenance",
-			Message: "Maintenance mode is enabled; all public port forwards are omitted until disabled and reloaded.",
+			Message: "Maintenance mode is enabled; all public port forwards are omitted until disabled and applied.",
 		})
 	}
 	ip := strings.TrimSpace(clientIP)
