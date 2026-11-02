@@ -276,7 +276,7 @@ Confirm mode needs **systemd** and an API running as **root**. Without them Appl
 
 | Situation | What happens |
 |-----------|--------------|
-| Confirmed | Stops the timer. The Apply becomes the new last confirmed config. Connections the firewall already accepted can outlive the change, so an open SSH session or the web UI's open page is not proof that a change is safe: try a new connection before confirming. |
+| Confirmed | Stops the timer. The Apply becomes the new last confirmed config. Connections the firewall already accepted can outlive the change. The web UI's nginx closes every connection after one response, so **Keep changes** needs a new connection and fails if the change blocks new connections to the UI. Nothing checks this for **`evuproxy reload-confirm`** in an open SSH session, for **`POST /apply/confirm`** sent straight to the API, or for the UI reached through an SSH tunnel or a reverse proxy on the same host, since those keep working over a connection opened earlier: try a new connection before confirming. |
 | Time runs out | Reverts. |
 | Apply again in the window | Restarts the wait. The revert target stays the last confirmed config. |
 | One-way reload in the window | Refused: **`evuproxy reload`** exits with an error and **`POST /reload`** answers **409**, because the timer would silently undo it. **`systemctl restart evuproxy`** fails the same way. **`peer-add --apply`** and the like are refused the same way, after saving. So is **`POST /restore`** / **`evuproxy restore`**. |

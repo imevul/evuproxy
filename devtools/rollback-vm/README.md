@@ -2,6 +2,8 @@
 
 Tests the revert timer in a throwaway Debian VM with real `nft`, `wg` and `systemd-run`. It applies a config that cuts the forwarded SSH port, stops the API, and checks that SSH comes back by itself. It also covers confirming, applying again during the window, an API restart, a failed revert, a reboot, a failed Apply whose revert also fails, a revert killed partway, what a reboot does with edits that were never confirmed, an upgrade through `scripts/update.sh` from the old boot unit, and what `evuproxy-geo.service` does with an unapplied country change. That last scenario downloads a few small zones from ipdeny.com, as the product does. The Go tests only cover these with a fake command runner.
 
+It also shows that **Keep changes** needs a new connection, with Chromium in the container driving the real panel through `docker/nginx.conf`. As a control, it first reproduces the lockout with keep-alive on, then shows on the shipped config that Keep gets no answer after a cut, that the firewall dropped the connection, that Keep never reached nginx, and that nginx and the API were otherwise fine. It records one known limit: Keep through an SSH tunnel still works.
+
 The VM runs under QEMU with KVM inside a container, on user-mode networking. Nothing is installed on the host, and its network and firewall aren't touched: QEMU forwards SSH and the API on the container's own loopback, and no port is published. The script runs from outside the VM, in the container.
 
 From the repo root, on a Linux host with `/dev/kvm`:
@@ -10,7 +12,8 @@ From the repo root, on a Linux host with `/dev/kvm`:
 CGO_ENABLED=0 go build -o devtools/rollback-vm/evuproxy ./cmd/evuproxy
 docker run --rm --device /dev/kvm \
   -v "$PWD/devtools/rollback-vm:/rollback-vm:ro" -v "$PWD/templates:/templates:ro" -v "$PWD/scripts:/scripts:ro" \
+  -v "$PWD/web:/web:ro" -v "$PWD/docker:/docker:ro" \
   alpine:latest sh -c "apk add --no-cache -q bash && exec bash /rollback-vm/run.sh"
 ```
 
-It takes about eight minutes and needs roughly 1 GiB of disk and 1 GiB of RAM. Everything except the `alpine` image and the binary lives in the container's writable layer, so `--rm` removes it. It exits with the number of failed checks, or `100` if setup failed.
+It takes about ten minutes and needs roughly 2 GiB of disk and 2 GiB of RAM. Add `-e KEEP_ONLY=1` to run only the Keep section. Everything except the `alpine` image and the binary lives in the container's writable layer, so `--rm` removes it. It exits with the number of failed checks, or `100` if setup failed.

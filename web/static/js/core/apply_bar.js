@@ -300,10 +300,12 @@ function onApplyClick(button) {
       button.removeAttribute("aria-busy");
     }
     if (applied) {
-      await afterApply();
-      // Last, since the bar hiding moves focus. The panel's question is the next thing to answer.
+      // First: if the Apply blocked new connections, the refresh below gets no answer for
+      // minutes. The panel's question is the next thing to answer, and taking focus now
+      // also stops the bar hiding from moving it.
       adoptAppliedSession(pendingSession);
       pendingSession = null;
+      await afterApply();
     }
   };
 }
