@@ -76,7 +76,6 @@ async function refreshGeoZonesTable() {
   } catch (e) {
     msg.textContent = String(e.message || e);
     msg.classList.add("err");
-    wrap.innerHTML = "";
   } finally {
     doneLoading();
   }

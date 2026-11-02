@@ -353,7 +353,8 @@ export async function refreshPeersPage() {
       throw cfgOut.reason;
     }
     state.lastConfig = cfgOut.value;
-    state.lastPeerWgStats = stOut.status === "fulfilled" ? stOut.value : null;
+    // Without stats every peer would read as offline, so a failed read keeps the last ones.
+    if (stOut.status === "fulfilled") state.lastPeerWgStats = stOut.value;
     setApiStatus(true);
     let pingMap = null;
     if (showPeersMetricsColumn()) {
@@ -361,7 +362,7 @@ export async function refreshPeersPage() {
         pingMap = await fetchPeerMetricsMap();
         state.lastPeerPingByTunnel = pingMap;
       } catch {
-        state.lastPeerPingByTunnel = null;
+        /* keep last values */
       }
     } else {
       state.lastPeerPingByTunnel = null;
@@ -384,7 +385,6 @@ export async function refreshPeersPage() {
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setPeersMsg(String(e.message || e), true);
-    $("peers-table-wrap").innerHTML = "";
   } finally {
     doneLoading();
   }

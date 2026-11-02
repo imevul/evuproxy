@@ -94,6 +94,18 @@ test.describe("accessibility (axe-core)", () => {
       await expectNoBlockingViolations(page, `not connected (${scheme})`);
     });
 
+    test(`a11y connection lost ${scheme}`, async ({ page, baseURL }) => {
+      test.skip(!baseURL, "baseURL unset");
+      await seed(page, { scheme });
+      await gotoRoute(page, baseURL!, "routes");
+      // A 401 shows the banner's every control, and stale rows are behind it.
+      await page.route("**/api/**", (route) => route.fulfill({ status: 401, json: { error: "unauthorized" } }));
+      await page.locator("#routes-refresh").click();
+      await page.locator("#connection-banner-token").waitFor({ state: "visible" });
+      await page.locator(".page:not([hidden]) .stale-tag").waitFor({ state: "visible" });
+      await expectNoBlockingViolations(page, `connection lost (${scheme})`);
+    });
+
     test(`a11y first-run checklist ${scheme}`, async ({ page, baseURL }) => {
       test.skip(!baseURL, "baseURL unset");
       await seed(page, { scheme });

@@ -2,7 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, setApiNotConnected, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
 import { eventDetail, eventLabel, geoSourceLabel, geoUpdatedMessage, timeHtml } from "../core/format.js";
 import { beginLoading } from "../core/loading.js";
-import { api, token, applyNavRestriction } from "../core/api.js";
+import { api, token, applyNavRestriction, requestConnectionCheck } from "../core/api.js";
 import { showToast } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
@@ -81,6 +81,12 @@ export function restartOverviewEventsPolling() {
   state.overviewEventsTimer = setInterval(refreshOverviewEventsList, 30000);
 }
 
+/* Once these have loaded, a failed refresh leaves them on screen. */
+let overviewEventsLoaded = false;
+let overviewCardsLoaded = false;
+/** The optional parts of the last pass, for a pass where one of them fails. */
+let lastOverviewParts = { met: null, cfg: null, st: null, evPack: null, pending: null };
+
 export async function refreshOverviewEventsList() {
   const ul = $("overview-events-list");
   const empty = $("overview-events-empty");
@@ -92,10 +98,11 @@ export async function refreshOverviewEventsList() {
     if (card) card.hidden = true;
     return;
   }
-  if (card) card.hidden = false;
   try {
     const data = await api("/v1/events?limit=25");
     const evs = data.events || [];
+    overviewEventsLoaded = true;
+    if (card) card.hidden = false;
     if (!evs.length) {
       ul.innerHTML = "";
       empty.classList.remove("is-hidden");
@@ -118,7 +125,8 @@ export async function refreshOverviewEventsList() {
       )
       .join("");
   } catch {
-    /* non-fatal */
+    // An empty list here would claim there are no events, when all we know is the request failed.
+    if (card && !overviewEventsLoaded) card.hidden = true;
   }
 }
 
@@ -465,6 +473,13 @@ function domPingSparkChart(model) {
 }
 
 function appendPingSparkInto(containerEl, met) {
+  if (!met) {
+    const p = document.createElement("p");
+    p.className = "meta overview-ping-spark-empty";
+    p.textContent = "Latency history could not be loaded.";
+    containerEl.appendChild(p);
+    return;
+  }
   const model = pingSparkChartModel(met);
   if (model.ys.length < 2) {
     const p = document.createElement("p");
@@ -678,7 +693,7 @@ function overviewHostGeoCard(o) {
 function appendApplySummary(root, evs) {
   const line = document.createElement("p");
   line.className = "meta";
-  line.textContent = "No recent apply or geo events in the last fetch.";
+  line.textContent = evs ? "No recent apply or geo events in the last fetch." : "Recent apply and geo events could not be loaded.";
   root.appendChild(line);
   const list = evs || [];
   for (const e of list) {
@@ -720,7 +735,7 @@ function activityPane(title) {
   return { root, body };
 }
 
-function overviewActivityAttentionCard(evs, items) {
+function overviewActivityAttentionCard(evs, items, allChecksRan) {
   const wrap = document.createElement("div");
   wrap.className = "evu-card card overview-dash-card overview-dash-activity";
 
@@ -734,7 +749,7 @@ function overviewActivityAttentionCard(evs, items) {
   if (!items.length) {
     const ok = document.createElement("p");
     ok.className = "meta";
-    ok.textContent = "No warnings from this pass.";
+    ok.textContent = allChecksRan ? "No warnings from this pass." : "Some checks could not run, because their data could not be loaded.";
     right.body.appendChild(ok);
   } else {
     const ul = document.createElement("ul");
@@ -816,7 +831,8 @@ function buildOverviewAttentionItems(cfg, o, st, met) {
   const items = [];
   const peers = (cfg && cfg.peers) || [];
   const pubMap = wgPeerPubKeyMap(st);
-  for (const p of peers) {
+  // No stats says nothing about handshakes, so it must not read as every peer lacking one.
+  for (const p of st ? peers : []) {
     if (p.disabled) continue;
     const row = pubMap.get((p.public_key || "").trim());
     const h = row && row.latest_handshake_unix;
@@ -891,6 +907,7 @@ export async function refreshOverviewPage() {
     state.apiConnectionOk = false;
     applyNavRestriction();
     setApiNotConnected();
+    overviewCardsLoaded = false;
     grid.innerHTML = "";
     grid.appendChild(
       overviewApiIssueCard({
@@ -909,16 +926,19 @@ export async function refreshOverviewPage() {
     } catch (e) {
       /* keep state.lastUIPrefs; overview still useful */
     }
+    const last = lastOverviewParts;
     const [o, met, cfg, st, evPack, pending] = await Promise.all([
       api("/v1/overview"),
-      api("/v1/metrics/peers").catch(() => null),
-      api("/v1/config").catch(() => null),
-      api("/v1/stats").catch(() => null),
-      api("/v1/events?limit=40").catch(() => ({ events: [] })),
-      api("/v1/pending").catch(() => null),
+      api("/v1/metrics/peers").catch(() => last.met),
+      api("/v1/config").catch(() => last.cfg),
+      api("/v1/stats").catch(() => last.st),
+      api("/v1/events?limit=40").catch(() => last.evPack),
+      api("/v1/pending").catch(() => last.pending),
     ]);
-    const evs = (evPack && evPack.events) || [];
+    const evs = evPack ? evPack.events || [] : null;
     if (seq !== state.overviewRefreshSeq) return;
+    lastOverviewParts = { met, cfg, st, evPack, pending };
+    overviewCardsLoaded = true;
     state.lastOverview = o;
     state.lastConfig = cfg || state.lastConfig;
     const maint = $("overview-maintenance-toggle");
@@ -930,7 +950,7 @@ export async function refreshOverviewPage() {
     grid.innerHTML = "";
     const checklist = cfg && firstRunChecklistCard(cfg, pending);
     if (checklist) grid.appendChild(checklist);
-    grid.appendChild(overviewActivityAttentionCard(evs, buildOverviewAttentionItems(cfg, o, st, met)));
+    grid.appendChild(overviewActivityAttentionCard(evs, buildOverviewAttentionItems(cfg, o, st, met), !!(cfg && st && met)));
     grid.appendChild(overviewHostGeoCard(o));
     grid.appendChild(overviewLatencyOverviewCard(met));
     void refreshOverviewEventsList();
@@ -940,21 +960,19 @@ export async function refreshOverviewPage() {
     state.apiConnectionOk = false;
     applyNavRestriction();
     setApiStatus(false, errText);
+    requestConnectionCheck();
+    // The banner says what's wrong. What this page last loaded stays until there's something newer.
+    if (overviewCardsLoaded) return;
     if (actionsCard) actionsCard.hidden = true;
     grid.innerHTML = "";
     grid.appendChild(
       overviewApiIssueCard({
-        message:
-          "There is a problem with the API: the EvuProxy API could not be reached or rejected this browser’s request.",
-        detail: errText,
+        message: "Nothing has loaded yet. This page fills in as soon as the API answers.",
+        detail: e.connectionKind ? "" : errText,
       })
     );
-    const evUl = $("overview-events-list");
-    const evEmpty = $("overview-events-empty");
     const evCard = $("overview-events-card");
-    if (evUl) evUl.innerHTML = "";
-    if (evEmpty) evEmpty.classList.remove("is-hidden");
-    if (evCard) evCard.hidden = true;
+    if (evCard && !overviewEventsLoaded) evCard.hidden = true;
   } finally {
     doneLoading();
   }

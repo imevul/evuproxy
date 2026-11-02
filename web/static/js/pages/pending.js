@@ -565,7 +565,7 @@ export async function refreshPendingBadge() {
     noteConfigRevision(p.current_config_sha256);
     showUnappliedCount(p.pending ? unappliedCount(p, cfg) : 0);
   } catch {
-    if (seq === pendingBadgeSeq) showUnappliedCount(0);
+    /* Not knowing isn't "nothing to apply", so the last count stays. */
   }
 }
 
@@ -576,6 +576,9 @@ function setPendingStatusTone(tone) {
   alert.classList.toggle("evu-alert--warning", tone === "warning");
   alert.classList.toggle("is-hidden", tone === "hidden");
 }
+
+/* Once this page has loaded, a failed refresh leaves that on screen. */
+let pendingPageLoaded = false;
 
 export async function refreshPendingPage() {
   const status = $("pending-status");
@@ -605,17 +608,16 @@ export async function refreshPendingPage() {
     const restoreBtn = $("pending-restore-previous");
     if (restoreBtn) restoreBtn.disabled = !p.restore_previous_applied_available;
     renderPendingDiffPanel();
+    pendingPageLoaded = true;
   } catch (e) {
-    status.textContent = "";
-    setPendingStatusTone("hidden");
-    state.lastPendingBaseline = "";
-    state.lastPendingNew = "";
-    renderChangesList({ pending: false });
-    const discardErr = $("pending-discard");
-    if (discardErr) discardErr.disabled = true;
-    const restoreErr = $("pending-restore-previous");
-    if (restoreErr) restoreErr.disabled = true;
-    panel.innerHTML = "";
+    if (!pendingPageLoaded) {
+      status.textContent = "";
+      setPendingStatusTone("hidden");
+      const discardErr = $("pending-discard");
+      if (discardErr) discardErr.disabled = true;
+      const restoreErr = $("pending-restore-previous");
+      if (restoreErr) restoreErr.disabled = true;
+    }
     setApiStatus(false, String(e.message || e));
     setPendingMsg(String(e.message || e), true);
   } finally {

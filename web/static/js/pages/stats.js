@@ -32,7 +32,6 @@ export async function refreshStatsPage() {
   const wgW = $("stats-wg-wrap");
   const nftW = $("stats-nft-wrap");
   setStatsMsg("");
-  state.lastMetricsPeersExport = null;
   const doneLoading = beginLoading("stats-wg-wrap", "stats-nft-wrap");
   try {
     const [st, mp] = await Promise.all([
@@ -81,8 +80,6 @@ export async function refreshStatsPage() {
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setStatsMsg(String(e.message || e), true);
-    wgW.innerHTML = "";
-    nftW.innerHTML = "";
   } finally {
     doneLoading();
   }

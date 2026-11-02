@@ -29,7 +29,7 @@
 :root {
   --evuproxy-success-text: hsl(152 55% 30%);
   --evuproxy-warning-text: hsl(38 92% 31%);
-  --evuproxy-danger-text: var(--evu-destructive);
+  --evuproxy-danger-text: hsl(0 72% 42%);
   --evuproxy-secondary-text: hsl(217 72% 43%);
 }
 
@@ -39,10 +39,10 @@
   --evuproxy-shadow-overlay: 0 24px 64px hsl(0 0% 0% / 0.6);
 
   /* Dark tints are dark, so the theme fills already read as text — except
-     destructive, which needed a nudge lighter to clear 4.5:1 on the card. */
+     destructive, which needed a nudge lighter to clear 4.5:1 on the card and its pill. */
   --evuproxy-success-text: var(--evu-success);
   --evuproxy-warning-text: var(--evu-warning);
-  --evuproxy-danger-text: hsl(0 72% 60%);
+  --evuproxy-danger-text: hsl(0 72% 66%);
   --evuproxy-secondary-text: var(--evu-secondary);
 
   /* The opposite nudge for the fill: white on the theme's dark destructive is 4.04:1. */

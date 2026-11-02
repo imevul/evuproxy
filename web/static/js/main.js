@@ -1,5 +1,6 @@
-import { hasUnsavedEdits, navigate, onHash } from "./core/router.js";
+import { hasUnsavedEdits, navigate, onHash, reloadCurrentPage } from "./core/router.js";
 import { $, applyTableFilter } from "./core/dom.js";
+import { initConnection } from "./core/connection.js";
 import {
   initModals,
   openModal,
@@ -231,6 +232,8 @@ document.addEventListener("keydown", (ev) => {
 initStatsPage();
 initLogsPage();
 initPendingPage();
+// Before the apply bar: its first poll goes out as it starts, and this has to hear how it went.
+initConnection({ onRecovered: reloadCurrentPage });
 initApplyBar({
   // Only these two pages show what the host is running against what is saved.
   afterApply: async () => {

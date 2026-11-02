@@ -88,7 +88,7 @@ function discardEditsFor(target) {
   if (target !== currentRoute) closeAllModals();
 }
 
-function showPage(name) {
+function showPage(name, keepView) {
   document.querySelectorAll(".page").forEach((p) => {
     p.hidden = true;
   });
@@ -96,7 +96,7 @@ function showPage(name) {
   if (sec) sec.hidden = false;
   setTitlePage(name);
   const contentEl = document.querySelector("main.content");
-  if (contentEl) contentEl.scrollTop = 0;
+  if (contentEl && !keepView) contentEl.scrollTop = 0;
   document.querySelectorAll(".nav-link").forEach((a) => {
     const on = a.getAttribute("data-route") === name;
     a.classList.toggle("is-active", on);
@@ -119,8 +119,18 @@ setUndoPageRefresh(() => {
   if (currentRoute && !hasUnsavedEdits(currentRoute)) void navigate(currentRoute);
 });
 
-/** @param {{ discard?: boolean }} [opts] `discard` once the operator has agreed to lose edits. */
+/** The API is back. The operator didn't ask to move, so this leaves tabs, scroll and any dialog as they are. */
+export function reloadCurrentPage() {
+  if (currentRoute && !hasUnsavedEdits(currentRoute)) void navigate(currentRoute, { keepView: true });
+  else void refreshPendingBadge();
+}
+
+/**
+ * @param {{ discard?: boolean, keepView?: boolean }} [opts] `discard` once the operator has
+ *   agreed to lose edits; `keepView` to reload the page on screen without resetting the view.
+ */
 export async function navigate(name, opts) {
+  const keepView = !!(opts && opts.keepView);
   if (!pages.includes(name)) name = "overview";
   if (!(opts && opts.discard) && hasUnsavedEdits(name)) {
     const target = name;
@@ -134,7 +144,7 @@ export async function navigate(name, opts) {
   // No token means the gate cannot pass and needs no request to say so. Every
   // page would be a dead end, so the one page that can fix it comes first.
   if (name !== "token" && !token().trim()) name = "token";
-  closeConfirmModal();
+  if (!keepView) closeConfirmModal();
   if (name !== "routes") {
     closeRouteProbeModal();
     closeRouteEditor();
@@ -158,18 +168,16 @@ export async function navigate(name, opts) {
     stopOverviewLatencyPolling();
   }
   // Everything up to the first await runs on the click; the network comes after.
-  showPage(name);
-  if (name === "settings") setSettingsEditorTab("prefs");
-  if (name === "geoblocking") setGeoEditorTab("default");
+  showPage(name, keepView);
+  if (name === "settings" && !keepView) setSettingsEditorTab("prefs");
+  if (name === "geoblocking" && !keepView) setGeoEditorTab("default");
   const doneLoading = beginLoading(...(pageLoadRegions[name] || []));
   try {
     if (name !== "overview" && name !== "token") {
       const ok = await ensureApiGate();
       if (seq !== navSeq) return;
-      if (!ok) {
-        void navigate("overview", { discard: true });
-        return;
-      }
+      // Stay here: what this page last loaded is still on screen, and it reloads on recovery.
+      if (!ok) return;
     }
     applyNavRestriction();
     await ensureUIPrefs();
