@@ -1,6 +1,6 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiNotConnected, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
-import { eventDetail, eventLabel, geoSourceLabel, timeHtml } from "../core/format.js";
+import { eventDetail, eventLabel, geoSourceLabel, geoUpdatedMessage, timeHtml } from "../core/format.js";
 import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
 import { showToast } from "../core/toast.js";
@@ -1008,9 +1008,9 @@ export function initOverviewPage() {
   $("btn-geo").addEventListener("click", async () => {
     setOverviewMsg("…");
     try {
-      await api("/v1/update-geo", { method: "POST" });
+      const res = await api("/v1/update-geo", { method: "POST" });
       setOverviewMsg("");
-      showToast("Geo lists updated on host");
+      showToast(geoUpdatedMessage(res));
     } catch (e) {
       setOverviewMsg(String(e.message || e), true);
     }

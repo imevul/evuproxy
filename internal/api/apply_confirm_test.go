@@ -1,13 +1,18 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/imevul/evuproxy/internal/apply"
+	"github.com/imevul/evuproxy/internal/config"
 )
 
 // fakeSystemd is a stubRunner where armed timers stay active until stopped.
@@ -75,6 +80,45 @@ func TestReloadBody_plainAndIgnoredBodiesStayOneWay(t *testing.T) {
 	if _, err := os.Stat(cfgPath + ".bak"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestUpdateGeo_holdsBackUnappliedCountries(t *testing.T) {
+	ts, cfgPath := newMutationTestServer(t, fakeSystemd())
+	t.Cleanup(apply.SwapGeoZoneDownloadForTest(func(context.Context, *config.Config) error { return nil }))
+	url := ts.URL + "/api/v1"
+	zoneDir := t.TempDir()
+	for _, cc := range []string{"se", "no"} {
+		if err := os.WriteFile(filepath.Join(zoneDir, cc+".zone"), []byte("192.0.2.0/24\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	geo := "geo:\n  enabled: true\n  countries: [se]\n  zone_dir: " + zoneDir + "\n"
+	applied := strings.Replace(string(b), "geo:\n  enabled: false\n", geo, 1) + "apply:\n  confirm: true\n"
+	if err := os.WriteFile(cfgPath, []byte(applied), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantStatus(t, doAuthed(t, http.MethodPost, url+"/reload", ""), http.StatusOK, "")
+
+	updateGeo := func(status int, code string) map[string]any {
+		t.Helper()
+		return wantStatus(t, doAuthed(t, http.MethodPost, url+"/update-geo", ""), status, code)
+	}
+	if out := updateGeo(http.StatusOK, ""); out["result"] != "geo_updated" || out["geo_changes_held_back"] != false {
+		t.Fatalf("nothing pending: %v", out)
+	}
+	edited := strings.Replace(applied, "countries: [se]", "countries: [no]", 1)
+	if err := os.WriteFile(cfgPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := updateGeo(http.StatusOK, ""); out["result"] != "geo_updated" || out["geo_changes_held_back"] != true {
+		t.Fatalf("countries pending: %v", out)
+	}
+	wantStatus(t, doAuthed(t, http.MethodPost, url+"/reload", `{"confirm_timeout_seconds":60}`), http.StatusOK, "")
+	updateGeo(http.StatusConflict, "apply_session_active")
 }
 
 func TestReloadBody_invalid(t *testing.T) {

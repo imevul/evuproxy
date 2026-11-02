@@ -152,7 +152,8 @@ func cmdUpdateGeo() *cobra.Command {
 		Use:   "update-geo",
 		Short: "Download country zones and refresh nftables geo sets",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return apply.UpdateGeo(cmd.Context(), cfgPath)
+			_, err := apply.UpdateGeo(cmd.Context(), cfgPath)
+			return err
 		},
 	}
 }

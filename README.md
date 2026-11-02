@@ -54,7 +54,7 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 | `evuproxy reload`                 | Regenerate `/etc/wireguard/<iface>.conf`, nftables tables `inet evuproxy` / `ip evuproxy`, load geo sets; refresh systemd-networkd `Unmanaged=yes` drop-in when netplan/networkd is in use |
 | `evuproxy reload --boot`          | What `evuproxy.service` runs: with `apply.confirm` on in the last applied config, apply that config and leave edits in `config.yaml` unapplied ([details](docs/config.md#confirm-or-revert-apply)) |
 | `evuproxy ensure-wg-networkd`     | Install `/etc/systemd/network/00-<iface>.network` (`Unmanaged=yes`) if networkd/netplan is in use; prints the path (used by install/update) |
-| `evuproxy update-geo`             | Refresh IPDeny country files and reload nftables geo **in both** inet and ip tables                      |
+| `evuproxy update-geo`             | Refresh IPDeny country files and reload nftables geo **in both** inet and ip tables. With `apply.confirm` on, this loads the last applied config's sets ([details](docs/config.md#confirm-or-revert-apply)) |
 | `evuproxy status`                 | `wg show` + `nft list table inet evuproxy`                                                               |
 | `evuproxy diagnostics [-o PATH]`  | Markdown host support bundle (WG, routes, logs, networkd, sanitized config); also **Settings → Diagnostics** / `GET /api/v1/diagnostics.md` |
 | `evuproxy serve`                  | Local HTTP API on `127.0.0.1:9847` (token in `/etc/evuproxy/api.token`)                                  |
