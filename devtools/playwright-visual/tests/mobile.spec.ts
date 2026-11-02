@@ -31,7 +31,7 @@ const smallTargets = (page: Page, route: string) =>
   page.evaluate((r) => {
     const scope = `#page-${r}`;
     const controls = document.querySelectorAll(
-      `.evu-app-header button, ${scope} button, ${scope} select, ${scope} input:not([type=checkbox]):not([type=radio]), ${scope} .evu-switch`
+      `.evu-app-header button, .evu-toaster button, ${scope} button, ${scope} select, ${scope} input:not([type=checkbox]):not([type=radio]), ${scope} .evu-switch`
     );
     return [...controls].flatMap((el) => {
       const box = el.getBoundingClientRect();
@@ -41,6 +41,34 @@ const smallTargets = (page: Page, route: string) =>
       const w = Math.max(box.width, grown ? parseFloat(after.width) : 0);
       const h = Math.max(box.height, grown ? parseFloat(after.height) : 0);
       return w < 44 || h < 44 ? [`${el.tagName} ${el.id || el.className} ${Math.round(w)}x${Math.round(h)}`] : [];
+    });
+  }, route);
+
+/**
+ * Taps on a control's own box that land on a different control, which is what an invisible
+ * ::after reaching over a neighbour does. Size checks cannot see this. Samples a 5×5 grid
+ * across each box; a rounded corner that falls through to the parent is not a theft.
+ */
+const stolenTaps = (page: Page, route: string) =>
+  page.evaluate((r) => {
+    const interactive = "button, a, select, input, textarea, .evu-switch";
+    const controls = document.querySelectorAll(
+      `#page-${r} button, #page-${r} select, #page-${r} input:not([type=checkbox]):not([type=radio]), #page-${r} .evu-switch`
+    );
+    return [...controls].flatMap((el) => {
+      if (!el.getBoundingClientRect().width) return [];
+      el.scrollIntoView({ block: "center", behavior: "instant" });
+      const box = el.getBoundingClientRect();
+      const thieves = new Set<string>();
+      for (let i = 0; i < 25; i++) {
+        const x = box.left + (box.width * ((i % 5) + 0.5)) / 5;
+        const y = box.top + (box.height * (Math.floor(i / 5) + 0.5)) / 5;
+        const other = document.elementFromPoint(x, y)?.closest(interactive);
+        if (other && !other.contains(el) && !el.contains(other)) {
+          thieves.add(other.getAttribute("aria-label") || other.id || other.className);
+        }
+      }
+      return [...thieves].map((t) => `${el.getAttribute("aria-label") || el.id || el.className} -> ${t}`);
     });
   }, route);
 
@@ -55,8 +83,58 @@ test.describe("phone layout", () => {
       await gotoRoute(page, origin, route);
       expect(await pageWidth(page)).toBeLessThanOrEqual(375);
       expect(await smallTargets(page, route)).toEqual([]);
+      expect(await stolenTaps(page, route)).toEqual([]);
     });
   }
+
+  test("stacked geo tags each remove their own country", async ({ page }) => {
+    await page.route("**/api/v1/config", async (r) => {
+      if (r.request().method() !== "GET") return r.continue();
+      const res = await r.fetch();
+      const cfg = largeConfig(await res.json());
+      await r.fulfill({ response: res, json: { ...cfg, geo: { ...cfg.geo, countries: ["se", "no", "dk", "fi", "de", "fr"] } } });
+    });
+    await gotoRoute(page, origin, "geoblocking");
+    const remove = page.locator(".geo-tag-remove");
+    await expect(remove).toHaveCount(6);
+    const tops = await remove.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
+    expect(new Set(tops).size).toBeGreaterThan(1);
+    expect(await smallTargets(page, "geoblocking")).toEqual([]);
+    expect(await stolenTaps(page, "geoblocking")).toEqual([]);
+
+    const first = remove.first();
+    const label = await first.getAttribute("aria-label");
+    await first.scrollIntoViewIfNeeded();
+    const box = (await first.boundingBox())!;
+    await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height - 1);
+    await expect(page.locator(".geo-tag-remove")).toHaveCount(5);
+    await expect(page.getByRole("button", { name: label!, exact: true })).toHaveCount(0);
+  });
+
+  test("a wrapped card label stays inside its own cell", async ({ page }) => {
+    await gotoRoute(page, origin, "geoblocking");
+    await page.locator("#geo-tab-zones-btn").tap();
+    const cells = page.locator("#geo-zones-table-wrap td[data-label]");
+    await cells.first().waitFor();
+    const spilled = await cells.evaluateAll((tds) =>
+      tds
+        .filter((td) => parseFloat(getComputedStyle(td, "::before").height) > td.clientHeight)
+        .map((td) => td.getAttribute("data-label"))
+    );
+    expect(spilled).toEqual([]);
+  });
+
+  test("the toast's Undo and Dismiss are full-size targets", async ({ page }) => {
+    await gotoRoute(page, origin, "routes");
+    await page.evaluate(async () => {
+      const { showToast } = await import("/static/js/core/toast.js" as string);
+      showToast("Removed route.", { action: { label: "Undo", onClick: () => undefined } });
+    });
+    await expect(page.locator("#toaster").getByRole("button", { name: "Dismiss" })).toBeVisible();
+    // Mid-slide, a fractional offset can round a 44px box to just under 44.
+    await expect(page.locator("#toaster .evu-toast")).toHaveCSS("transform", "none");
+    expect(await smallTargets(page, "routes")).toEqual([]);
+  });
 
   for (const [route, wrap, actions] of [
     ["routes", "routes-table-wrap", ["data-route-test", "data-route-edit", "data-route-del", "data-route-disabled"]],

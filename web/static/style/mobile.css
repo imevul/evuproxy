@@ -85,15 +85,41 @@
     background: none;
   }
 
+  /*
+   * The same for a tag's ×: an invisible extension would reach over the × of the tag
+   * above, and that removes the wrong country from the firewall rules.
+   */
+  body.app .geo-tags-chips {
+    flex-basis: 100%;
+  }
+
+  body.app .geo-tag {
+    padding-block: 0;
+    padding-right: 0;
+  }
+
+  body.app .geo-tag-remove {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  /* The toast keeps its height: Undo and Dismiss now fill it. */
+  body.app .evu-toast {
+    padding-block: 0.125rem;
+  }
+
+  body.app .evu-toast__close {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
   /* Small controls that sit inside text keep their size and extend an invisible area. */
   body.app .btn-help-trigger,
-  body.app .geo-tag-remove,
   body.app .evu-switch {
     position: relative;
   }
 
   body.app .btn-help-trigger::after,
-  body.app .geo-tag-remove::after,
   body.app .evu-switch::after {
     content: "";
     position: absolute;
@@ -183,7 +209,6 @@
   }
 
   table.data[data-cards] td {
-    position: relative;
     display: block;
     padding: 0.25rem 0;
     border: 0;
@@ -191,15 +216,17 @@
     overflow-wrap: anywhere;
   }
 
+  /* The label floats in the padding, so a cell grows when its label wraps. */
   table.data[data-cards] td[data-label] {
+    display: flow-root;
     padding-left: 5.5rem;
   }
 
   table.data[data-cards] td[data-label]::before {
     content: attr(data-label);
-    position: absolute;
-    left: 0;
+    float: left;
     width: 5rem;
+    margin-left: -5.5rem;
     color: var(--evu-muted-foreground);
     font-family: "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
     font-size: 0.75rem;
@@ -225,7 +252,7 @@
   }
 
   table.data[data-cards] td.cell-disabled-toggle::before {
-    position: static;
+    margin-left: 0;
   }
 
   /* Actions fill the card's foot and need no label of their own. */
@@ -256,9 +283,10 @@
   }
 
   table.data.logs-data[data-cards] td[data-label]::before {
-    position: static;
+    float: none;
     display: block;
     width: auto;
+    margin-left: 0;
   }
 
   table.data.logs-data[data-cards] td:nth-child(1),
