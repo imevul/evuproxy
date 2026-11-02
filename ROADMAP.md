@@ -198,7 +198,7 @@ Last:
 Automation:
 
 - [x] `nft -c` syntax tests in CI
-- [ ] Run the Playwright behavior and axe-core suites in CI against the mock stack
+- [x] Run the Playwright behavior and axe-core suites in CI against the mock stack
 - [ ] Decide whether to add a visual regression baseline, weighing test flakiness against value
 - [ ] Automated smoke test: tunnel up, TCP and UDP forward, geo on and off, narrow peer `AllowedIPs` still reaching the LAN
 - [ ] Automated forwarding policy tests: port maps, deny and allow lists, break-glass, route geo, maintenance mode
