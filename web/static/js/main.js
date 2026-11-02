@@ -10,13 +10,14 @@ import {
 import { initTablists } from "./core/tabs.js";
 import { initTokenPage } from "./pages/token.js";
 import { initSettingsPage } from "./pages/settings.js";
-import { initOverviewPage } from "./pages/overview.js";
+import { initApplyBar } from "./core/apply_bar.js";
+import { initOverviewPage, refreshOverviewPage } from "./pages/overview.js";
 import { initPeersPage, closePeerEditor } from "./pages/peers.js";
 import { initRoutesPage, closeRouteEditor, closeRouteProbeModal } from "./pages/routes.js";
 import { initTopologyPage } from "./pages/topology.js";
 import { initInboundPage, closeInboundEditor } from "./pages/inbound.js";
 import { initGeoblockingPage, closeGeoCountryModal } from "./pages/geoblocking.js";
-import { initPendingPage } from "./pages/pending.js";
+import { initPendingPage, refreshPendingBadge, refreshPendingPage } from "./pages/pending.js";
 import { initStatsPage } from "./pages/stats.js";
 import { initLogsPage } from "./pages/logs.js";
 
@@ -230,5 +231,13 @@ document.addEventListener("keydown", (ev) => {
 initStatsPage();
 initLogsPage();
 initPendingPage();
+initApplyBar({
+  // Only these two pages show what the host is running against what is saved.
+  afterApply: async () => {
+    await refreshPendingBadge();
+    if (!$("page-pending").hidden) await refreshPendingPage();
+    if (!$("page-overview").hidden) await refreshOverviewPage();
+  },
+});
 
 void onHash();

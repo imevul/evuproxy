@@ -65,7 +65,7 @@
         <a href="#/topology" class="nav-link evu-nav-link" data-route="topology">Topology</a>
         <a href="#/inbound" class="nav-link evu-nav-link" data-route="inbound">Inbound access</a>
         <a href="#/geoblocking" class="nav-link evu-nav-link" data-route="geoblocking">Geoblock &amp; limits</a>
-        <a href="#/pending" class="nav-link evu-nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span><span class="evu-sr-only" id="nav-pending-sr"></span></a>
+        <a href="#/pending" class="nav-link evu-nav-link" data-route="pending">Pending changes<span class="nav-pending-count" id="nav-pending-count" aria-hidden="true" hidden></span><span class="evu-sr-only" id="nav-pending-sr"></span></a>
         <a href="#/stats" class="nav-link evu-nav-link" data-route="stats">Stats</a>
         <a href="#/logs" class="nav-link evu-nav-link" data-route="logs">Logs</a>
       </nav>
@@ -120,16 +120,53 @@
         <span class="evu-brand__name">EvuProxy</span>
       </div>
       <main class="evu-main__inner content" id="main-content" tabindex="-1">
+      <div id="apply-region" class="apply-region">
+        <div id="apply-bar" class="apply-bar" role="group" aria-label="Unapplied changes" hidden>
+          <span id="apply-bar-text" class="apply-bar__text" aria-live="polite"></span>
+          <div class="apply-bar__actions">
+            <a id="apply-bar-review" class="evu-btn evu-btn--outline evu-btn--sm" href="#/pending">Review</a>
+            <button type="button" id="apply-bar-apply" class="evu-btn evu-btn--primary evu-btn--sm">Apply</button>
+          </div>
+        </div>
+        <div id="apply-result" class="apply-result" tabindex="0" role="group" aria-label="Apply result" hidden>
+          <div class="apply-result__head">
+            <ol id="apply-progress" class="apply-progress" aria-label="Apply progress" hidden>
+              <li data-apply-step="validate">Validating</li>
+              <li data-apply-step="firewall">Applying firewall</li>
+              <li data-apply-step="wireguard">Applying WireGuard</li>
+              <li data-apply-step="done">Done</li>
+            </ol>
+            <button type="button" id="apply-result-dismiss" class="evu-btn evu-btn--ghost evu-btn--sm apply-result__dismiss">Dismiss</button>
+          </div>
+          <span id="apply-progress-status" class="evu-sr-only" role="status"></span>
+          <p id="apply-msg" class="msg" aria-live="polite"></p>
+          <div id="pending-validate-panel" class="evu-alert pending-validate-panel is-hidden" role="group" aria-labelledby="pending-validate-title">
+            <div class="evu-alert__body pending-validate-body">
+              <p class="evu-alert__title" id="pending-validate-title">Config check</p>
+              <p id="pending-client-ip" class="meta pending-client-ip"></p>
+              <ul id="pending-validate-warnings" class="pending-validate-warnings is-hidden"></ul>
+              <div id="pending-lockout-ack-wrap" class="pending-lockout-ack-wrap is-hidden">
+                <label class="evu-check pending-lockout-ack">
+                  <input type="checkbox" id="pending-lockout-ack" class="evu-checkbox" />
+                  <span class="evu-check__text">
+                    <span>I understand these rules may lock me out of this host, and I have another way in.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       <section id="page-overview" class="page" hidden>
         <div class="page-title-row">
           <h1 class="page-title">Overview</h1>
           <button type="button" class="btn-help-trigger" aria-label="More about Overview (dialog)" data-help-title="Overview" data-help-template="help-overview-intro">?</button>
         </div>
-        <p class="hint">Host, tunnel and geo state at a glance, plus the two host actions that do not need a config change.</p>
+        <p class="hint">Host, tunnel and geo state at a glance, plus maintenance mode and geo list updates.</p>
         <div id="overview-cards" class="card-grid overview-cards-compact"></div>
         <div class="overview-bottom-grid">
           <div id="overview-actions-card" class="evu-card card actions-card">
-            <h3>Apply</h3>
+            <h3>Host actions</h3>
             <div class="field overview-maintenance-field">
               <div class="toggle-switch-row">
                 <span class="toggle-switch-text" id="overview-maintenance-desc">Maintenance mode</span>
@@ -141,7 +178,6 @@
               <p class="meta">When on, public forwards are omitted until you turn this off and Apply.</p>
             </div>
             <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="btn-apply">Apply</button>
               <button type="button" class="evu-btn evu-btn--outline" id="btn-geo">Update geo lists</button>
             </div>
             <p id="overview-action-msg" class="msg" aria-live="polite"></p>
@@ -216,7 +252,7 @@
                     ?
                   </button>
                 </div>
-                <p class="hint meta hint--tight">Linux NIC facing the Internet, e.g. <code class="inline">eth0</code>. Saving changes config only: the firewall keeps the old interface until you Apply from <strong>Pending changes</strong>.</p>
+                <p class="hint meta hint--tight">Linux NIC facing the Internet, e.g. <code class="inline">eth0</code>. The firewall keeps the old interface until you Apply.</p>
                 <input type="text" id="settings-public-interface" placeholder="eth0" spellcheck="false" autocomplete="off" />
               </div>
             </div>
@@ -399,7 +435,7 @@
           </button>
         </div>
         <p class="hint">
-          Tunnel endpoints and WireGuard keys for each client. Save writes server YAML; <strong>Apply</strong> from <strong>Pending changes</strong> to update the tunnel and firewall rules.
+          Tunnel endpoints and WireGuard keys for each client.
         </p>
         <div class="evu-card card">
           <div class="toolbar">
@@ -606,7 +642,7 @@
           </button>
         </div>
         <p class="hint">
-          WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily; edits take effect after <strong>Apply</strong> on <strong>Pending changes</strong>.
+          WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily.
         </p>
         <div class="evu-card card">
           <div class="toolbar">
@@ -955,7 +991,7 @@
           </button>
         </div>
         <p class="hint">
-          Which countries may reach forwarded ports. Switches save as you flip them, and other edits save from the bar that appears. Then apply from <strong>Pending changes</strong>.
+          Which countries may reach forwarded ports. Switches save as you flip them, and other edits save from the bar that appears.
         </p>
         <div class="evu-card card geo-editor">
           <div class="geo-enable-row">
@@ -1260,21 +1296,6 @@
             <button type="button" class="evu-btn evu-btn--danger-outline" id="pending-restore-previous" disabled>Restore previous applied</button>
             <button type="button" class="evu-btn evu-btn--outline" id="pending-refresh">Refresh</button>
           </div>
-          <div id="pending-validate-panel" class="evu-alert pending-validate-panel is-hidden" role="group" aria-labelledby="pending-validate-title">
-            <div class="evu-alert__body pending-validate-body">
-              <p class="evu-alert__title" id="pending-validate-title">Config check</p>
-              <p id="pending-client-ip" class="meta pending-client-ip"></p>
-              <ul id="pending-validate-warnings" class="pending-validate-warnings is-hidden"></ul>
-              <div id="pending-lockout-ack-wrap" class="pending-lockout-ack-wrap is-hidden">
-                <label class="evu-check pending-lockout-ack">
-                  <input type="checkbox" id="pending-lockout-ack" class="evu-checkbox" />
-                  <span class="evu-check__text">
-                    <span>I understand these rules may lock me out of this host, and I have another way in.</span>
-                  </span>
-                </label>
-              </div>
-            </div>
-          </div>
           <details id="pending-raw-diff" class="pending-raw-diff">
           <summary>Generated nftables</summary>
           <p class="hint meta">
@@ -1540,7 +1561,7 @@
 
     <template id="help-peers-intro">
       <div class="help-modal-body">
-        <p>Save writes YAML on the server only; <strong>Apply</strong> from <strong>Pending changes</strong> to update WireGuard and nftables when ready.</p>
+        <p>Save writes YAML on the server only; <strong>Apply</strong> updates WireGuard and nftables.</p>
         <p>
           <strong>Status:</strong> from host handshake time — roughly <strong>Online</strong> if the latest handshake was within about three minutes, otherwise stale/offline;
           <strong>Unknown</strong> if statistics are unavailable.
@@ -1569,7 +1590,7 @@
         <p>
           Restricts public <strong>forwarded</strong> ports using GeoIP zones; configured under <code class="inline">geo</code> in the YAML.
         </p>
-        <p>Choose allow vs block via <strong>List mode</strong>, then run <strong>Update geo lists</strong> here or Overview, and <strong>Apply</strong> from Pending.</p>
+        <p>Choose allow vs block via <strong>List mode</strong>, then run <strong>Update geo lists</strong> here or Overview, and <strong>Apply</strong>.</p>
         <p>
           Inbound SSH/HTTP (<code class="inline">input_allows</code>) obey geo only if <strong>Apply geoblocking to inbound allow rules</strong> is on (<strong>Countries &amp; rules</strong> tab).
           Break-glass CIDRs, the global denylist and rate limits are on the <strong>Advanced</strong> tab, and <strong>Zone files</strong> shows what is currently on disk per country.
@@ -1584,10 +1605,7 @@
           A read-only summary of what the host is running right now: WireGuard interface and peer counts, forwarding, geo zone freshness, peer latency, and recent
           activity from <code class="inline">state/events.jsonl</code>.
         </p>
-        <p>
-          <strong>Apply</strong> writes the saved config to nftables and WireGuard — the same action as Apply on <strong>Pending changes</strong>, including the
-          pre-apply check, so it asks you to confirm if the config could cut off your own access. <strong>Update geo lists</strong> refreshes the on-disk country zone files.
-        </p>
+        <p><strong>Update geo lists</strong> refreshes the on-disk country zone files.</p>
         <p><strong>Maintenance mode</strong> keeps every route in config but omits public forwards from the generated rules until you turn it off and Apply.</p>
       </div>
     </template>
@@ -1630,7 +1648,7 @@
     <template id="help-pending-intro">
       <div class="help-modal-body">
         <p>
-          Saving on Peers, Routes, Inbound access or Geoblock writes YAML on the server only. Nothing reaches nftables or WireGuard until you apply here — so this page
+          Saving on Peers, Routes, Inbound access or Geoblock writes YAML on the server only. Nothing reaches nftables or WireGuard until you Apply — so this page
           is the diff between what is saved and what the host is running.
         </p>
         <p>
@@ -1638,8 +1656,8 @@
           place; it has no time limit, unlike the Undo on a toast. The exact rules are under <strong>Generated nftables</strong>.
         </p>
         <p>
-          <strong>Check config</strong> validates the pending ruleset and reports anything that could lock you out of this host; <strong>Apply</strong> runs it
-          for real. <strong>Discard pending</strong> throws away unapplied edits and <strong>Restore previous applied</strong> rolls back to the last known-good config.
+          <strong>Apply</strong> checks first and stops if the check fails or could lock you out of this host; the result stays at the top of the page.
+          <strong>Check config</strong> runs only the check. <strong>Discard pending</strong> throws away unapplied edits and <strong>Restore previous applied</strong> rolls back to the last known-good config.
         </p>
       </div>
     </template>
@@ -1664,10 +1682,9 @@
           in the config. Ports forwarded to peers belong on <strong>Routes</strong> instead.
         </p>
         <p>
-          Turning <strong>Enabled</strong> off keeps a rule in the config but omits it from the generated nftables until you turn it back on. Changes reach the host from
-          <strong>Pending changes</strong>.
+          Turning <strong>Enabled</strong> off keeps a rule in the config but omits it from the generated nftables until you turn it back on.
         </p>
-        <p>Take care with the rule that keeps your own SSH session alive — the config check on Pending changes warns before an apply would lock you out.</p>
+        <p>Take care with the rule that keeps your own SSH session alive — Apply warns first if it would lock you out.</p>
       </div>
     </template>
 
@@ -1679,7 +1696,7 @@
         </p>
         <p>
           That is the setting most likely to lock you out: if your own address is outside the allowed countries, your next SSH connection is dropped. Add a break-glass
-          CIDR on the <strong>Advanced</strong> tab first, and read the config check on <strong>Pending changes</strong> before applying.
+          CIDR on the <strong>Advanced</strong> tab first, and read the config check before applying.
         </p>
       </div>
     </template>
@@ -1780,7 +1797,7 @@
       <div class="help-modal-body">
         <p>
           Turning <strong>Enabled</strong> off keeps this entry in the server YAML but omits it from generated nftables until you turn it on again and
-          <strong>Apply</strong> from <strong>Pending changes</strong>.
+          <strong>Apply</strong>.
         </p>
       </div>
     </template>
@@ -1789,7 +1806,7 @@
       <div class="help-modal-body">
         <p>
           Turning <strong>Enabled</strong> off keeps this peer in the server YAML but omits them from WireGuard until you turn it on again and
-          <strong>Apply</strong> from <strong>Pending changes</strong>.
+          <strong>Apply</strong>.
         </p>
       </div>
     </template>

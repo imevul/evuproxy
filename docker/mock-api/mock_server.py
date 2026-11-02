@@ -1226,6 +1226,9 @@ class Handler(BaseHTTPRequestHandler):
                 )
             )
             return
+        if path == "/api/v1/reload/progress":
+            # The mock's reload finishes at once, so one is never seen running.
+            return self._send_json(200, {"step": ""})
         if path == "/api/v1/pending":
             _ensure_mock_apply_bootstrap()
             disk = _disk_config_sha()

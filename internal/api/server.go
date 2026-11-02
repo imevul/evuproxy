@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oschwald/geoip2-golang"
@@ -43,6 +44,8 @@ type Server struct {
 	// (reload, update-geo, backup, restore, PUT /config, POST /config/discard, POST /config/restore-previous-applied).
 	// A second concurrent request fails fast with HTTP 503 and does not queue.
 	applyMu sync.Mutex
+	// reloadStep is the stage of the running reload (a string), empty when none is running.
+	reloadStep atomic.Value
 
 	EventLog  *eventlog.Logger
 	routeTest *slidingLimiter
@@ -111,6 +114,7 @@ func (s *Server) Routes() http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("POST /api/v1/reload", s.auth(s.handleReload))
+	mux.HandleFunc("GET /api/v1/reload/progress", s.auth(s.handleReloadProgress))
 	mux.HandleFunc("POST /api/v1/update-geo", s.auth(s.handleUpdateGeo))
 	mux.HandleFunc("GET /api/v1/status", s.auth(s.handleStatus))
 	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.handleMetrics))

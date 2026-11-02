@@ -218,7 +218,7 @@ async function saveInboundEditor() {
     renderInboundTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
-    showToast((idxRaw === "" ? "Inbound rule added." : "Inbound rule saved.") + " Review it on Pending changes, then Apply.");
+    showToast(idxRaw === "" ? "Inbound rule added." : "Inbound rule saved.");
   } catch (e) {
     if (e instanceof ConfigMergeError) {
       setEditorMsg(

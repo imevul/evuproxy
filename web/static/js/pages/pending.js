@@ -1,127 +1,13 @@
 import { state } from "../core/state.js";
-import { $, escapeHtml, setApiStatus, clientIPSourceLabel } from "../core/dom.js";
-import { applyErrorText } from "../core/format.js";
+import { $, escapeHtml, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
-import { api } from "../core/api.js";
+import { api, responseEtag } from "../core/api.js";
 import { showToast } from "../core/toast.js";
-import { setTitlePendingCount } from "../core/title.js";
 import { openConfirmModal } from "../core/modal.js";
-import { fetchValidateResult, lockoutRisks, lockoutSignature } from "../core/lockout.js";
+import { checkConfig, invalidateCheck, noteConfigRevision, showUnappliedCount } from "../core/apply_bar.js";
 import { saveConfigEdit } from "../core/config_save.js";
 import { describeConfigChanges, revertChange, reapplyChange } from "../core/config_changes.js";
 import { showUndoToast } from "../core/undo.js";
-
-/**
- * One warning or error from /validate.
- *
- * The message is what the operator has to act on, so it leads; the machine code
- * follows in muted text for anyone matching it against the docs or a bug report.
- */
-function validateFindingItem(finding) {
-  const li = document.createElement("li");
-  li.textContent = finding.message || String(finding);
-  if (finding.code) {
-    const code = document.createElement("span");
-    code.className = "meta pending-validate-code";
-    code.textContent = String(finding.code);
-    li.append(" ", code);
-  }
-  return li;
-}
-
-/**
- * Paints the check result.
- *
- * Rendering only; the Apply gate reads the response, not the DOM. Deriving
- * "is there a lockout risk" here would make the gate depend on this function
- * running and on `#pending-validate-warnings` existing — a missing element would
- * fail open, which is the exact class of bug that left this panel unbuilt.
- */
-function renderPendingValidateResult(res) {
-  const panel = $("pending-validate-panel");
-  const ipLine = $("pending-client-ip");
-  const warnUl = $("pending-validate-warnings");
-  const ackWrap = $("pending-lockout-ack-wrap");
-  const ack = $("pending-lockout-ack");
-  const risks = lockoutRisks(res);
-  const warnings = Array.isArray(res.warnings) ? res.warnings : [];
-  const errors = Array.isArray(res.errors) ? res.errors : [];
-
-  if (panel) {
-    panel.classList.remove("is-hidden");
-    // Severity: failed check > any warning > clean.
-    const severity = !res.ok
-      ? "evu-alert--danger"
-      : warnings.length
-        ? "evu-alert--warning"
-        : "evu-alert--success";
-    panel.classList.remove("evu-alert--danger", "evu-alert--warning", "evu-alert--success");
-    panel.classList.add(severity);
-  }
-  if (ipLine) {
-    const ip = res.detected_client_ip || "unknown";
-    const badge = clientIPSourceLabel(res.ip_detection_source);
-    ipLine.textContent = "Your connection appears as: " + ip + " (" + badge + ")";
-    if (res.ip_detection_note) {
-      ipLine.textContent += ". " + res.ip_detection_note;
-    }
-  }
-  if (warnUl) {
-    warnUl.innerHTML = "";
-    // Both lists, always: a config can fail nft -c *and* carry lockout risks,
-    // and showing only the errors would hide the risks the operator must ack.
-    errors.forEach((e) => warnUl.appendChild(validateFindingItem(e)));
-    warnings.forEach((w) => warnUl.appendChild(validateFindingItem(w)));
-    warnUl.classList.toggle("is-hidden", !errors.length && !warnings.length);
-  }
-
-  // Keep an existing tick only when it was given for these exact warnings.
-  const sig = lockoutSignature(risks);
-  state.pendingValidateSig = sig;
-  if (state.pendingLockoutAckSig !== sig) {
-    state.pendingLockoutAckSig = "";
-    if (ack) ack.checked = false;
-  }
-  if (ackWrap) ackWrap.classList.toggle("is-hidden", !risks.length);
-}
-
-/**
- * Runs the pre-apply check and renders it. Returns the result, or null when the
- * check could not be completed (the message is already on screen).
- */
-async function runPendingValidate() {
-  setPendingMsg("Checking config…");
-  const { res, error } = await fetchValidateResult();
-  if (!res) {
-    invalidatePendingValidate();
-    setPendingMsg(error, true);
-    return null;
-  }
-  renderPendingValidateResult(res);
-  setPendingMsg(
-    res.ok ? "Config check passed (nft -c)." : "Config check failed; fix the errors above.",
-    !res.ok
-  );
-  return res;
-}
-
-/**
- * Drops the panel and any acknowledgement.
- *
- * Called whenever the config underneath may have moved. Apply re-runs the check
- * regardless, so this is about not showing a stale verdict — and about not
- * leaving a ticked box behind for a set of warnings that no longer applies.
- */
-function invalidatePendingValidate() {
-  state.pendingValidateSig = "";
-  state.pendingLockoutAckSig = "";
-  const ack = $("pending-lockout-ack");
-  if (ack) ack.checked = false;
-  const ackWrap = $("pending-lockout-ack-wrap");
-  if (ackWrap) ackWrap.classList.add("is-hidden");
-  const panel = $("pending-validate-panel");
-  if (panel) panel.classList.add("is-hidden");
-}
 
 function setPendingMsg(text, isErr) {
   const el = $("pending-msg");
@@ -638,11 +524,11 @@ async function fetchPendingCounts() {
 }
 
 /**
- * How many separate places the ruleset changes in, for the tab title. The API
- * only says whether anything is pending, so this is an estimate. A pending edit
- * that leaves the ruleset alone (a note, say) still counts as one.
+ * How many separate places the ruleset changes in. An estimate, for when the Changes
+ * list has no rows to count. A pending edit that leaves the ruleset alone (a note, say)
+ * still counts as one.
  */
-function pendingChangeCount(p) {
+function rulesetChangeCount(p) {
   const ops = computeLineDiff(splitLines(String(p.nftables_baseline ?? "")), splitLines(String(p.nftables ?? "")));
   if (!ops) return 1;
   let count = 0;
@@ -655,24 +541,31 @@ function pendingChangeCount(p) {
   return Math.max(count, 1);
 }
 
+/** The rows on the Changes list, so the count and the list agree. */
+function unappliedCount(p, cfg) {
+  const rows = cfg ? describeConfigChanges(p.applied_config, cfg).length : 0;
+  return rows || rulesetChangeCount(p);
+}
+
+/** The saved config, without a second request when the page on screen just loaded this revision. */
+function savedConfig(p) {
+  const loaded = state.lastConfig;
+  return loaded && responseEtag(loaded) === '"' + p.current_config_sha256 + '"' ? loaded : api("/v1/config");
+}
+
+/* Saves and navigation both refresh this, so an earlier answer can land after a later one. */
+let pendingBadgeSeq = 0;
+
 export async function refreshPendingBadge() {
-  const dot = $("nav-pending-dot");
-  if (!dot) return;
-  // The dot is colour-only and aria-hidden, so the nav link carries the same
-  // state as text for anyone who cannot see it.
-  const sr = $("nav-pending-sr");
-  const setPending = (pending) => {
-    dot.classList.toggle("is-hidden", !pending);
-    dot.title = pending ? "Saved config not yet applied to host" : "";
-    if (sr) sr.textContent = pending ? " (unapplied changes)" : "";
-  };
+  const seq = ++pendingBadgeSeq;
   try {
     const p = await api("/v1/pending");
-    setPending(!!p.pending);
-    setTitlePendingCount(p.pending ? pendingChangeCount(p) : 0);
+    const cfg = p.pending && p.applied_config ? await savedConfig(p) : null;
+    if (seq !== pendingBadgeSeq) return;
+    noteConfigRevision(p.current_config_sha256);
+    showUnappliedCount(p.pending ? unappliedCount(p, cfg) : 0);
   } catch {
-    setPending(false);
-    setTitlePendingCount(0);
+    if (seq === pendingBadgeSeq) showUnappliedCount(0);
   }
 }
 
@@ -690,9 +583,6 @@ export async function refreshPendingPage() {
   if (!status || !panel) return;
   setPendingMsg("");
   setChangesMsg("");
-  // The config may have changed since the last check (another tab, another
-  // page in this one, or an apply that just landed).
-  invalidatePendingValidate();
   const doneLoading = beginLoading("pending-changes-list", "pending-diff-panel");
   try {
     const [p, cfg] = await Promise.all([api("/v1/pending"), api("/v1/config")]);
@@ -735,7 +625,11 @@ export async function refreshPendingPage() {
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initPendingPage() {
-  $("pending-refresh").addEventListener("click", refreshPendingPage);
+  $("pending-refresh").addEventListener("click", () => {
+    // Refresh is the operator saying the config may have moved, so the earlier result goes too.
+    invalidateCheck();
+    void refreshPendingPage();
+  });
   $("pending-changes-list").addEventListener("click", (e) => {
     const revert = e.target.closest("[data-change-revert]");
     if (revert) void revertListedChange(+revert.dataset.changeRevert);
@@ -755,56 +649,7 @@ export function initPendingPage() {
     });
   }
   const pendingCheck = $("pending-check-config");
-  if (pendingCheck) pendingCheck.addEventListener("click", () => void runPendingValidate());
-
-  const ackBox = $("pending-lockout-ack");
-  if (ackBox) {
-    // Bind the tick to the warnings currently on screen. Re-validating on Apply
-    // then revokes it automatically if the config moved in the meantime.
-    ackBox.addEventListener("change", () => {
-      state.pendingLockoutAckSig = ackBox.checked ? state.pendingValidateSig : "";
-    });
-  }
-
-  const applyBtn = $("pending-apply");
-  applyBtn.addEventListener("click", async () => {
-    if (applyBtn.disabled) return;
-    applyBtn.disabled = true;
-    try {
-      // Always check immediately before applying. A stored "it passed earlier"
-      // cannot know about a config saved since — in another tab, by the CLI, or
-      // on another page of this one.
-      const res = await runPendingValidate();
-      if (!res) return;
-      if (!res.ok) return;
-      const risks = lockoutRisks(res);
-      if (risks.length) {
-        const ack = $("pending-lockout-ack");
-        const acked = !!ack && ack.checked && state.pendingLockoutAckSig === lockoutSignature(risks);
-        if (!acked) {
-          setPendingMsg(
-            "This config may lock you out. Read the warnings above, then tick the box and apply again.",
-            true
-          );
-          if (ack) ack.focus();
-          return;
-        }
-      }
-      setPendingMsg("…");
-      try {
-        await api("/v1/reload", { method: "POST" });
-        setPendingMsg("");
-        await refreshPendingPage();
-        await refreshPendingBadge();
-        setApiStatus(true);
-        showToast("Applied to host");
-      } catch (e) {
-        setPendingMsg(applyErrorText(e), true);
-      }
-    } finally {
-      applyBtn.disabled = false;
-    }
-  });
+  if (pendingCheck) pendingCheck.addEventListener("click", () => void checkConfig());
 
   const pendingDiscard = $("pending-discard");
   if (pendingDiscard) {
@@ -824,7 +669,7 @@ export function initPendingPage() {
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);
-            showToast("Pending changes discarded. Apply when ready.");
+            showToast("Pending changes discarded.");
           } catch (e) {
             setPendingMsg(String(e.message || e), true);
           }
@@ -851,7 +696,7 @@ export function initPendingPage() {
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);
-            showToast("Previous applied config restored. Apply when ready.");
+            showToast("Previous applied config restored.");
           } catch (e) {
             setPendingMsg(String(e.message || e), true);
           }

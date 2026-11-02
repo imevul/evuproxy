@@ -12,11 +12,12 @@ test.beforeEach(async ({ page }) => {
   await seed(page, { scheme: "light" });
 });
 
-test("both host actions are labelled Apply", async ({ page }) => {
+test("the host action is labelled Apply", async ({ page }) => {
+  await page.route("**/api/v1/pending", (route) => route.fulfill({ json: { pending: true } }));
   await gotoRoute(page, origin, "overview");
-  await expect(page.locator("#btn-apply")).toHaveText("Apply");
+  await expect(page.locator("#apply-bar-apply")).toHaveText("Apply");
   await gotoRoute(page, origin, "pending");
-  await expect(page.locator("#pending-apply")).toHaveText("Apply");
+  await expect(page.locator("#apply-bar-apply")).toHaveText("Apply");
   await expect(page.locator("#pending-refresh")).toHaveText("Refresh");
 });
 
@@ -50,26 +51,21 @@ test("a failed Apply still shows why", async ({ page }) => {
   await expect(page.locator("#overview-events-list")).toContainText("nft: syntax error");
 });
 
-const APPLY_ERRORS = [
-  { route: "overview", button: "#btn-apply", msg: "#overview-action-msg" },
-  { route: "pending", button: "#pending-apply", msg: "#pending-msg" },
-];
-
-for (const { route: name, button, msg } of APPLY_ERRORS) {
-  test(`a failed Apply on ${name} does not repeat the API's reload error`, async ({ page }) => {
-    await page.route("**/api/v1/validate", (route) =>
-      route.fulfill({ json: { ok: true, warnings: [] } })
-    );
-    await page.route("**/api/v1/reload", (route) =>
-      route.fulfill({ status: 500, json: { error: "reload failed" } })
-    );
-    await gotoRoute(page, origin, name);
-    await page.locator(button).click();
-    await expect(page.locator(msg)).toHaveText("Apply failed");
-  });
-}
+test("a failed Apply does not repeat the API's reload error", async ({ page }) => {
+  await page.route("**/api/v1/pending", (route) => route.fulfill({ json: { pending: true } }));
+  await page.route("**/api/v1/validate", (route) =>
+    route.fulfill({ json: { ok: true, warnings: [] } })
+  );
+  await page.route("**/api/v1/reload", (route) =>
+    route.fulfill({ status: 500, json: { error: "reload failed" } })
+  );
+  await gotoRoute(page, origin, "overview");
+  await page.locator("#apply-bar-apply").click();
+  await expect(page.locator("#apply-msg")).toHaveText("Apply failed");
+});
 
 test("another Apply error is shown as sent", async ({ page }) => {
+  await page.route("**/api/v1/pending", (route) => route.fulfill({ json: { pending: false } }));
   await page.route("**/api/v1/validate", (route) =>
     route.fulfill({ json: { ok: true, warnings: [] } })
   );
@@ -78,7 +74,7 @@ test("another Apply error is shown as sent", async ({ page }) => {
   );
   await gotoRoute(page, origin, "pending");
   await page.locator("#pending-apply").click();
-  await expect(page.locator("#pending-msg")).toHaveText("another operation is in progress");
+  await expect(page.locator("#apply-msg")).toHaveText("another operation is in progress");
 });
 
 test("geo freshness calls an Apply an Apply", async ({ page }) => {
