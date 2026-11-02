@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -151,6 +152,7 @@ MOCK_CONFIG_DEFAULT = {
     "forwarding": {
         "routes": [
             {
+                "name": "Minecraft",
                 "proto": "tcp",
                 "ports": ["25565", "25566", "25567"],
                 "target_ip": "10.100.0.10",
@@ -348,6 +350,15 @@ def _format_port_set(ports: list) -> str:
     if not parts:
         return ""
     return "{ " + ", ".join(parts) + " }"
+
+
+def _route_name_error(name: str) -> str:
+    """Same rule and messages as validRouteName in internal/config/validators.go."""
+    if any(ch != "\t" and unicodedata.category(ch) == "Cc" for ch in name):
+        return "name cannot contain newlines or control characters"
+    if len(name.strip()) > 64:
+        return "name is longer than 64 characters"
+    return ""
 
 
 def _route_protocols(proto: str | None) -> list[str]:
@@ -1348,6 +1359,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(400, {"error": "geo.countries required when geo.enabled"})
             if not geo.get("zone_dir"):
                 return self._send_json(400, {"error": "geo.zone_dir required when geo.enabled"})
+        for i, route in enumerate((body.get("forwarding") or {}).get("routes") or []):
+            name_err = _route_name_error(route.get("name") or "")
+            if name_err:
+                return self._send_json(400, {"error": "forwarding.routes[%d]: %s" % (i, name_err)})
         MOCK_CONFIG = copy.deepcopy(body)
         _persist_mock_config()
         return self._send_json(

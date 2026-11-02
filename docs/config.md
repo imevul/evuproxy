@@ -132,6 +132,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `name` | string (optional) | Label for operators, shown first in the web UI. Up to 64 characters, no newlines or control characters. Not used by the rules engine, and need not be unique. Checked even when the route is disabled. |
 | `proto` | string | `tcp`, `udp`, `both`, or several protocols separated by comma, `+`, or spaces (e.g. `tcp, udp`). `both` expands to TCP and UDP. |
 | `ports` | list of strings | Port expressions passed through to nftables. Each element is a single port, range, or brace list fragment. Examples: `25565`, `80-81`, `80/tcp`-style is not used—use `proto` and plain port tokens. See **Port list syntax** below. |
 | `target_ip` | string | **IPv4 host address only** (no `/mask`), e.g. `10.100.0.2`. Must match the **IPv4** of a **non-disabled** peer’s `tunnel_ip`. |

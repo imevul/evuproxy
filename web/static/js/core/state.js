@@ -51,6 +51,17 @@ export const state = {
   topologyPanY: 0,
   topologyZoomK: 1,
   topologyPanDrag: null,
+  /** Large configs only: the graph groups routes by peer (see TOPO_SCALE_ROUTES). */
+  topologyAtScale: false,
+  /** Peer keys opened by the user. Groups start collapsed. */
+  topologyExpanded: new Set(),
+  /** A filter opens every group that matches; these are the ones closed again since it was typed. */
+  topologyFilterCollapsed: new Set(),
+  topologyFilter: "",
+  /** Height of the drawn graph, to stop scrolling past its end. */
+  topologyContentH: 0,
+  /** Arguments of the last render, so collapse and filter redraw without a fetch. */
+  topologyLastRender: null,
 
   lastUIPrefs: {
     peer_tunnel_subnet_cidr: "",

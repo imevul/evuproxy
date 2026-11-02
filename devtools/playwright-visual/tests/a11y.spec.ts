@@ -9,7 +9,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import type { Result } from "axe-core";
 
-import { ROUTES, SCHEMES, gotoRoute, seed } from "./helpers";
+import { ROUTES, SCHEMES, gotoRoute, largeConfig, seed } from "./helpers";
 
 const BLOCKING = new Set(["critical", "serious"]);
 
@@ -91,6 +91,21 @@ test.describe("accessibility (axe-core)", () => {
       await page.locator(".overview-first-run").waitFor({ state: "visible" });
       await expectNoBlockingViolations(page, `first-run checklist (${scheme})`);
     });
+
+    for (const route of ["routes", "peers", "inbound", "topology"] as const) {
+      test(`a11y large config ${route} ${scheme}`, async ({ page, baseURL }) => {
+        test.skip(!baseURL, "baseURL unset");
+        await seed(page, { scheme });
+        await page.route("**/api/v1/config", async (r) => {
+          if (r.request().method() !== "GET") return r.continue();
+          const res = await r.fetch();
+          await r.fulfill({ response: res, json: largeConfig(await res.json()) });
+        });
+        await gotoRoute(page, baseURL!, route);
+        await page.locator(`#page-${route} .table-sort, #page-${route} [data-topo-toggle]`).first().waitFor({ state: "visible" });
+        await expectNoBlockingViolations(page, `large config ${route} (${scheme})`);
+      });
+    }
 
     test(`a11y danger confirm ${scheme}`, async ({ page, baseURL }) => {
       test.skip(!baseURL, "baseURL unset");
