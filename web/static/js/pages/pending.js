@@ -579,10 +579,14 @@ function renderChangesList(p, cfg) {
   if (rawDiff && p.pending && !comparable) rawDiff.open = true;
 }
 
-/** Where focus goes once a row has left the list: the row now in its place, else the heading. */
+/**
+ * Where focus goes once a row has left the list: the row now in its place, else the heading.
+ * With nothing left pending the Changes section is hidden and cannot take focus, so the page heading does.
+ */
 function focusChangeAt(index) {
   const buttons = document.querySelectorAll("#pending-changes-list [data-change-revert]");
-  const target = buttons[Math.min(index, buttons.length - 1)] || $("pending-changes-title");
+  const heading = $("pending-changes").classList.contains("is-hidden") ? "pending-page-title" : "pending-changes-title";
+  const target = buttons[Math.min(index, buttons.length - 1)] || $(heading);
   if (target) target.focus();
 }
 

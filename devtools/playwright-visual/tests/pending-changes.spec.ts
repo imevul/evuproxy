@@ -315,6 +315,41 @@ test.describe("Changes list on Pending", () => {
     await expect(page.locator("#pending-changes-title")).toBeFocused();
   });
 
+  /** Real /pending, so the mock itself decides whether anything is still pending. */
+  async function openOneRealChange(page: Page, request: APIRequestContext) {
+    await page.unroute("**/api/v1/pending");
+    const res = await request.get(origin + "/api/v1/pending", { headers: auth() });
+    const baseline = (await res.json()).applied_config;
+    const saved = clone(baseline);
+    saved.input_allows = [...(saved.input_allows || []), { proto: "udp", dport: "51820" }];
+    await putConfig(request, saved);
+    await gotoRoute(page, origin, "pending");
+    await expect(rows(page)).toHaveCount(1);
+    return baseline;
+  }
+
+  test("focus moves to the page heading when the last Revert clears pending", async ({ page, request }) => {
+    await openOneRealChange(page, request);
+    await revertOf(page, "Added inbound rule UDP 51820").click();
+
+    await expect(page.locator("#pending-status")).toContainText("No pending changes");
+    await expect(page.locator("#pending-changes")).toBeHidden();
+    await expect(page.getByRole("heading", { level: 1, name: "Pending changes" })).toBeFocused();
+  });
+
+  test("focus moves to the page heading when the change is already gone and nothing is pending", async ({
+    page,
+    request,
+  }) => {
+    const baseline = await openOneRealChange(page, request);
+    await putConfig(request, baseline);
+    await revertOf(page, "Added inbound rule UDP 51820").click();
+
+    await expect(toast(page)).toContainText("Already gone");
+    await expect(page.locator("#pending-changes")).toBeHidden();
+    await expect(page.getByRole("heading", { level: 1, name: "Pending changes" })).toBeFocused();
+  });
+
   test("each Revert names what it reverts, and peer names are not parsed as HTML", async ({ page, request }) => {
     await openWith(page, request, (c) => (c.peers[1].name = "<img src=x onerror=alert(1)>"));
     await expect(rows(page).locator("img")).toHaveCount(0);
