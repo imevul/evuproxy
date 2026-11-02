@@ -47,6 +47,20 @@ PW_VISUAL_SUBDIR=visual-after npx playwright test smoke-visual
 
 Compare e.g. `screenshots/visual-before/overview-dark.png` against `screenshots/visual-after/overview-dark.png`.
 
+### Measuring screenshot flakiness
+
+`PW_FREEZE_CACHE` turns on frozen captures (`tests/freeze.ts`): a fixed clock and peer keys, with API responses and fonts replayed from that file. `playwright.freeze.config.ts` adds a fixed locale and timezone and turns off retries. `measure-flake.mjs` then compares the runs using the comparator behind `toHaveScreenshot`:
+
+```bash
+cd devtools/playwright-visual
+export PW_FREEZE_CACHE=$PWD/screenshots/freeze-cache.json   # the first run fills it
+PW_VISUAL_SUBDIR=run-1 npx playwright test smoke-visual.spec --config playwright.freeze.config.ts
+PW_VISUAL_SUBDIR=run-2 npx playwright test smoke-visual.spec --config playwright.freeze.config.ts
+node measure-flake.mjs --threshold=0.02 screenshots/run-1 screenshots/run-2
+```
+
+Run all captures in the `mcr.microsoft.com/playwright` image matching the locked Playwright version, on the same port: the cache is keyed by full URL, and runners without that image's fonts render differently. Set `PW_FREEZE_CSS` to add a deliberate regression and see whether a threshold catches it.
+
 ## Accessibility (`make a11y`)
 
 Runs axe-core against WCAG 2.0/2.1 A and AA on all 11 routes in both schemes, at desktop size and again at 375×812.
