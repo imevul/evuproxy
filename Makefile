@@ -4,6 +4,10 @@
 
 # Run from the repository root. Requires Go 1.25+, Docker, and `docker compose` (v2).
 
+# docker-compose.dev.yml runs mock-api as this user; shells don't export these on their own.
+export UID := $(shell id -u)
+export GID := $(shell id -g)
+
 # check runs the same gates as CI: formatting, vet, and the full test suite.
 check: fmt vet test
 
