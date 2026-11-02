@@ -163,14 +163,14 @@ if (ctxHelpClose) ctxHelpClose.addEventListener("click", closeContextHelpModal);
 const ctxHelpBd = $("context-help-backdrop");
 if (ctxHelpBd) ctxHelpBd.addEventListener("click", closeContextHelpModal);
 
-document.querySelectorAll(".table-filter").forEach((input) => {
+document.querySelectorAll(".table-filter[data-filter-table]").forEach((input) => {
   input.addEventListener("input", () => applyTableFilter(input.dataset.filterTable));
 });
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
     const tag = (ev.target && ev.target.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ev.target?.isContentEditable) return;
-    // Only Peers and Routes have a filter; elsewhere the key does nothing.
+    // Only Peers, Routes and a large Topology have a filter; elsewhere the key does nothing.
     const filter = document.querySelector(".page:not([hidden]) .table-filter");
     if (!filter) return;
     ev.preventDefault();

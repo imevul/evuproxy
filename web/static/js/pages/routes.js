@@ -16,10 +16,12 @@ import {
   rowErrorHtml,
   restoreRowSwitchFocus,
   focusTableRow,
+  rowIndexAfterRemoval,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
+import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
@@ -210,6 +212,10 @@ function formatRouteProtoCell(p) {
   return escapeHtml(plain);
 }
 
+function routeName(r) {
+  return String(r.name || "").trim();
+}
+
 function renderRoutesTable(cfg) {
   const wrap = $("routes-table-wrap");
   const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
@@ -226,11 +232,22 @@ function renderRoutesTable(cfg) {
     }
     return;
   }
-  const rows = routes
-    .map((r, i) => {
+  // No column for a config that names nothing: it would be blank on every row.
+  const anyNamed = routes.some(routeName);
+  const rows = sortedRows("routes", routes, {
+    name: routeName,
+    proto: (r) => routeProtoPlainText(r.proto),
+    ports: (r) => (r.ports || []).join(", "),
+    target: (r) => peerNameForTargetHost(cfg, r.target_ip) || String(r.target_ip || "").trim(),
+    source: (r) => (r.source_allow_cidrs || []).length,
+    enabled: (r) => (r.disabled ? 0 : 1),
+  })
+    .map(({ item: r, index: i }) => {
       const targetHost = String(r.target_ip || "").trim();
       const targetPeerName = peerNameForTargetHost(cfg, targetHost);
-      const f = [formatRouteProtoCell(r.proto), (r.ports || []).join(", "), targetHost, targetPeerName].join(" ").toLowerCase();
+      const name = routeName(r);
+      const f = [name, formatRouteProtoCell(r.proto), (r.ports || []).join(", "), targetHost, targetPeerName].join(" ").toLowerCase();
+      const nameCell = !anyNamed ? "" : name ? `<td class="route-name-cell">${escapeHtml(name)}</td>` : '<td><span class="meta">—</span></td>';
       const srcList = r.source_allow_cidrs || [];
       const srcCell =
         srcList.length > 0
@@ -241,14 +258,19 @@ function renderRoutesTable(cfg) {
             "</span> <span class=\"meta\">CIDR</span></td>"
           : '<td><span class="meta">any</span></td>';
       return (
-        `<tr data-row="${i}" tabindex="-1" data-filter="${escapeHtml(f)}"${r.disabled ? ' class="is-row-disabled"' : ""}><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
+        `<tr data-row="${i}" tabindex="-1" data-filter="${escapeHtml(f)}"${r.disabled ? ' class="is-row-disabled"' : ""}>${nameCell}<td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
         monoIpCopyCellHtml(r.target_ip, targetPeerName) +
-        `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-test="${i}">Test</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-del="${i}">Remove</button></td></tr>` +
-        rowErrorHtml("data-route-disabled", i, 6)
+        `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, name ? "Enabled: " + name : "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-test="${i}">Test</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-del="${i}">Remove</button></td></tr>` +
+        rowErrorHtml("data-route-disabled", i, anyNamed ? 7 : 6)
       );
     })
     .join("");
-  wrap.innerHTML = `<table class="data"><thead><tr><th scope="col">Proto</th><th scope="col">Ports</th><th scope="col">Target</th><th scope="col">Source</th><th scope="col">Enabled</th><th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
+  const nameHead = anyNamed ? sortHeaderHtml("routes", "name", "Name") : "";
+  setTableHtml(
+    wrap,
+    `<table class="data"><thead><tr>${nameHead}${sortHeaderHtml("routes", "proto", "Proto")}${sortHeaderHtml("routes", "ports", "Ports")}${sortHeaderHtml("routes", "target", "Target")}${sortHeaderHtml("routes", "source", "Source")}${sortHeaderHtml("routes", "enabled", "Enabled")}<th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`
+  );
+  bindSortHeaders(wrap, "routes", () => renderRoutesTable(cfg));
   bindTunnelIpCopyButtons(wrap, setRoutesMsg);
   wrap.querySelectorAll("[data-route-edit]").forEach((b) => {
     b.addEventListener("click", () => openRouteEditor(+b.getAttribute("data-route-edit")));
@@ -287,6 +309,7 @@ function openRouteEditor(index) {
   if (index === -1) {
     $("route-edit-index").value = "";
     $("route-editor-title").textContent = "Add route";
+    $("route-f-name").value = "";
     setRouteProtoCheckboxes("tcp");
     $("route-f-ports").value = "";
     const sa0 = $("route-f-source-allow");
@@ -303,6 +326,7 @@ function openRouteEditor(index) {
     routeEditBase = JSON.stringify(r);
     $("route-edit-index").value = String(index);
     $("route-editor-title").textContent = "Edit route";
+    $("route-f-name").value = r.name || "";
     setRouteProtoCheckboxes(r.proto);
     $("route-f-ports").value = (r.ports || []).join(", ");
     $("route-f-target").value = r.target_ip || "";
@@ -326,7 +350,7 @@ function openRouteEditor(index) {
   const modal = $("route-modal");
   if (modal) {
     openModal(modal);
-    const firstFocus = $("route-f-proto-tcp");
+    const firstFocus = $("route-f-name");
     if (firstFocus) requestAnimationFrame(() => firstFocus.focus());
   }
 }
@@ -499,6 +523,8 @@ async function saveRouteEditor() {
     disabled: !(routeEn && routeEn.checked),
     source_allow_cidrs: srcList.length ? srcList : undefined,
   };
+  const name = $("route-f-name").value.trim();
+  if (name) entry.name = name;
   const denyList = parseSourceAllowListInput(($("route-f-source-deny") && $("route-f-source-deny").value) || "");
   if (denyList.length) entry.source_deny_cidrs = denyList;
   const gm = ($("route-f-geo-mode") && $("route-f-geo-mode").value) || "inherit";
@@ -564,15 +590,17 @@ async function removeRoute(index) {
       removedAt = findConfigRow(routes, index, identity, routeIdentity, "route");
       [removed] = routes.splice(removedAt, 1);
     });
+    const focusAt = rowIndexAfterRemoval(wrap, row, removedAt);
     await fadeOutRow(row);
     setRoutesMsg("");
     renderRoutesTable(c);
     setApiStatus(true);
     refreshPendingBadge();
-    focusTableRow(wrap, removedAt, $("routes-add"));
+    focusTableRow(wrap, focusAt, $("routes-add"));
     const targetHost = String(removed.target_ip || "").trim();
     const target = peerNameForTargetHost(c, targetHost) || targetHost || "—";
-    const label = routeProtoPlainText(removed.proto) + " " + ((removed.ports || []).join(", ") || "—") + " to " + target;
+    const detail = routeProtoPlainText(removed.proto) + " " + ((removed.ports || []).join(", ") || "—") + " to " + target;
+    const label = routeName(removed) ? routeName(removed) + ": " + detail : detail;
     const removedJson = JSON.stringify(removed);
     let restoredAt = removedAt;
     showUndoToast("Removed route " + label + ".", {

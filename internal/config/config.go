@@ -54,6 +54,8 @@ type Forwarding struct {
 
 // ForwardRoute maps public TCP or UDP ports to a peer tunnel IPv4 (must match a peer's tunnel_ip).
 type ForwardRoute struct {
+	// Name is an optional label for operators; not used by the rules engine.
+	Name     string   `yaml:"name,omitempty" json:"name,omitempty"`
 	Proto    string   `yaml:"proto" json:"proto"`                           // tcp, udp, both, or comma/plus-separated e.g. tcp,udp
 	Ports    []string `yaml:"ports" json:"ports"`                           // port/range/brace-list strings (nft dport set syntax)
 	TargetIP string   `yaml:"target_ip" json:"target_ip"`                   // IPv4, no CIDR
@@ -319,6 +321,10 @@ func (c *Config) validateForwardingRoutes() error {
 		}
 	}
 	for i, r := range c.Forwarding.Routes {
+		// Before the Disabled check: the name is shown whether or not the route is on.
+		if err := validRouteName(r.Name); err != nil {
+			return fmt.Errorf("forwarding.routes[%d]: %w", i, err)
+		}
 		if r.Disabled {
 			continue
 		}
