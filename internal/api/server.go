@@ -140,6 +140,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleLogs))
 	mux.HandleFunc("GET /api/v1/diagnostics.md", s.auth(s.handleDiagnosticsMD))
 	mux.HandleFunc("POST /api/v1/backup", s.auth(s.handleBackup))
+	mux.HandleFunc("GET /api/v1/backup/info", s.auth(s.handleBackupInfo))
 	mux.HandleFunc("POST /api/v1/restore", s.auth(s.handleRestore))
 	return mux
 }

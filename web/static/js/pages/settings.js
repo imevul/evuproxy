@@ -332,6 +332,19 @@ function stableConfigJson(cfg) {
   return JSON.stringify(cfg == null ? null : stableSortKeys(cfg));
 }
 
+/** "2 peers, 3 routes, 1 inbound rule": what an uploaded config holds, to confirm by. */
+function configRowSummary(cfg) {
+  const count = (list, one) => {
+    const n = Array.isArray(list) ? list.length : 0;
+    return n + " " + one + (n === 1 ? "" : "s");
+  };
+  return [
+    count(cfg.peers, "peer"),
+    count(cfg.forwarding && cfg.forwarding.routes, "route"),
+    count(cfg.input_allows, "inbound rule"),
+  ].join(", ");
+}
+
 function openConfigUploadModal() {
   const m = $("config-upload-modal");
   if (m) openModal(m);
@@ -497,7 +510,7 @@ export function initSettingsPage() {
 
   const restoreBtn = $("btn-restore-run");
   if (restoreBtn) {
-    restoreBtn.addEventListener("click", () => {
+    restoreBtn.addEventListener("click", async () => {
       const path = (($("restore-path-input") && $("restore-path-input").value) || "").trim();
       const msg = $("backup-restore-msg");
       if (!path) {
@@ -507,11 +520,37 @@ export function initSettingsPage() {
         }
         return;
       }
+      let dated = "";
+      try {
+        const info = await api("/v1/backup/info?path=" + encodeURIComponent(path));
+        dated = ", dated " + new Date(info.modified).toLocaleString();
+      } catch (e) {
+        // An older API has no date to give; only a missing archive is worth stopping for.
+        if (String(e.message) === "archive not found") {
+          if (msg) {
+            msg.textContent = "No archive at " + path + ".";
+            msg.classList.add("err");
+          }
+          return;
+        }
+      }
+      const name = path.slice(path.lastIndexOf("/") + 1);
       openConfirmModal({
-        title: "Restore from backup?",
+        title: "Restore " + name + "?",
         message:
-          "This replaces files under /etc/evuproxy from the archive. Reload the host if needed. Path: " + path,
+          "This replaces files under /etc/evuproxy with the archive " + path + dated + ". Reload the host if needed.",
         confirmLabel: "Replace host files",
+        extraAction: {
+          label: "Back up current config first",
+          run: async () => {
+            const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+            // Next to the archive, so it is under the allow directory, and never the archive itself.
+            const target = path.slice(0, path.lastIndexOf("/") + 1) + "evuproxy-pre-restore-" + stamp + ".tgz";
+            await api("/v1/backup?path=" + encodeURIComponent(target), { method: "POST" });
+            void refreshOverviewEventsList();
+            return "Backup created: " + target;
+          },
+        },
         onConfirm: async () => {
           closeConfirmModal();
           if (msg) {
@@ -589,7 +628,7 @@ export function initSettingsPage() {
         if (hint) {
           hint.textContent = same
             ? "Uploaded JSON matches server config."
-            : "Preview below — Save replaces the server file (YAML comments are not preserved).";
+            : "Save replaces the saved config with " + f.name + " (" + configRowSummary(parsed) + "). YAML comments are not preserved.";
         }
         const preC = $("config-upload-pre-current");
         const preN = $("config-upload-pre-new");

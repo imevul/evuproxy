@@ -9,13 +9,15 @@ import {
   clearRowError,
   rowErrorHtml,
   restoreRowSwitchFocus,
+  focusTableRow,
   fadeOutRow,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
-import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
+import { showUndoToast } from "../core/undo.js";
+import { openModal, closeModal, dismissModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 /** JSON of the rule open in the editor, to detect it changing elsewhere before Save. */
@@ -36,7 +38,20 @@ async function patchInboundDisabled(index, disabled) {
     setApiStatus(true);
     refreshPendingBadge();
     renderInboundTable(cfg);
-    showToast(disabled ? "Inbound rule disabled" : "Inbound rule enabled");
+    const label = (off) => (off ? "Inbound rule disabled" : "Inbound rule enabled");
+    showUndoToast(label(disabled), {
+      page: "inbound",
+      edit: (c) => {
+        c.input_allows[findConfigRow(c.input_allows, index, identity, inboundRuleIdentity, "inbound rule")].disabled = !disabled;
+      },
+      afterSave: (next, focus) => {
+        setInboundMsg("");
+        refreshPendingBadge();
+        renderInboundTable(next);
+        if (focus) restoreRowSwitchFocus($("inbound-table-wrap"), "data-inbound-disabled", currentIndex(), { force: true });
+      },
+      message: () => label(!disabled),
+    });
   } catch (e) {
     const at = e instanceof ConfigMergeError ? -1 : currentIndex();
     setInboundMsg("");
@@ -82,7 +97,7 @@ function renderInboundTable(cfg) {
         " " +
         (dportDisplay(r.dport) || r.note || "#" + i);
       return (
-        `<tr${r.disabled ? ' class="is-row-disabled"' : ""}><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(dportDisplay(r.dport))}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>` +
+        `<tr data-row="${i}" tabindex="-1"${r.disabled ? ' class="is-row-disabled"' : ""}><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(dportDisplay(r.dport))}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>` +
         rowErrorHtml("data-inbound-disabled", i, 5)
       );
     })
@@ -92,7 +107,10 @@ function renderInboundTable(cfg) {
     b.addEventListener("click", () => openInboundEditor(+b.getAttribute("data-inbound-edit")));
   });
   wrap.querySelectorAll("[data-inbound-del]").forEach((b) => {
-    b.addEventListener("click", () => removeInboundRule(+b.getAttribute("data-inbound-del")));
+    b.addEventListener("click", (ev) => {
+      // The next row slides under the pointer, so a double-click must not remove it too.
+      if (ev.detail <= 1) removeInboundRule(+b.getAttribute("data-inbound-del"));
+    });
   });
   wrap.querySelectorAll("input[data-inbound-disabled]").forEach((inp) => {
     inp.addEventListener("click", (ev) => ev.stopPropagation());
@@ -213,43 +231,60 @@ function inboundRuleIdentity(r) {
   );
 }
 
+/** One removal at a time: a second click on the same row would fail as "removed elsewhere". */
+let inboundRemoveBusy = false;
+
 async function removeInboundRule(index) {
   const cfg = state.lastConfig;
-  if (!cfg || !cfg.input_allows || cfg.input_allows[index] === undefined) return;
-  const rule = cfg.input_allows[index];
-  const identity = inboundRuleIdentity(rule);
-  const openIndex = index;
-  const proto = String(rule.proto || "").toUpperCase() || "—";
-  const dport = dportDisplay(rule.dport) || "—";
-  const note = String(rule.note || "").trim();
-  const label = proto + " " + dport + (note ? " (" + note + ")" : "");
-  openConfirmModal({
-    title: "Remove inbound rule?",
-    message:
-      label +
-      " will no longer be open on this host. The host is not updated until you apply on Pending changes.",
-    confirmLabel: "Remove rule",
-    onConfirm: async () => {
-      try {
-        const removeBtn = document.querySelector(`#inbound-table-wrap [data-inbound-del="${openIndex}"]`);
-        const row = removeBtn && removeBtn.closest("tr");
-        // Re-resolve in the edit: the list may have changed while the dialog was open, or since this tab loaded.
-        const c = await saveConfigEdit((draft) => {
-          const i = findConfigRow(draft.input_allows, openIndex, identity, inboundRuleIdentity, "inbound rule");
-          draft.input_allows.splice(i, 1);
-        });
-        await fadeOutRow(row);
+  if (inboundRemoveBusy || !cfg || !cfg.input_allows || cfg.input_allows[index] === undefined) return;
+  const identity = inboundRuleIdentity(cfg.input_allows[index]);
+  const wrap = $("inbound-table-wrap");
+  const removeBtn = wrap.querySelector(`[data-inbound-del="${index}"]`);
+  const row = removeBtn && removeBtn.closest("tr");
+  inboundRemoveBusy = true;
+  try {
+    let removed = null;
+    let removedAt = index;
+    const c = await saveConfigEdit((draft) => {
+      removedAt = findConfigRow(draft.input_allows, index, identity, inboundRuleIdentity, "inbound rule");
+      [removed] = draft.input_allows.splice(removedAt, 1);
+    });
+    await fadeOutRow(row);
+    setInboundMsg("");
+    renderInboundTable(c);
+    setApiStatus(true);
+    refreshPendingBadge();
+    focusTableRow(wrap, removedAt, $("inbound-add"));
+    const proto = String(removed.proto || "").toLowerCase() || "—";
+    const note = String(removed.note || "").trim();
+    const label = proto + " " + (dportDisplay(removed.dport) || "—") + (note ? " (" + note + ")" : "");
+    const removedJson = JSON.stringify(removed);
+    let restoredAt = removedAt;
+    showUndoToast("Removed inbound rule " + label + ".", {
+      page: "inbound",
+      edit: (draft) => {
+        if (!draft.input_allows) draft.input_allows = [];
+        // Already back (saved elsewhere since): nothing to reverse. Only the whole row counts,
+        // since identity also matches a disabled twin.
+        restoredAt = draft.input_allows.findIndex((r) => JSON.stringify(r) === removedJson);
+        if (restoredAt !== -1) return false;
+        restoredAt = Math.min(removedAt, draft.input_allows.length);
+        draft.input_allows.splice(restoredAt, 0, removed);
+      },
+      afterSave: (next, focus) => {
         setInboundMsg("");
-        renderInboundTable(c);
-        setApiStatus(true);
         refreshPendingBadge();
-        showToast("Inbound rule removed. Apply on Pending changes when ready.");
-      } catch (e) {
-        setInboundMsg(String(e.message || e), true);
-        renderInboundTable(state.lastConfig);
-      }
-    },
-  });
+        renderInboundTable(next);
+        if (focus) focusTableRow(wrap, restoredAt, $("inbound-add"), { force: true });
+      },
+      message: () => "Restored inbound rule " + label + ".",
+    });
+  } catch (e) {
+    setInboundMsg(String(e.message || e), true);
+    renderInboundTable(state.lastConfig);
+  } finally {
+    inboundRemoveBusy = false;
+  }
 }
 
 export async function refreshInboundPage() {

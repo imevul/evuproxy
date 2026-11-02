@@ -104,7 +104,6 @@ test.describe("conflicting config saves", () => {
       c.forwarding.routes.reverse();
     });
     await page.locator("#routes-table-wrap [data-route-del]").first().click();
-    await page.locator("#confirm-modal-ok").click();
     await expect(page.locator("#toaster")).toContainText(/removed/i);
 
     const { cfg } = await getConfig(request);
@@ -143,9 +142,6 @@ test.describe("conflicting config saves", () => {
       const expected = (await getConfig(request)).cfg;
 
       await wrap.locator(`label.evu-switch:has(${row.input})`).last().click();
-      // The stale page may still see enabled routes on this peer and ask first.
-      const dialogOk = page.locator("#confirm-modal-ok");
-      if (await dialogOk.isVisible()) await dialogOk.click();
 
       await expect(page.locator(row.msg)).toContainText(/changed or removed elsewhere/);
       await expect(page.locator(row.msg)).toHaveClass(/err/);
@@ -219,9 +215,6 @@ test.describe("conflicting config saves", () => {
     });
 
     await page.locator("#peers-table-wrap .evu-switch").first().click();
-    // The stale page may still see enabled routes on this peer and ask first.
-    const dialogOk = page.locator("#confirm-modal-ok");
-    if (await dialogOk.isVisible()) await dialogOk.click();
 
     await expect
       .poll(async () => !!(await getConfig(request)).cfg.peers[0].disabled)

@@ -5,6 +5,7 @@ import { beginLoading } from "../core/loading.js";
 import { api, token, applyNavRestriction } from "../core/api.js";
 import { showToast } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
 import { fetchUIPrefsFromServer } from "../core/prefs.js";
 import {
   wgPeerPubKeyMap,
@@ -979,26 +980,31 @@ export function initOverviewPage() {
   if (overviewMaint) {
     overviewMaint.addEventListener("change", async () => {
       if (!state.lastConfig) return;
-      if (
-        overviewMaint.checked &&
-        !window.confirm("Enable maintenance mode? Public port forwards will stop until you disable this and reload.")
-      ) {
-        overviewMaint.checked = false;
-        return;
-      }
+      const on = overviewMaint.checked;
+      const saveMaintenance = (value) => (cfg) => {
+        if (!cfg.forwarding) cfg.forwarding = {};
+        cfg.forwarding.maintenance_mode = value;
+      };
+      const confirmation = (value) =>
+        value
+          ? "Maintenance mode saved. Public port forwards stop when you Reload."
+          : "Maintenance mode off. Reload to restore forwards.";
       setOverviewMsg("…");
       try {
-        await saveConfigEdit((cfg) => {
-          if (!cfg.forwarding) cfg.forwarding = {};
-          cfg.forwarding.maintenance_mode = overviewMaint.checked;
-        });
+        await saveConfigEdit(saveMaintenance(on));
         setOverviewMsg("");
         refreshPendingBadge();
-        showToast(
-          overviewMaint.checked
-            ? "Maintenance mode saved. Reload to apply."
-            : "Maintenance mode off. Reload to restore forwards."
-        );
+        showUndoToast(confirmation(on), {
+          page: "overview",
+          edit: saveMaintenance(!on),
+          afterSave: (cfg, focus) => {
+            setOverviewMsg("");
+            refreshPendingBadge();
+            overviewMaint.checked = !!(cfg.forwarding && cfg.forwarding.maintenance_mode);
+            if (focus) overviewMaint.focus();
+          },
+          message: () => confirmation(!on),
+        });
       } catch (e) {
         overviewMaint.checked = !!(state.lastConfig.forwarding && state.lastConfig.forwarding.maintenance_mode);
         setOverviewMsg(String(e.message || e), true);

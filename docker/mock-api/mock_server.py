@@ -208,6 +208,28 @@ MOCK_APPLIED_SHA: str | None = None
 MOCK_BAK: dict | None = None
 MOCK_BAK_SLOTS: list[dict | None] = [None, None, None, None, None]
 
+# Archives the mock pretends are on disk, by path: unix time of the last backup.
+MOCK_BACKUPS: dict[str, float] = {"/var/backups/evuproxy-config.tgz": time.time()}
+
+
+def _config_change_count(a, b) -> int:
+    """Match configChangeCount in internal/apply/config_changes.go."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return sum(_config_change_count(a.get(k), b.get(k)) for k in a.keys() | b.keys())
+    if isinstance(a, list) and (isinstance(b, list) or b is None):
+        rows = [json.dumps(r, sort_keys=True) for r in a]
+        only_b = 0
+        for row in b or []:
+            key = json.dumps(row, sort_keys=True)
+            if key in rows:
+                rows.remove(key)
+            else:
+                only_b += 1
+        return max(len(rows), only_b)
+    if isinstance(b, list) and a is None:
+        return len(b)
+    return 0 if a == b else 1
+
 MOCK_PREFS: dict = {
     "peer_tunnel_subnet_cidr": "",
     "wireguard_server_endpoint": "",
@@ -1201,10 +1223,12 @@ class Handler(BaseHTTPRequestHandler):
                 MOCK_BAK is not None and _disk_config_sha() != _config_sha(MOCK_BAK)
             )
             restore_previous_applied_available = False
+            restore_previous_change_count = 0
             if MOCK_BAK is not None:
                 for slot in MOCK_BAK_SLOTS:
                     if slot is not None and _config_sha(slot) != _config_sha(MOCK_BAK):
                         restore_previous_applied_available = True
+                        restore_previous_change_count = _config_change_count(MOCK_CONFIG, slot)
                         break
             return self._send_json(
                 200,
@@ -1216,8 +1240,21 @@ class Handler(BaseHTTPRequestHandler):
                     "nftables_baseline": _nft_from_config(MOCK_CONFIG_BASELINE),
                     "discard_available": discard_available,
                     "restore_previous_applied_available": restore_previous_applied_available,
+                    "discard_change_count": (
+                        _config_change_count(MOCK_CONFIG, MOCK_BAK) if MOCK_BAK is not None else 0
+                    ),
+                    "restore_previous_change_count": restore_previous_change_count,
                 },
             )
+        if path == "/api/v1/backup/info":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            apath = (qs.get("path") or [""])[0].strip()
+            if not apath:
+                return self._send_json(400, {"error": "path query required"})
+            if apath not in MOCK_BACKUPS:
+                return self._send_json(404, {"error": "archive not found"})
+            modified = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(MOCK_BACKUPS[apath]))
+            return self._send_json(200, {"archive": apath, "modified": modified, "size_bytes": 4096})
         if path == "/api/v1/preferences":
             return self._send_json(200, _normalize_prefs(MOCK_PREFS))
         if path == "/api/v1/metrics/peers":
@@ -1566,6 +1603,7 @@ class Handler(BaseHTTPRequestHandler):
             apath = (qs.get("path") or [""])[0].strip()
             if not apath:
                 apath = "/var/backups/evuproxy-config.tgz"
+            MOCK_BACKUPS[apath] = time.time()
             _push_mock_event("backup_ok", apath)
             return self._send_json(200, {"archive": apath})
         if path == "/api/v1/restore":
