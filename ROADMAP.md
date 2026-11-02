@@ -201,7 +201,7 @@ Automation:
 - [x] Run the Playwright behavior and axe-core suites in CI against the mock stack
 - [ ] Decide whether to add a visual regression baseline, weighing test flakiness against value
 - [x] Automated smoke test: tunnel up, TCP and UDP forward, geo on and off, narrow peer `AllowedIPs` still reaching the LAN
-- [ ] Automated forwarding policy tests: port maps, deny and allow lists, break-glass, route geo, maintenance mode
+- [x] Automated forwarding policy tests: port maps, deny and allow lists, break-glass, route geo, maintenance mode
 - [ ] Automated stress tests: rate limits and CrowdSec drops under load, with legitimate traffic still getting through
 - [ ] *Proposed:* add tests for `internal/geoip`, `internal/logging` and `cmd/evuproxy`, which have none
 

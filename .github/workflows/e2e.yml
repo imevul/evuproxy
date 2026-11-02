@@ -27,5 +27,5 @@ jobs:
       - name: Load WireGuard
         # A container can't count on the kernel loading this for it.
         run: sudo modprobe wireguard
-      - name: Tunnel, forwards, geo and narrow AllowedIPs
+      - name: Tunnel, forwards, geo, narrow AllowedIPs and forwarding policies
         run: make e2e
