@@ -36,6 +36,25 @@ async function expectRecovered(page: Page): Promise<void> {
   await expect(page.locator("#api-status")).toHaveText("API OK");
 }
 
+/** A hash change, which gets past disabled nav links the way the Back button does. */
+async function goToHash(page: Page, route: string): Promise<void> {
+  await page.evaluate((r) => {
+    location.hash = `#/${r}`;
+  }, route);
+}
+
+/** A 200 this version can't render, standing in for a render bug or a version mismatch. */
+const UNREADABLE_CONFIG = { peers: 7, routes: 7, network: 7 };
+
+function countRequests(page: Page, glob: string): () => number {
+  let count = 0;
+  void page.route(glob, (route) => {
+    count++;
+    return route.fallback();
+  });
+  return () => count;
+}
+
 async function markThisPageLoad(page: Page): Promise<void> {
   await page.evaluate(() => {
     (window as unknown as { __sameLoad: boolean }).__sameLoad = true;
@@ -211,21 +230,145 @@ test("opening the UI during an outage says nothing has loaded, then fills in", a
   await expect(page.locator("#overview-events-card")).toBeVisible();
 });
 
-test("a route opened during an outage stays put and loads on recovery", async ({ page }) => {
+test("a route opened during an outage stays put, says it hasn't loaded, and loads on recovery", async ({ page }) => {
   await gotoRoute(page, origin, "overview");
   const restore = await stopApi(page, "network");
-  await page.evaluate(() => {
-    location.hash = "#/inbound";
-  });
+  await goToHash(page, "inbound");
   await expect(banner(page)).toBeVisible();
   await expect(page.locator("#page-inbound")).toBeVisible();
   await expect(page.locator("#inbound-table-wrap .evu-empty")).toHaveCount(0);
+  await expect(staleTag(page)).toHaveCount(0);
+  await expect(page.locator("#page-inbound .not-loaded-tag")).toHaveText("Not loaded yet");
+  await expect(page.locator("#connection-banner-stale")).toContainText("This page hasn't loaded yet");
+  await expect(page.locator("#connection-banner-stale")).not.toContainText("out of date");
+
+  // Overview did load, so going back there has to say so instead.
+  await goToHash(page, "overview");
+  await expect(staleTag(page)).toHaveText("Stale data");
+  await expect(page.locator("#connection-banner-stale")).toContainText("may be out of date");
+  await expect(page.locator("#connection-banner-stale")).not.toContainText("hasn't loaded");
+  await goToHash(page, "inbound");
+  await expect(page.locator("#connection-banner-stale")).toContainText("This page hasn't loaded yet");
 
   await restore();
   await expectRecovered(page);
+  await expect(page.locator(".not-loaded-tag")).toHaveCount(0);
   await expect(page.locator("#page-inbound")).toBeVisible();
   await expect(page.locator("#inbound-table-wrap table.data")).toBeVisible();
 });
+
+test("a page that fails to render is a page error, not an outage or a request loop", async ({ page }) => {
+  await gotoRoute(page, origin, "overview");
+  const cards = await page.locator("#overview-cards .evu-card").count();
+  expect(cards).toBeGreaterThan(0);
+  await page.route("**/api/v1/config", (route) => route.fulfill({ json: UNREADABLE_CONFIG }));
+  await goToHash(page, "token");
+  await expect(page.locator("#page-token")).toBeVisible();
+
+  const requests = countRequests(page, "**/api/v1/overview");
+  await goToHash(page, "overview");
+  await expect(page.locator("#overview-action-msg")).toContainText("could not be updated", { timeout: 10_000 });
+  await page.waitForTimeout(5_000);
+  expect(requests()).toBeLessThanOrEqual(3);
+
+  await expect(page.locator("#overview-action-msg")).toContainText("from an earlier load");
+  await expect(page.locator("#overview-cards .evu-card")).toHaveCount(cards);
+  await expect(banner(page)).toBeHidden();
+  await expect(disabledLinks(page)).toHaveCount(0);
+  await expect(page.locator("#api-status")).toHaveText("API OK");
+});
+
+test("a page that fails to render on its first load says so", async ({ page }) => {
+  await page.route("**/api/v1/config", (route) => route.fulfill({ json: UNREADABLE_CONFIG }));
+  const requests = countRequests(page, "**/api/v1/overview");
+  await gotoRoute(page, origin, "overview");
+  await expect(page.locator("#overview-cards")).toContainText("This page could not be displayed");
+  await expect(page.locator("#overview-cards")).not.toContainText("Open API token");
+  await page.waitForTimeout(5_000);
+  expect(requests()).toBeLessThanOrEqual(5);
+  await expect(banner(page)).toBeHidden();
+  await expect(disabledLinks(page)).toHaveCount(0);
+});
+
+test("recovery that fails again doesn't reload without a delay", async ({ page }) => {
+  await gotoRoute(page, origin, "routes");
+  await expect(page.locator("#routes-table-wrap table.data")).toBeVisible();
+  // Every other answer fails, so the gate can fail on each reload while each probe passes.
+  let answers = 0;
+  await page.route("**/api/v1/overview", (route) =>
+    ++answers % 2 ? route.fulfill({ status: 500, json: { error: "flapping" } }) : route.fallback()
+  );
+  await goToHash(page, "inbound");
+  await page.waitForTimeout(5_000);
+  // Two requests per reload at one reload per retry interval, and the first pair. A loop makes hundreds.
+  expect(answers).toBeLessThanOrEqual(8);
+});
+
+test("one broken endpoint is marked as old on Overview, and clears when it's back", async ({ page }) => {
+  await gotoRoute(page, origin, "overview");
+  const activity = page.locator("#overview-cards .overview-dash-activity");
+  await expect(activity).toBeVisible();
+  await expect(activity).not.toContainText("could not be refreshed");
+
+  await page.route("**/api/v1/stats", (route) => route.fulfill({ status: 500, json: { error: "stats broken" } }));
+  await goToHash(page, "token");
+  await goToHash(page, "overview");
+  await expect(activity).toContainText("Based on an earlier load, because they could not be refreshed: WireGuard stats.");
+  await expect(activity).not.toContainText("No warnings from this pass");
+  await expect(banner(page)).toBeHidden();
+
+  await page.unroute("**/api/v1/stats");
+  await goToHash(page, "token");
+  await goToHash(page, "overview");
+  await expect(page.locator("#overview-cards .overview-dash-host")).toBeVisible();
+  await expect(activity).not.toContainText("could not be refreshed");
+});
+
+test("broken events and latency are marked as old on their own cards", async ({ page }) => {
+  await gotoRoute(page, origin, "overview");
+  await expect(page.locator("#overview-cards .overview-dash-activity")).toBeVisible();
+  const broken = { status: 500, json: { error: "broken" } };
+  await page.route("**/api/v1/events*", (route) => route.fulfill(broken));
+  await page.route("**/api/v1/metrics/peers", (route) => route.fulfill(broken));
+  await goToHash(page, "token");
+  await goToHash(page, "overview");
+  const old = "could not be refreshed, so it's from an earlier load";
+  await expect(page.locator("#overview-cards .overview-dash-activity")).toContainText(old);
+  await expect(page.locator("#overview-latency-card")).toContainText(old);
+  await expect(page.locator("#overview-events-card")).toContainText(old);
+});
+
+test("Peers says when its live values are old", async ({ page }) => {
+  await gotoRoute(page, origin, "peers");
+  await expect(page.locator("#peers-table-wrap table.data")).toBeVisible();
+  await page.route("**/api/v1/stats", (route) => route.fulfill({ status: 500, json: { error: "stats broken" } }));
+  await page.locator("#peers-refresh").click();
+  await expect(page.locator("#peers-msg")).toContainText("from an earlier load");
+  await expect(page.locator("#peers-table-wrap table.data")).toBeVisible();
+  await expect(banner(page)).toBeHidden();
+});
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`the current page's nav link stays readable during an outage (${scheme})`, async ({ page }) => {
+    await seed(page, { scheme });
+    await gotoRoute(page, origin, "routes");
+    await expect(page.locator("#routes-table-wrap table.data")).toBeVisible();
+    const link = navLink(page, "routes");
+    const look = () =>
+      link.evaluate((el) => {
+        const s = getComputedStyle(el);
+        return { color: s.color, background: s.backgroundColor, opacity: s.opacity };
+      });
+    const before = await look();
+
+    const restore = await stopApi(page, "network");
+    await page.locator("#routes-refresh").click();
+    await expect(banner(page)).toBeVisible();
+    await expect(link).toHaveClass(/nav-disabled/);
+    expect(await look()).toEqual(before);
+    await restore();
+  });
+}
 
 for (const { route, refresh, region } of [
   { route: "peers", refresh: "#peers-refresh", region: "#peers-table-wrap" },

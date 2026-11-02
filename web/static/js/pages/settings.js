@@ -2,6 +2,7 @@ import { state, defaultPeerSubnetCidr, contentWidthKey, contentWidthCssValues } 
 import { $, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, getApiBase, headersDownload, responseEtag } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { showToast, reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit, putConfigAtRevision, isConfigRevisionMismatch } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
@@ -265,6 +266,7 @@ async function loadSettingsPage() {
     await fetchUIPrefsFromServer();
     state.uiPrefsFetched = true;
     setApiStatus(true);
+    markPageLoaded("settings");
   } catch (e) {
     if (msg) {
       msg.textContent = String(e.message || e);

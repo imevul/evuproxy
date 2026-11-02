@@ -24,53 +24,78 @@ const TITLES = {
 
 /** @type {{ kind: string, detail: string, since: Date } | null} null while the API answers. */
 let lost = null;
-/** Whether anything has loaded since the page opened, so that there can be stale data at all. */
+/** Whether the API has answered since the page opened, so that contact can have been lost. */
 let everAnswered = false;
+/** The pages that have shown API data since the page opened. */
+const loadedPages = new Set();
 let probing = false;
 let probeAgain = false;
 let retrying = false;
 let retryTimer = null;
 let onRecovered = () => {};
+let lastReloadAt = 0;
+let reloadTimer = null;
 
 function setText(el, text) {
   // The banner is a live region, so unchanged text must not be rewritten.
   if (el.textContent !== text) el.textContent = text;
 }
 
-/** Tags every page that shows API data. The API token page has none. */
-function markStale(stale) {
-  document.querySelectorAll(".page:not(#page-token) .page-title-row").forEach((row) => {
-    const tag = row.querySelector(".stale-tag");
-    if (!stale) {
-      if (tag) tag.remove();
-    } else if (!tag) {
-      const el = document.createElement("span");
-      el.className = "evu-pill stale-tag";
-      el.textContent = "Stale data";
-      row.appendChild(el);
-    }
+/** A page calls this once it shows API data, so that an outage can call that data stale. */
+export function markPageLoaded(name) {
+  loadedPages.add(name);
+}
+
+function setPageTag(row, className, text, on) {
+  const tag = row.querySelector("." + className);
+  if (!on) {
+    if (tag) tag.remove();
+  } else if (!tag) {
+    const el = document.createElement("span");
+    el.className = "evu-pill " + className;
+    el.textContent = text;
+    row.appendChild(el);
+  }
+}
+
+/** Tags every page that shows API data. The API token page has none, and Overview says it in a card. */
+function markPages(outage) {
+  document.querySelectorAll(".page:not(#page-token)").forEach((page) => {
+    const row = page.querySelector(".page-title-row");
+    const name = page.id.replace("page-", "");
+    const loaded = loadedPages.has(name);
+    setPageTag(row, "stale-tag", "Stale data", outage && loaded);
+    setPageTag(row, "not-loaded-tag", "Not loaded yet", outage && !loaded && name !== "overview");
   });
 }
 
-function render() {
+function pageStateText() {
+  const page = document.querySelector(".page:not([hidden])");
+  const name = page ? page.id.replace("page-", "") : "";
+  if (name === "token") return "";
+  return loadedPages.has(name)
+    ? "What's on screen was loaded before then and may be out of date. "
+    : "This page hasn't loaded yet. It fills in as soon as the API answers. ";
+}
+
+/** Also called when the page on screen changes, since the banner speaks about that page. */
+export function renderConnectionState() {
   const banner = $("connection-banner");
   if (!lost) {
     if (banner.contains(document.activeElement)) $("main-content").focus({ preventScroll: true });
     banner.hidden = true;
-    markStale(false);
+    markPages(false);
     return;
   }
   setText($("connection-banner-title"), TITLES[lost.kind]);
   setText($("connection-banner-detail"), lost.detail);
   setText(
     $("connection-banner-stale"),
-    (everAnswered
-      ? "Lost contact at " + lost.since.toLocaleTimeString() + ". What's on screen was loaded before then and may be out of date. "
-      : "") + "Trying again automatically."
+    (everAnswered ? "Lost contact at " + lost.since.toLocaleTimeString() + ". " : "") + pageStateText() + "Trying again automatically."
   );
   $("connection-banner-token").hidden = lost.kind !== "auth";
   banner.hidden = false;
-  markStale(everAnswered);
+  markPages(true);
 }
 
 function detailFor(kind, e) {
@@ -85,7 +110,23 @@ function markLost(e) {
   state.apiConnectionOk = false;
   applyNavRestriction();
   setApiStatus(false, detail);
-  render();
+  renderConnectionState();
+}
+
+/**
+ * Reloads the page on screen, at most once per retry interval. If that reload fails while the
+ * probe still succeeds, recovering again must not turn into a tight loop of requests.
+ */
+function reloadAfterRecovery() {
+  clearTimeout(reloadTimer);
+  if (lost) return;
+  const wait = lastReloadAt + RETRY_MS - Date.now();
+  if (wait > 0) {
+    reloadTimer = setTimeout(reloadAfterRecovery, wait);
+    return;
+  }
+  lastReloadAt = Date.now();
+  onRecovered();
 }
 
 function markAnswering() {
@@ -97,10 +138,10 @@ function markAnswering() {
   state.apiConnectionOk = true;
   applyNavRestriction();
   setApiStatus(true);
-  render();
+  renderConnectionState();
   if (wasLost) showToast("Connection restored");
   // A page that stopped at the nav gate never loaded, even if no banner ever showed.
-  if (wasLost || wasRestricted) onRecovered();
+  if (wasLost || wasRestricted) reloadAfterRecovery();
 }
 
 function scheduleProbe() {
@@ -127,7 +168,7 @@ async function probe() {
   clearTimeout(retryTimer);
   if (!savedToken()) {
     lost = null;
-    render();
+    renderConnectionState();
     finishRetry();
     return;
   }

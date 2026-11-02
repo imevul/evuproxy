@@ -3,6 +3,7 @@ import { $, escapeHtml, trunc, setApiStatus, downloadTextFile, metricsPeersToCsv
 import { beginLoading } from "../core/loading.js";
 import { formatBytes, formatCount, timeHtml } from "../core/format.js";
 import { api } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { prepareTableCards } from "../core/table_sort.js";
 
 /* ——— Stats ——— */
@@ -77,6 +78,7 @@ export async function refreshStatsPage() {
       nftW.innerHTML =
         "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No counters to show</p><p>The generated ruleset has no counter lines, or <code>nft</code> is unavailable on this host.</p></div>";
     }
+    markPageLoaded("stats");
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setStatsMsg(String(e.message || e), true);

@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
@@ -424,6 +425,7 @@ export async function refreshLogsPage() {
       return e;
     });
     renderLogsView();
+    markPageLoaded("logs");
   } catch (e) {
     if (seq !== state.logsRefreshSeq) return;
     setApiStatus(false, String(e.message || e));

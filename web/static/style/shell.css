@@ -106,6 +106,14 @@ body.app .nav-link.nav-disabled:hover {
   filter: none;
 }
 
+/* The page on screen during an outage: not a way to go anywhere, but it still says where you are. */
+body.app .nav-link.is-active.nav-disabled,
+body.app .nav-link.is-active.nav-disabled:hover {
+  color: var(--evu-primary-foreground);
+  background: var(--evu-primary);
+  opacity: 1;
+}
+
 body.app .nav-pending-count {
   margin-left: auto;
 }
@@ -400,7 +408,8 @@ body:has(#apply-bar:not([hidden])) #pending-apply {
   gap: 0.5rem;
 }
 
-.stale-tag {
+.stale-tag,
+.not-loaded-tag {
   flex: none;
 }
 

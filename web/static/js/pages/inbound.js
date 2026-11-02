@@ -15,6 +15,7 @@ import {
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { showToast } from "../core/toast.js";
 import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
@@ -306,6 +307,7 @@ export async function refreshInboundPage() {
     state.lastConfig = await api("/v1/config");
     setApiStatus(true);
     renderInboundTable(state.lastConfig);
+    markPageLoaded("inbound");
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setInboundMsg(String(e.message || e), true);

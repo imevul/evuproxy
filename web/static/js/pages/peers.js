@@ -20,6 +20,7 @@ import {
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, apiBlob } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { showToast } from "../core/toast.js";
 import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
@@ -357,17 +358,23 @@ export async function refreshPeersPage() {
     if (stOut.status === "fulfilled") state.lastPeerWgStats = stOut.value;
     setApiStatus(true);
     let pingMap = null;
+    let pingFailed = false;
     if (showPeersMetricsColumn()) {
       try {
         pingMap = await fetchPeerMetricsMap();
         state.lastPeerPingByTunnel = pingMap;
       } catch {
         /* keep last values */
+        pingFailed = true;
       }
     } else {
       state.lastPeerPingByTunnel = null;
     }
     renderPeersTable(state.lastConfig, state.lastPeerWgStats, pingMap !== null ? pingMap : state.lastPeerPingByTunnel);
+    markPageLoaded("peers");
+    if (stOut.status !== "fulfilled" || pingFailed) {
+      setPeersMsg("Some live values could not be refreshed, so handshakes, traffic or latency may be from an earlier load.", true);
+    }
     // The operator can leave or come back while this loads: no timer for a page
     // they left, and only one if overlapping refreshes both land here.
     stopPeersPingPolling();

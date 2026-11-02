@@ -2,6 +2,7 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api, responseEtag } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
 import { showToast } from "../core/toast.js";
 import { openConfirmModal } from "../core/modal.js";
 import { checkConfig, invalidateCheck, noteConfigRevision, showUnappliedCount } from "../core/apply_bar.js";
@@ -609,6 +610,7 @@ export async function refreshPendingPage() {
     if (restoreBtn) restoreBtn.disabled = !p.restore_previous_applied_available;
     renderPendingDiffPanel();
     pendingPageLoaded = true;
+    markPageLoaded("pending");
   } catch (e) {
     if (!pendingPageLoaded) {
       status.textContent = "";

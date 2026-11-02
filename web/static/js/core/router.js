@@ -1,6 +1,7 @@
 import { state } from "./state.js";
 import { $, setApiNotConnected, setApiStatus } from "./dom.js";
 import { ensureApiGate, applyNavRestriction, token } from "./api.js";
+import { renderConnectionState } from "./connection.js";
 import { setGeoEditorTab } from "./advanced.js";
 import { beginLoading } from "./loading.js";
 import { setTitlePage } from "./title.js";
@@ -169,6 +170,7 @@ export async function navigate(name, opts) {
   }
   // Everything up to the first await runs on the click; the network comes after.
   showPage(name, keepView);
+  renderConnectionState();
   if (name === "settings" && !keepView) setSettingsEditorTab("prefs");
   if (name === "geoblocking" && !keepView) setGeoEditorTab("default");
   const doneLoading = beginLoading(...(pageLoadRegions[name] || []));
