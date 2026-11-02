@@ -98,7 +98,7 @@ func Backup(ctx context.Context, configPath, dest string) error {
 			return fmt.Errorf("backup: mkdir: %w", err)
 		}
 	}
-	if out, err := runCmdCombined(ctx, "tar", "-czf", destFS, "-C", root, "."); err != nil {
+	if out, err := runCmdCombined(ctx, "tar", "-czf", destFS, "--exclude=./"+confirmSessionDirName, "--exclude=./"+lastRevertName, "-C", root, "."); err != nil {
 		return fmt.Errorf("tar: %w: %s", err, out)
 	}
 	return nil
@@ -113,6 +113,12 @@ func Restore(configPath, archive string) error {
 		return err
 	}
 	defer unlock()
+	// The revert would undo the restore, or restore the old config over it.
+	if s, err := readConfirmSession(configPath); err != nil {
+		return fmt.Errorf("restore: %w", err)
+	} else if s != nil {
+		return ErrConfirmSessionActive
+	}
 	archAbs, err := filepath.Abs(archive)
 	if err != nil {
 		return fmt.Errorf("restore: archive path: %w", err)
@@ -145,7 +151,7 @@ func Restore(configPath, archive string) error {
 		if err != nil {
 			return err
 		}
-		if rel == "." {
+		if rel == "." || isConfirmStateEntry(rel) {
 			continue
 		}
 		// Clean("/"+ToSlash(rel)) is a CodeQL path sanitizer; rel is also validated by tarEntryRelPath.

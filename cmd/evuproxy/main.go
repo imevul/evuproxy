@@ -1,11 +1,14 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/oschwald/geoip2-golang"
 	"github.com/spf13/cobra"
@@ -35,6 +38,9 @@ func main() {
 		cmdMetrics(),
 		cmdVersion(),
 		cmdReload(),
+		cmdReloadConfirm(),
+		cmdReloadRevert(),
+		cmdReloadStatus(),
 		cmdUpdateGeo(),
 		cmdStatus(),
 		cmdEnsureWgNetworkd(),
@@ -65,11 +71,72 @@ func cmdVersion() *cobra.Command {
 }
 
 func cmdReload() *cobra.Command {
-	return &cobra.Command{
+	var confirmWithin time.Duration
+	c := &cobra.Command{
 		Use:   "reload",
 		Short: "Regenerate and apply WireGuard + nftables from config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return apply.Reload(cmd.Context(), cfgPath)
+			if confirmWithin == 0 {
+				return apply.Reload(cmd.Context(), cfgPath)
+			}
+			if confirmWithin%time.Second != 0 {
+				return fmt.Errorf("--confirm-within must be whole seconds")
+			}
+			session, err := apply.ReloadWithConfirm(cmd.Context(), cfgPath, int(confirmWithin/time.Second), func(string) {})
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Applied. Check a new connection still works, then run `evuproxy reload-confirm` to keep it; reverting at %s.\n", session.Deadline.Local().Format(time.RFC3339))
+			return err
+		},
+	}
+	c.Flags().DurationVar(&confirmWithin, "confirm-within", 0, "revert automatically unless `evuproxy reload-confirm` runs within this time (e.g. 60s)")
+	return c
+}
+
+func cmdReloadConfirm() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reload-confirm",
+		Short: "Keep an Apply that is waiting for confirmation",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apply.ConfirmApply(cmd.Context(), cfgPath)
+		},
+	}
+}
+
+func cmdReloadRevert() *cobra.Command {
+	var reason, token string
+	c := &cobra.Command{
+		Use:   "reload-revert",
+		Short: "Revert an Apply that is waiting for confirmation, or retry a revert that failed",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			err := apply.RevertApply(cmd.Context(), cfgPath, reason, token)
+			// A timer that lost its session has nothing to do; a confirm got there first.
+			if token != "" && errors.Is(err, apply.ErrNoConfirmSession) {
+				return nil
+			}
+			return err
+		},
+	}
+	c.Flags().StringVar(&reason, "reason", apply.RevertReasonManual, "why this is being reverted")
+	c.Flags().StringVar(&token, "token", "", "do nothing unless this is the current session's timer")
+	_ = c.Flags().MarkHidden("reason")
+	_ = c.Flags().MarkHidden("token")
+	return c
+}
+
+func cmdReloadStatus() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reload-status",
+		Short: "Print any Apply waiting for confirmation and the last revert, as JSON",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := apply.ReadConfirmStatus(cmd.Context(), cfgPath)
+			if err != nil {
+				return err
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(st)
 		},
 	}
 }

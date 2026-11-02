@@ -362,6 +362,44 @@ body:has(#apply-bar:not([hidden])) #pending-apply {
   display: none;
 }
 
+.apply-session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin: 0;
+  padding: 0.5rem 1.25rem;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.apply-session[hidden],
+.apply-session [hidden] {
+  display: none;
+}
+
+.apply-session__detail {
+  margin: 0;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.apply-session__note {
+  margin: 0.25rem 0 0;
+}
+
+.apply-session__note:empty {
+  display: none;
+}
+
+.apply-session__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 /* A long list of findings must not push the whole page out of view. */
 .apply-result {
   max-height: 40vh;

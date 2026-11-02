@@ -49,6 +49,9 @@ func ReloadWithProgress(ctx context.Context, cfgPath string, progress func(step 
 		return err
 	}
 	defer unlock()
+	if err := checkOneWayReload(ctx, cfgPath); err != nil {
+		return err
+	}
 	err = reload(ctx, cfgPath, progress)
 	if err != nil {
 		_ = state.RecordApplyFailure(cfgPath)

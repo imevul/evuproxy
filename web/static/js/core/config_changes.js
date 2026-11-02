@@ -287,6 +287,8 @@ const SETTING_LABELS = {
   "geo.apply_to_input_allows": "geoblocking on inbound rules",
   "geo.break_glass_cidrs": "break-glass",
   "crowdsec.enabled": "CrowdSec",
+  "apply.confirm": "revert Apply unless confirmed",
+  "apply.confirm_timeout_seconds": "seconds to confirm an Apply",
 };
 
 function settingLabel(path) {

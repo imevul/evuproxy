@@ -82,6 +82,10 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	if err := apply.Restore(s.Config, path); err != nil {
 		s.logErr("restore", err)
 		s.emit(eventlog.Record{Event: "restore_failed", Detail: eventDetail(err.Error())})
+		if status, code, ok := confirmErrorCode(err); ok {
+			s.jsonAPIError(w, status, err.Error(), code)
+			return
+		}
 		s.jsonErr(w, http.StatusInternalServerError, "restore failed")
 		return
 	}

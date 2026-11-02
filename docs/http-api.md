@@ -59,7 +59,7 @@ The installer runs the API as **root** when enabled (full functionality). If you
 
 ## Mutating operations (serialization)
 
-These endpoints change on-disk config, backups, or live nftables / WireGuard: **`PUT /config`**, **`POST /config/discard`**, **`POST /config/restore-previous-applied`**, **`POST /reload`**, **`POST /update-geo`**, **`POST /backup`**, **`POST /restore`**. Only one runs at a time; a second concurrent request gets **HTTP 503** with a stable error message (no queue). Use retries with backoff on the client.
+These endpoints change on-disk config, backups, or live nftables / WireGuard: **`PUT /config`**, **`POST /config/discard`**, **`POST /config/restore-previous-applied`**, **`POST /reload`**, **`POST /apply/confirm`**, **`POST /apply/revert`**, **`POST /apply/reverted/restore`**, **`POST /apply/reverted/dismiss`**, **`POST /update-geo`**, **`POST /backup`**, **`POST /restore`**. Only one runs at a time; a second concurrent request gets **HTTP 503** with a stable error message (no queue). Use retries with backoff on the client.
 
 ## Backup and restore paths
 
@@ -79,7 +79,10 @@ All paths below are under **`/api/v1`** unless noted.
 | `GET` / `PUT` | `/preferences`                                                   | UI helper fields in **`ui-preferences.json`**: tunnel subnet CIDR, WireGuard endpoint, **`metrics_collection_enabled`** (default false; **`PUT`** is partial merge; legacy **`show_peer_latency`** in JSON is migrated on read). |
 | `GET` / `PUT` | `/config/notes`                                                  | Operator scratchpad stored as **`config-notes.txt`** beside **`config.yaml`** (plain text, size-capped). **`PUT`** body: **`{"text":"…"}`**. Emits **`config_notes_saved`** in audit events. Does not reload WireGuard/nftables. |
 | `GET`         | `/metrics/peers`                                                | Stored peer ICMP metrics (**SQLite**, maintained by **`evuproxy metrics`**). JSON: **`peers`**, **`collection_disabled`**, **`collected_at_utc`**, **`dashboard`** (`last_ping` / `last_10m` min/avg/max ms). Read-only from API; **`serve --metrics-db`** overrides DB path (default **`metrics.sqlite`** beside `--config`). See **[Metrics peers semantics](#metrics-peers-semantics)**. |
-| `POST`        | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config. Also updates **`config.yaml.bak`** / rotation (see [Applying changes](config.md#applying-changes)). |
+| `POST`        | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config. Also updates **`config.yaml.bak`** / rotation (see [Applying changes](config.md#applying-changes)). One-way unless the body asks otherwise; see [Confirm or revert](#confirm-or-revert). |
+| `GET`         | `/apply/session`                                                | Whether an Apply is waiting for confirmation, and the last revert. See [Confirm or revert](#confirm-or-revert). |
+| `POST`        | `/apply/confirm`, `/apply/revert`                               | Keep the waiting Apply, or revert it now. **`/apply/revert`** also retries a revert that failed. |
+| `POST`        | `/apply/reverted/restore`, `/apply/reverted/dismiss`            | Bring the rejected config back as unapplied changes, or forget it. |
 | `GET`         | `/reload/progress`                                              | Stage of the **`POST /reload`** running in this API process, which answers only when it has finished: **`step`** is **`firewall`**, **`wireguard`**, or an empty string when none is running. Does not see a reload run by the CLI. |
 | `POST`        | `/update-geo`                                                   | Download zones and refresh geo sets in nftables.                                                                                                          |
 | `GET`         | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`, `/about` | Diagnostics, config summary, **`/metrics`** text for both **inet evuproxy** forward and input chains (either `nft list` failure → 5xx), host stats, recent firewall-related journal lines, version info. **`/logs`** accepts **`?limit=N`** (default **200**) and is rate-limited to **20 requests/minute per token** (excess → **429** with `error_code: rate_limit`). |
@@ -99,7 +102,7 @@ All paths below are under **`/api/v1`** unless noted.
 | `POST`        | `/peers/onboard-bundle`                                         | Build an **EVUB** onboarding blob (JSON body: `passphrase`, `peer_private_key`, `peer_tunnel_address`, `server_public_key`, `endpoint`, `allowed_ips`, optional `interface_name`). Returns `{blob_base64}`. Same HTTP caveat as keypair generation. |
 
 
-**`POST /validate` lockout risks:** warnings whose **`code`** starts with **`lockout_risk_`** must be acknowledged in the UI before Apply. Nothing on the server refuses the reload.
+**`POST /validate` lockout risks:** warnings whose **`code`** starts with **`lockout_risk_`** must be acknowledged in the UI before a one-way Apply. With [confirm or revert](#confirm-or-revert) on, the UI shows them through the countdown and asks for no acknowledgement. Nothing on the server refuses the reload.
 
 | Code | Meaning |
 |------|---------|
@@ -111,6 +114,48 @@ All paths below are under **`/api/v1`** unless noted.
 | `lockout_risk_check_unavailable` | The client IPv4 address could not be detected, so the address-specific checks did not run. |
 
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
+
+### Confirm or revert
+
+**`POST /reload`** with **`{"confirm_timeout_seconds": 60}`** (**10** to **3600**) applies the config and reverts it unless **`POST /apply/confirm`** arrives in time. A systemd timer does the revert, so it happens even with the API stopped. Behavior, the **`apply`** config setting and the matching CLI commands are in [Confirm or revert](config.md#confirm-or-revert-apply).
+
+**Existing callers are unaffected.** With no body, or a body that isn't a JSON object, **`POST /reload`** stays one-way, whatever the **`apply`** setting says. The setting only tells the web UI what to send. The one difference is during a confirmation window, when a one-way reload gets **409**.
+
+The response to a confirmed reload adds **`session`**, in the same shape as below.
+
+**`GET /apply/session`**:
+
+```json
+{
+  "confirm_enabled": true,
+  "confirm_timeout_seconds": 60,
+  "session": {
+    "phase": "active",
+    "started_at": "2026-11-02T08:00:00Z",
+    "deadline": "2026-11-02T08:01:02Z",
+    "timeout_seconds": 60,
+    "remaining_seconds": 41
+  },
+  "last_revert": null
+}
+```
+
+- **`confirm_enabled`**, **`confirm_timeout_seconds`**: the **`apply`** setting in **`config.yaml`**.
+- **`session`**: **`null`** when nothing is waiting. **`phase`** is **`active`**, **`rolling_back`**, or **`failed`** with a **`failure`** message; **`failed`** also covers a session past its deadline whose timer ended without reverting, and a revert that was killed before it finished. Prefer **`remaining_seconds`** to **`deadline`** for a countdown, since clocks differ.
+- **`last_revert`**: **`{at, reason, config_available}`** until it is dismissed or a new session starts. **`reason`** is **`timeout`**, **`manual`**, **`interrupted`** (the session outlived its timer, usually a reboot), or **`failed_apply`** (an Apply failed and so did its revert, then a reboot, API restart or **`evuproxy reload`** finished the revert). **`config_available`** says **`config.yaml.reverted`** exists.
+
+Refusals answer **409** with a stable **`error_code`**:
+
+| `error_code` | Meaning |
+|--------------|---------|
+| `apply_session_active` | One-way **`POST /reload`** or **`POST /restore`** during a window, or restoring a rejected config while a session exists. |
+| `no_apply_session` | Nothing to confirm or revert. A timer may have got there first; read **`GET /apply/session`**. |
+| `rollback_failed` | A revert failed and still stands, so this was refused. Retry **`POST /apply/revert`**. Also returned when an Apply failed and reverting it failed too. |
+| `no_baseline` | No known-good config to revert to: **`config.yaml.bak`** is missing, invalid, or not what was last applied. Run a one-way reload first. |
+| `confirm_unavailable` | The timer could not be armed (no systemd, or an API that isn't root). Nothing was changed. |
+| `no_reverted_config`, `pending_edits` | **`POST /apply/reverted/restore`** has nothing to restore, or **`config.yaml`** has unapplied changes it won't replace. |
+
+An invalid **`POST /reload`** body, such as a timeout out of range, answers **400** with **`error_code`:** `invalid_reload_body`. The audit events add **`apply_confirmed`**, **`apply_reverted`** (detail: the reason, or **`failed_apply`** when a failed Apply put the host back) and **`apply_revert_failed`**.
 
 ### Config revisions (`ETag` / `If-Match`)
 
@@ -167,6 +212,6 @@ When **`EVUPROXY_LOG_DIR`** is set (e.g. **`/var/log/evuproxy`**), **`evuproxy s
 
 ## Audit events file
 
-Mutations append JSON lines under **`/etc/evuproxy/state/events.jsonl`** (config-adjacent **`state/`** directory). Size is capped (**default 2 MiB**; override **`EVUPROXY_EVENTS_MAX_BYTES`**, clamped **256 KiB–8 MiB**). Only one **`evuproxy serve`** process should write this file unless you add external locking.
+Mutations append JSON lines under **`/etc/evuproxy/state/events.jsonl`** (config-adjacent **`state/`** directory). Size is capped (**default 2 MiB**; override **`EVUPROXY_EVENTS_MAX_BYTES`**, clamped **256 KiB–8 MiB**). Only one **`evuproxy serve`** process should write this file unless you add external locking. The one exception is confirm-or-revert, whose events come from whichever process acted, including the revert timer and the CLI, so they appear with the API stopped. A line could be lost if the file is being trimmed at that moment.
 
 **`POST /api/v1/config/discard`** and **`POST /api/v1/config/restore-previous-applied`** match **`evuproxy discard-pending`** and **`evuproxy restore-previous-applied`** (see [Applying changes](config.md#applying-changes)).

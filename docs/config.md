@@ -240,6 +240,45 @@ Non-disabled peers must have a non-empty `name`, `public_key`, and `tunnel_ip`.
 
 After editing `config.yaml`, run **`evuproxy reload --config /etc/evuproxy/config.yaml`** (or use the HTTP API) so WireGuard and nftables are regenerated. The admin UI can edit and save via **`PUT /api/v1/config`** (YAML is rewritten from the structured config; comments and unknown keys are not preserved).
 
+### Confirm or revert (`apply`)
+
+```yaml
+apply:
+  confirm: true
+  confirm_timeout_seconds: 60
+```
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `confirm` | bool (optional) | If `true`, the web UI's **Apply** reverts by itself unless you confirm it in time. Left out or `false`: Apply is one-way, and a lockout risk needs an acknowledgement. |
+| `confirm_timeout_seconds` | int (optional) | How long to wait, **10** to **3600**. Default **60**. |
+
+[`config/evuproxy.example.yaml`](../config/evuproxy.example.yaml) turns it on, so new installs have it. Upgrading leaves an existing `config.yaml` alone, so existing installs keep a one-way Apply until you turn it on, with this setting or under **Settings → Preferences**. Only the web UI reads this setting. **`evuproxy reload`** and **`POST /api/v1/reload`** are one-way unless each call asks otherwise, so scripts and the boot unit behave as before. The setting takes effect from the next Apply.
+
+Confirm mode needs **systemd** and an API running as **root**. Without them Apply stops with an error and changes nothing; turn the setting off to go back to a one-way Apply. It also needs a known-good config to go back to, so run **`evuproxy reload`** once first (a host that has booted with **`evuproxy.service`** enabled already has).
+
+**How it works:** before touching the firewall, the Apply arms a transient systemd timer that runs **`evuproxy reload-revert`**. The timer is independent of the API, so a stopped API or a change that cuts your connection doesn't stop it. A revert restores **`config.yaml`** and the **`.bak`** history to how they were before the Apply and re-runs the normal reload. The rejected config is kept as **`config.yaml.reverted`**, since **`evuproxy.service`** would otherwise apply it again at the next boot.
+
+| Situation | What happens |
+|-----------|--------------|
+| Confirmed | Stops the timer. The Apply becomes the new last confirmed config. Connections the firewall already accepted can outlive the change, so an open SSH session or the web UI's open page is not proof that a change is safe: try a new connection before confirming. |
+| Time runs out | Reverts. |
+| Apply again in the window | Restarts the wait. The revert target stays the last confirmed config. |
+| One-way reload in the window | Refused: **`evuproxy reload`** exits with an error and **`POST /reload`** answers **409**, because the timer would silently undo it. **`peer-add --apply`** and the like are refused the same way, after saving. So is **`POST /restore`** / **`evuproxy restore`**. |
+| API restart in the window | Nothing changes: the session is on disk and the timer keeps running. If **`systemctl`** can't say whether the timer is armed, the session stands, and a one-way reload stays refused. |
+| Reboot in the window | Transient timers don't survive a reboot, so **`evuproxy reload`** at boot (or **`evuproxy serve`** at startup) reverts first. The session records its boot, so this doesn't depend on **`systemctl`** answering. |
+| An Apply fails in the window | Reverts the host straight away, and leaves your edits in **`config.yaml`** as unapplied changes. |
+| A revert fails | Tries three times, firewall before WireGuard, then records the failure in **`evuproxy reload-status`** and the audit events, and the UI shows it. **`config.yaml`** is already the baseline, so a reboot won't bring the rejected config back. A revert that was killed partway reads as failed too. Retry with **`evuproxy reload-revert`** or **`evuproxy reload`**. If the Apply itself had failed, **`evuproxy reload-revert`** puts your edits back in **`config.yaml`** as unapplied changes, while **`evuproxy reload`**, a reboot or an API restart keeps them in **`config.yaml.reverted`** with **`last_revert.reason`** **`failed_apply`**. |
+
+| Command | What it does |
+|---------|--------------|
+| **`evuproxy reload --confirm-within 60s`** | Applies and waits for confirmation, whatever the setting says. |
+| **`evuproxy reload-confirm`** | Keeps the Apply. |
+| **`evuproxy reload-revert`** | Reverts now, or retries a revert that failed. |
+| **`evuproxy reload-status`** | Prints any waiting Apply and the last revert as JSON. |
+
+To bring back a rejected config by hand, copy **`config.yaml.reverted`** over **`config.yaml`**. The UI offers the same as **Restore as unapplied changes**. Backups leave session state out, so restoring one can't start a revert.
+
 ### Applied snapshots (`config.yaml.bak` and `config.yaml.bak.1` … `.bak.5`)
 
 After each **successful** **`evuproxy reload`** (or **`POST /api/v1/reload`**), EvuProxy updates history from the current **`config.yaml`**:

@@ -21,6 +21,20 @@ func configYAMLBackupNth(cfgPath string, n int) string {
 	return cfgPath + ".bak." + strconv.Itoa(n)
 }
 
+// ConfigYAMLHistoryPaths returns .bak and .bak.1 … .bak.5, whether or not they exist.
+func ConfigYAMLHistoryPaths(cfgPath string) []string {
+	paths := []string{ConfigYAMLBackupPath(cfgPath)}
+	for n := 1; n <= 5; n++ {
+		paths = append(paths, configYAMLBackupNth(cfgPath, n))
+	}
+	return paths
+}
+
+// ValidateConfigYAML reports whether b is a config that could be saved.
+func ValidateConfigYAML(b []byte) error {
+	return validateConfigYAMLBytes(b)
+}
+
 func validateConfigYAMLBytes(b []byte) error {
 	var c config.Config
 	if err := yaml.Unmarshal(b, &c); err != nil {
