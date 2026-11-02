@@ -15,6 +15,14 @@ import { showToast } from "./toast.js";
 const POLL_SESSION_MS = 3000;
 const POLL_IDLE_MS = 30000;
 const TICK_MS = 250;
+/**
+ * nginx closes every connection after one response, so each request here opens a new one,
+ * and a firewall that blocks new connections drops it without an answer. Without a limit
+ * the browser keeps retrying for minutes, and those retries get through once the firewall
+ * has reverted, so a late Keep could land after the session it was meant for.
+ */
+const REQUEST_TIMEOUT_MS = 15000;
+const NO_ANSWER = "No answer from the host over a new connection. If this change locked you out, the host reverts by itself when the time runs out.";
 /** Screen readers hear the start and this last warning, not every second. */
 const WARN_AT_SECONDS = 10;
 
@@ -89,9 +97,11 @@ function render() {
   $("apply-session-revert").textContent = failed ? "Retry revert" : "Revert now";
   $("apply-session-restore").hidden = !!session || !revert.config_available;
   $("apply-session-dismiss").hidden = !!session;
-  if (!busy && active && unreachable) {
+  const noteIsErr = $("apply-session-note").classList.contains("err");
+  // A button's error stays: it says what didn't happen, which this note doesn't.
+  if (!busy && active && unreachable && !noteIsErr) {
     setNote("The API isn't answering. If this change locked you out, the host reverts by itself when the time runs out.");
-  } else if (!busy && !$("apply-session-note").classList.contains("err")) {
+  } else if (!busy && !noteIsErr) {
     setNote("");
   }
 }
@@ -130,7 +140,7 @@ function adopt(next) {
 /** Reads the session. Throws on anything but a clear answer; an API without this route gives null. */
 async function fetchStatus() {
   try {
-    return await api("/v1/apply/session");
+    return await api("/v1/apply/session", { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch (e) {
     if (e.status === 404) return null;
     throw e;
@@ -190,7 +200,7 @@ async function act(path, done) {
   busy = true;
   setNote("…");
   try {
-    await api(path, { method: "POST" });
+    await api(path, { method: "POST", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     setNote("");
     setApiStatus(true);
     busy = false;
@@ -202,7 +212,8 @@ async function act(path, done) {
     await onSettled();
   } catch (e) {
     busy = false;
-    setNote(String(e.message || e), true);
+    // Only an HTTP answer has a status: anything else is a request that got no answer.
+    setNote(e.status ? String(e.message || e) : NO_ANSWER, true);
     await poll();
   }
 }

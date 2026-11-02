@@ -44,6 +44,7 @@ ssh_authorized_keys:
 packages:
   - nftables
   - wireguard-tools
+  - nginx-light
 EOF
 cat >meta-data <<EOF
 instance-id: evuproxy-rollback-vm
@@ -56,7 +57,7 @@ qemu-system-x86_64 \
 	-display none -serial file:/vm/serial.log \
 	-drive file=disk.qcow2,if=virtio \
 	-drive file=seed.iso,if=virtio,format=raw,media=cdrom \
-	-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:9847-:9847 \
+	-netdev user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:9847-:9847,hostfwd=tcp:127.0.0.1:9080-:9080 \
 	-device virtio-net-pci,netdev=n0 &
 
 SSH_BASE=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -i /vm/id_ed25519 -p 2222)
@@ -170,6 +171,8 @@ vm "systemctl daemon-reload && systemctl enable evuproxy.service evuproxy-api.se
 wait_for_api || die "API did not come up"
 check "baseline firewall is live and SSH works through it" live_rules_allow_ssh
 
+# KEEP_ONLY=1 skips to the "Keep needs a new connection" section at the end.
+host_sections() {
 log "=== 1. Timeout with the API stopped: the case the issue asks for ==="
 open_held_shell || die "held shell"
 put_config "$LOCKED_RULES" locked-out
@@ -367,6 +370,182 @@ vm mv /usr/sbin/nft.off /usr/sbin/nft
 check "retry succeeds" test "$(api -X POST "$api_url/apply/revert" | jq -r .result)" = reverted
 check "and clears the session" test "$(session_phase)" = none
 check "config.yaml is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+}
+[ "${KEEP_ONLY:-}" = 1 ] || host_sections
+
+log "=== 11. Keep needs a new connection ==="
+# The real panel in a real browser, outside the VM, through the real docker/nginx.conf.
+apk add --no-cache -q chromium nodejs npm || die "apk add browser"
+mkdir -p /vm/browser
+cp /rollback-vm/keep.mjs /vm/browser/ || die "copy keep.mjs"
+(cd /vm/browser && npm init -y >/dev/null && npm install --silent --no-audit --no-fund playwright-core) || die "npm install"
+vm "rm -rf /usr/share/nginx/html && mkdir -p /usr/share/nginx" || die "web dir"
+scp_vm -r /web root@127.0.0.1:/usr/share/nginx/html || die "copy web"
+# Rules with the panel's port open, on top of what OPEN_RULES allows.
+PANEL_RULES="$OPEN_RULES
+  - proto: tcp
+    dport: \"9080\""
+# $1: the nginx config, filled in the way docker/entrypoint.sh does. Log each request's
+# connection, so the log shows which ones reached nginx and how many connections they used.
+install_nginx() {
+	sed -e 's|__API_HOST__|127.0.0.1:9847|g' -e 's|__UI_LISTEN__|0.0.0.0:9080|g' "$1" |
+		vm "cat >/etc/nginx/conf.d/default.conf; rm -f /etc/nginx/sites-enabled/default; printf '%s\n' \"log_format evu '\\\$connection \\\$time_iso8601 \\\$status \\\$remote_addr \\\$request';\" 'access_log /var/log/nginx/evu.log evu;' >/etc/nginx/conf.d/00-log.conf; : >/var/log/nginx/evu.log; nginx -t -q && systemctl restart nginx"
+}
+# The same config with connections kept open, as it shipped before this change.
+sed -e 's/keepalive_timeout 0;/keepalive_timeout 65;/' -e '/client_header_timeout 5s;/d' /docker/nginx.conf >/vm/nginx.keepalive.conf
+grep -q 'keepalive_timeout 65;' /vm/nginx.keepalive.conf || die "keep-alive control config"
+grep -q 'keepalive_timeout 0;' /docker/nginx.conf || die "shipped config does not close connections"
+
+# Drives the browser through an Apply and stops before Keep, so the checks below run with
+# the panel still open. Sets browser_pid. $1: the name for this run's output.
+start_panel() {
+	rm -f /vm/browser/applied /vm/browser/press /vm/browser/finish "/vm/browser/$1.json"
+	# exec, so browser_pid is node itself and can be killed.
+	(cd /vm/browser && BROWSER_OUT="$1.json" TOKEN="$TOKEN" exec node keep.mjs) &
+	browser_pid=$!
+	local i
+	for ((i = 0; i < 90; i++)); do
+		[ -f /vm/browser/applied ] && return 0
+		kill -0 "$browser_pid" 2>/dev/null || return 1
+		sleep 1
+	done
+	return 1
+}
+# Presses Keep and waits for the page to report what came of it.
+press_keep() {
+	touch /vm/browser/press
+	local i
+	for ((i = 0; i < 40; i++)); do
+		[ -s "/vm/browser/$1.json" ] && return 0
+		sleep 1
+	done
+	return 1
+}
+finish_panel() { touch /vm/browser/finish; wait "$browser_pid" 2>/dev/null; }
+outcome() { jq -r ".$2" "/vm/browser/$1.json"; }
+panel_session() {
+	held curl -sS -m 5 -H "X-API-Token:\ $TOKEN" http://127.0.0.1:9080/api/v1/apply/session | jq -r '.session.phase // "none"'
+}
+confirm_posts_seen() { held grep -c apply/confirm /var/log/nginx/evu.log; }
+panel_reachable_new() { curl -fsS -m 3 http://127.0.0.1:9080/healthz >/dev/null 2>&1; }
+panel_cut() { ! panel_reachable_new; }
+# Counts SYNs to the panel that reach the end of the input chain, where the policy drops them.
+count_dropped_syns() { held nft add rule inet evuproxy input tcp dport 9080 tcp flags syn counter; }
+dropped_syns() { held nft list chain inet evuproxy input | sed -n 's/.*tcp dport 9080 tcp flags syn.*counter packets \([0-9]*\).*/\1/p'; }
+reset_panel_host() {
+	put_config "$PANEL_RULES" baseline
+	vm evuproxy reload || die "baseline reload"
+	vm rm -f /etc/evuproxy/config.yaml.reverted /etc/evuproxy/.evuproxy-apply-last-revert.json
+	wait_for_api || die "API after baseline reload"
+	put_config "$LOCKED_RULES" locked-out
+}
+
+log "--- Control: with keep-alive on, the lockout can be confirmed. This is the bug. ---"
+install_nginx /vm/nginx.keepalive.conf || die "install keep-alive nginx"
+reset_panel_host
+open_held_shell || die "held shell"
+start_panel keepalive || die "panel did not reach the Keep prompt"
+check "control: new SSH connections are cut" ssh_cut
+check "control: new connections to the panel are cut" panel_cut
+press_keep keepalive || die "control: no outcome from Keep"
+log "control outcome: $(cat /vm/browser/keepalive.json)"
+finish_panel
+check "control: Keep succeeded over the surviving connection" test "$(outcome keepalive kept)" = true
+check "control: no session is left to revert" test "$(panel_session)" = none
+check "control: the locked config is now the confirmed one" test "$(held tail -1 /etc/evuproxy/config.yaml)" = "# locked-out"
+log "recovering the control host from its own held shell"
+held "cat >/etc/evuproxy/config.yaml" < <(write_config "$PANEL_RULES" baseline)
+held evuproxy reload || die "control recovery"
+close_held_shell
+
+log "--- Shipped config: Keep fails after a cut, and the timer reverts ---"
+install_nginx /docker/nginx.conf || die "install nginx"
+reset_panel_host
+open_held_shell || die "held shell"
+t0=$(now)
+start_panel shipped || die "panel did not reach the Keep prompt"
+check "new SSH connections are cut" ssh_cut
+check "new connections to the panel are cut" panel_cut
+count_dropped_syns
+before_syns=$(dropped_syns)
+press_keep shipped || die "no outcome from Keep"
+log "outcome: $(cat /vm/browser/shipped.json)"
+after_syns=$(dropped_syns)
+log "SYNs to the panel dropped by the firewall while Keep waited: $before_syns then $after_syns"
+log "nginx's log of confirm requests, now $(held date -Iseconds): [$(held grep apply/confirm /var/log/nginx/evu.log)]"
+check "Keep did not succeed" test "$(outcome shipped kept)" = false
+check "the page says no answer came" bash -c "jq -r .note /vm/browser/shipped.json | grep -q 'No answer from the host'"
+check "the page still counts down" bash -c "jq -r .detail /vm/browser/shipped.json | grep -q 'Reverting in'"
+check "the firewall dropped new connections to the panel" test "${after_syns:-0}" -gt "${before_syns:-0}"
+check "Keep never reached nginx" test "$(confirm_posts_seen)" = 0
+check "nginx and the API still work: only the connection was missing" test "$(panel_session)" = active
+close_held_shell
+check "SSH comes back by itself" wait_for_ssh 90
+t1=$(now)
+log "SSH was back $((t1 - t0))s after the Apply started"
+finish_panel
+check "the page reports the revert" bash -c "jq -e '.afterRevert | test(\"Reverted to the last confirmed config\")' /vm/browser/shipped.json >/dev/null"
+check "config.yaml is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+check "the rejected config was kept" test "$(vm tail -1 /etc/evuproxy/config.yaml.reverted)" = "# locked-out"
+# QEMU's user-mode networking accepts for the guest and may still be holding the request the
+# browser gave up on, and delivers it once the guest answers. A real network doesn't: closing
+# a socket that is still connecting stops its SYNs. Either way it must not count as a Keep.
+log "nginx's log of confirm requests after the revert: [$(vm grep apply/confirm /var/log/nginx/evu.log)]"
+late_keep_refused() { ! vm grep apply/confirm /var/log/nginx/evu.log | grep -qE '^[0-9]+ [^ ]+ 2[0-9][0-9] '; }
+check "a Keep arriving after the revert is not accepted" late_keep_refused
+
+log "--- Shipped config: the failure above is the connection, not Keep ---"
+reset_panel_host
+put_config "$PANEL_RULES" still-open
+start_panel open || die "panel did not reach the Keep prompt"
+press_keep open || die "no outcome from Keep"
+log "outcome: $(cat /vm/browser/open.json)"
+finish_panel
+check "with new connections allowed, the same button keeps the change" test "$(outcome open kept)" = true
+check "and the config stays" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# still-open"
+check "with one connection per request" bash -c "[ \"\$(ssh ${SSH_BASE[*]} -o ControlPath=none root@127.0.0.1 \"cut -d' ' -f1 /var/log/nginx/evu.log | sort | uniq -d | wc -l\")\" = 0 ]"
+log "page load: $(outcome open pageLoadRequests) requests, so that many connections"
+
+reset_panel_host
+open_held_shell || die "held shell"
+start_panel loopback || die "panel did not reach the Keep prompt"
+check "cut again" panel_cut
+loopback_result=$(held curl -sS -m 10 -H "X-API-Token:\ $TOKEN" -X POST http://127.0.0.1:9080/api/v1/apply/confirm | jq -r .result)
+check "the same request from inside the VM confirms, so the route itself is fine" test "$loopback_result" = confirmed
+kill "$browser_pid" 2>/dev/null
+wait "$browser_pid" 2>/dev/null
+held "cat >/etc/evuproxy/config.yaml" < <(write_config "$PANEL_RULES" baseline)
+held evuproxy reload || die "recovery"
+close_held_shell
+
+log "--- Shipped config: connections don't linger ---"
+reset_panel_host
+exec 3<>/dev/tcp/127.0.0.1/9080
+printf 'GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n' >&3
+reply=$(timeout 5 cat <&3)
+exec 3<&-
+check "nginx answers Connection: close and hangs up" bash -c "grep -qi '^connection: close' <<<'$reply'"
+# A socket opened ahead of time and never used, like a browser's spare.
+exec 3<>/dev/tcp/127.0.0.1/9080
+sleep 7
+# In a subshell, since writing to a closed socket can end the process with SIGPIPE.
+(printf 'GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n' >&3) 2>/dev/null
+reply=$(timeout 3 cat <&3 2>/dev/null)
+exec 3<&-
+check "an idle socket is closed before it can carry a request" test -z "$reply"
+
+log "--- Known limit: an SSH tunnel is an established connection, so Keep still works ---"
+reset_panel_host
+open_held_shell || die "held shell"
+ssh "${SSH_BASE[@]}" -o ControlPath=/vm/held.sock -O forward -L 9081:127.0.0.1:9080 root@127.0.0.1 || die "tunnel"
+tunnel_url=http://127.0.0.1:9081/api/v1
+api -X POST "$tunnel_url/reload" -d '{"confirm_timeout_seconds":60}' >/dev/null
+check "new SSH connections are cut" ssh_cut
+check "new connections to the panel are cut" panel_cut
+check "yet Keep through the tunnel still confirms: docs and panel warn about this" test "$(api -X POST "$tunnel_url/apply/confirm" | jq -r .result)" = confirmed
+held "cat >/etc/evuproxy/config.yaml" < <(write_config "$PANEL_RULES" baseline)
+held evuproxy reload || die "recovery"
+close_held_shell
 
 log "=== RESULT: $failures failed ==="
 if [ "$failures" -ne 0 ]; then

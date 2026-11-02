@@ -78,7 +78,8 @@ test("Apply asks for confirmation and counts down, with focus on Keep", async ({
   await expect(page.locator("#apply-session-detail")).toContainText(/Reverting in (60|59|58)s/);
   await expect(page.locator("#apply-session-keep")).toBeFocused();
   await expect(page.locator("#apply-session-status")).toContainText("Keep these changes?");
-  await expect(page.locator("#apply-session-check")).toContainText("check you can open a new connection");
+  await expect(page.locator("#apply-session-check")).toContainText("Keep opens a new connection");
+  await expect(page.locator("#apply-session-check")).toContainText("SSH tunnel or a proxy");
   await expect(page.locator("#apply-session-keep")).toHaveAttribute("aria-describedby", "apply-session-check");
   expect(JSON.parse(host.reloadBodies[0])).toEqual({ confirm_timeout_seconds: 60 });
 });
@@ -217,6 +218,50 @@ test("losing the API during the window says the host reverts by itself", async (
   await page.route("**/api/v1/apply/session", (route) => route.abort());
   await expect(page.locator("#apply-session-note")).toContainText("the host reverts by itself", { timeout: 35000 });
   await expect(page.locator("#apply-session-detail")).toContainText("Reverting in");
+});
+
+test("the prompt shows right after a cut, while the screen's refresh gets no answer", async ({ page }) => {
+  await stubHost(page, CLEAN);
+  await gotoRoute(page, origin, "overview");
+  // Only the Apply's own request, on a connection opened before the cut, comes back.
+  await page.route("**/api/v1/reload", async (route) => {
+    await page.route("**/api/v1/pending", () => {});
+    await page.route("**/api/v1/overview", () => {});
+    await page.route("**/api/v1/apply/session", () => {});
+    return route.fulfill({ json: { result: "reloaded", session: activeSession(60) } });
+  });
+  await page.locator("#apply-bar-apply").click();
+  await expect(panel(page)).toContainText("Applied. Keep these changes?");
+  await expect(page.locator("#apply-session-keep")).toBeFocused();
+});
+
+test("a Keep that gets no answer says so, stops waiting and keeps the countdown", async ({ page }) => {
+  test.setTimeout(60000);
+  const host = await stubHost(page, CLEAN, { session: activeSession(45) });
+  await gotoRoute(page, origin, "overview");
+  await expect(panel(page)).toContainText("Keep these changes?");
+  // What a firewall dropping the new connection looks like from here: nothing ever comes back.
+  await page.route("**/api/v1/apply/confirm", () => {});
+  await page.route("**/api/v1/apply/session", () => {});
+  await page.locator("#apply-session-keep").click();
+  const note = page.locator("#apply-session-note");
+  await expect(note).toContainText("No answer from the host over a new connection", { timeout: 20000 });
+  await expect(note).toHaveClass(/err/);
+  await expect(page.locator("#apply-session-detail")).toContainText("Reverting in");
+  await expect(page.locator("#apply-session-keep")).toBeVisible();
+  await expect(page.getByText("Changes kept")).toBeHidden();
+  expect(host.posts).toEqual([]);
+  // The hung re-read must not replace the message with the milder one when it gives up too.
+  await page.waitForTimeout(16000);
+  await expect(note).toContainText("No answer from the host over a new connection");
+});
+
+test("polling that gets no answer gives up and says the host reverts by itself", async ({ page }) => {
+  await stubHost(page, CLEAN, { session: activeSession(45) });
+  await gotoRoute(page, origin, "overview");
+  await expect(panel(page)).toContainText("Keep these changes?");
+  await page.route("**/api/v1/apply/session", () => {});
+  await expect(page.locator("#apply-session-note")).toContainText("the host reverts by itself", { timeout: 25000 });
 });
 
 test("Settings has a switch for the setting, saved like the other switches", async ({ page }) => {
