@@ -86,7 +86,7 @@ func cmdReload() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Applied. Run `evuproxy reload-confirm` to keep it; reverting at %s.\n", session.Deadline.Local().Format(time.RFC3339))
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Applied. Check a new connection still works, then run `evuproxy reload-confirm` to keep it; reverting at %s.\n", session.Deadline.Local().Format(time.RFC3339))
 			return err
 		},
 	}

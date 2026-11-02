@@ -141,8 +141,8 @@ The response to a confirmed reload adds **`session`**, in the same shape as belo
 ```
 
 - **`confirm_enabled`**, **`confirm_timeout_seconds`**: the **`apply`** setting in **`config.yaml`**.
-- **`session`**: **`null`** when nothing is waiting. **`phase`** is **`active`**, **`rolling_back`**, or **`failed`** with a **`failure`** message; **`failed`** also covers a session past its deadline whose timer ended without reverting. Prefer **`remaining_seconds`** to **`deadline`** for a countdown, since clocks differ.
-- **`last_revert`**: **`{at, reason, config_available}`** until it is dismissed or a new session starts. **`reason`** is **`timeout`**, **`manual`** or **`interrupted`** (the session outlived its timer, usually a reboot). **`config_available`** says **`config.yaml.reverted`** exists.
+- **`session`**: **`null`** when nothing is waiting. **`phase`** is **`active`**, **`rolling_back`**, or **`failed`** with a **`failure`** message; **`failed`** also covers a session past its deadline whose timer ended without reverting, and a revert that was killed before it finished. Prefer **`remaining_seconds`** to **`deadline`** for a countdown, since clocks differ.
+- **`last_revert`**: **`{at, reason, config_available}`** until it is dismissed or a new session starts. **`reason`** is **`timeout`**, **`manual`**, **`interrupted`** (the session outlived its timer, usually a reboot), or **`failed_apply`** (an Apply failed and so did its revert, then a reboot, API restart or **`evuproxy reload`** finished the revert). **`config_available`** says **`config.yaml.reverted`** exists.
 
 Refusals answer **409** with a stable **`error_code`**:
 

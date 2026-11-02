@@ -78,6 +78,8 @@ test("Apply asks for confirmation and counts down, with focus on Keep", async ({
   await expect(page.locator("#apply-session-detail")).toContainText(/Reverting in (60|59|58)s/);
   await expect(page.locator("#apply-session-keep")).toBeFocused();
   await expect(page.locator("#apply-session-status")).toContainText("Keep these changes?");
+  await expect(page.locator("#apply-session-check")).toContainText("check you can open a new connection");
+  await expect(page.locator("#apply-session-keep")).toHaveAttribute("aria-describedby", "apply-session-check");
   expect(JSON.parse(host.reloadBodies[0])).toEqual({ confirm_timeout_seconds: 60 });
 });
 
@@ -100,6 +102,7 @@ test("Revert now offers the rejected config back", async ({ page }) => {
   await expect(panel(page)).toContainText("Reverted to the last confirmed config.");
   await expect(panel(page)).toContainText("You chose to revert it.");
   await expect(page.locator("#apply-session-keep")).toBeHidden();
+  await expect(page.locator("#apply-session-check")).toBeHidden();
 
   await page.locator("#apply-session-restore").click();
   await expect(panel(page)).toBeHidden();

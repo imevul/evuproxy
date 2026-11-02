@@ -298,6 +298,76 @@ log "GET /apply/session: $status"
 check "it was reported as interrupted" test "$(jq -r '.last_revert.reason' <<<"$status")" = interrupted
 check "no session is left" test "$(jq -r '.session' <<<"$status")" = null
 
+log "=== 9. A failed Apply and failed revert stay out of config.yaml across reboots ==="
+reset_host baseline
+reboot_and_wait() {
+	vm systemctl reboot || true
+	sleep 10
+	wait_for_ssh 120 || return 1
+	vm systemctl is-system-running --wait >/dev/null 2>&1
+	return 0
+}
+put_config "$LOCKED_RULES" failed-apply
+# reload loads the firewall before WireGuard, so this fails the Apply with the new
+# firewall live, and fails every revert attempt the same way after restoring the old one.
+vm mv /usr/bin/wg /usr/bin/wg.off
+code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":600}')
+check "the Apply is refused as a failed revert" test "$code" = 409
+check "SSH works: the firewall went back before WireGuard failed" ssh_works
+check "the failure is reported" test "$(vm evuproxy reload-status | jq -r .session.phase)" = failed
+check "config.yaml is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+log "rebooting with WireGuard still broken"
+check "the VM comes back" reboot_and_wait
+check "the firewall is the baseline, not the failed config" live_rules_allow_ssh
+check "config.yaml is still the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+# The boot unit and the API's startup each retry the revert, one after the other.
+settled_phase() {
+	local phase i
+	for ((i = 0; i < 60; i++)); do
+		phase=$(vm evuproxy reload-status | jq -r .session.phase)
+		[ "$phase" != rolling_back ] && break
+		sleep 1
+	done
+	echo "$phase"
+}
+check "the failure still stands" test "$(settled_phase)" = failed
+vm mv /usr/bin/wg.off /usr/bin/wg
+log "rebooting with WireGuard fixed: the revert now succeeds at boot"
+check "the VM comes back" reboot_and_wait
+status=$(vm evuproxy reload-status)
+log "evuproxy reload-status: $status"
+check "the session is gone" test "$(jq -r '.session' <<<"$status")" = null
+check "it says why" test "$(jq -r '.last_revert.reason' <<<"$status")" = failed_apply
+check "the firewall is the baseline, not the failed config" live_rules_allow_ssh
+check "config.yaml is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+check "the failed edits were kept" test "$(vm tail -1 /etc/evuproxy/config.yaml.reverted)" = "# failed-apply"
+check "a later boot's reload still applies the baseline" vm evuproxy reload
+check "SSH still works after it" ssh_works
+check "the firewall is still the baseline" live_rules_allow_ssh
+
+log "=== 10. A revert killed partway offers a retry ==="
+wait_for_api || die "API did not come back"
+reset_host baseline
+put_config "$OPEN_RULES" killed-revert
+api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":10}' >/dev/null
+vm mv /usr/sbin/nft /usr/sbin/nft.off
+phase=active
+for ((i = 0; i < 30; i++)); do
+	phase=$(session_phase)
+	[ "$phase" = rolling_back ] && break
+	sleep 0.5
+done
+check "the timer started the revert" test "$phase" = rolling_back
+vm "systemctl kill --signal=SIGKILL 'evuproxy-apply-revert-*.service'"
+sleep 1
+status=$(api "$api_url/apply/session")
+log "GET /apply/session: $status"
+check "the killed revert reads as failed" test "$(jq -r '.session.phase' <<<"$status")" = failed
+vm mv /usr/sbin/nft.off /usr/sbin/nft
+check "retry succeeds" test "$(api -X POST "$api_url/apply/revert" | jq -r .result)" = reverted
+check "and clears the session" test "$(session_phase)" = none
+check "config.yaml is the baseline" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# baseline"
+
 log "=== RESULT: $failures failed ==="
 if [ "$failures" -ne 0 ]; then
 	vm journalctl --no-pager -n 40 -u 'evuproxy*' || true

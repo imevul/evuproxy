@@ -50,6 +50,16 @@ const (
 	ConfirmPhaseFailed      = "failed"
 )
 
+// What systemd says about a session's timer.
+type revertTimerState int
+
+const (
+	revertTimerLive revertTimerState = iota
+	revertTimerDead
+	// revertTimerUnclear is a hung or failing systemctl: the timer may well still be armed.
+	revertTimerUnclear
+)
+
 const (
 	confirmSessionDirName = ".evuproxy-apply-session"
 	confirmSessionFile    = "session.json"
@@ -84,6 +94,15 @@ var (
 // rollbackRetryDelay is the pause between revert attempts. Package variable so tests don't wait.
 var rollbackRetryDelay = 5 * time.Second
 
+// currentBootID identifies this boot, or is empty if it can't be read. Package variable so tests can reboot.
+var currentBootID = func() string {
+	b, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 // ConfirmSession is an Apply waiting for confirmation, stored beside the config so
 // an API restart or a reboot can find it.
 type ConfirmSession struct {
@@ -92,6 +111,8 @@ type ConfirmSession struct {
 	StartedAt      time.Time `json:"started_at"`
 	Deadline       time.Time `json:"deadline"`
 	TimeoutSeconds int       `json:"timeout_seconds"`
+	// BootID is the boot the timer was armed in. Transient timers don't outlive it.
+	BootID string `json:"boot_id,omitempty"`
 	// RevertReason is set once a revert has started, and survives a failed attempt.
 	RevertReason string `json:"revert_reason,omitempty"`
 	Failure      string `json:"failure,omitempty"`
@@ -227,18 +248,24 @@ func stopRevertTimer(ctx context.Context, token string) {
 	}
 }
 
-// revertTimerLive reports whether the session's timer can still fire. Only a clear
-// answer counts as dead: a hung systemctl must not trigger a revert.
-func revertTimerLive(ctx context.Context, token string) bool {
-	out, err := runCmdOutput(ctx, "systemctl", "is-active", revertUnit(token)+".timer")
-	if err != nil && errors.Is(err, context.DeadlineExceeded) {
-		return true
+// sessionTimerState reports whether the session's timer can still fire. A timer from an
+// earlier boot is gone whatever systemctl says, which matters at boot: the host has no
+// firewall yet, so the boot unit must revert rather than wait for a clear answer. Within a
+// boot only an explicit answer counts as dead: a hung systemctl must not trigger a revert.
+func sessionTimerState(ctx context.Context, s *ConfirmSession) revertTimerState {
+	if boot := currentBootID(); boot != "" && s.BootID != "" && boot != s.BootID {
+		return revertTimerDead
 	}
-	switch strings.TrimSpace(string(out)) {
-	case "active", "activating", "reloading":
-		return true
+	out, err := runCmdOutput(ctx, "systemctl", "is-active", revertUnit(s.Token)+".timer")
+	switch answer := strings.TrimSpace(string(out)); answer {
+	case "active", "activating", "reloading", "deactivating":
+		return revertTimerLive
+	case "inactive", "failed", "unknown":
+		return revertTimerDead
+	default:
+		slog.Warn("could not tell whether the revert timer is armed", "answer", answer, "err", err)
+		return revertTimerUnclear
 	}
-	return false
 }
 
 // checkConfirmBaseline makes sure .bak really is what the host is running and could
@@ -331,7 +358,9 @@ func restoreConfirmBaseline(cfgPath string) error {
 
 // rollbackLocked reverts the session. The caller holds the apply lock. reload applies
 // the firewall before WireGuard, so a WireGuard failure still leaves the firewall reverted.
-func rollbackLocked(ctx context.Context, cfgPath string, s *ConfirmSession, reason string) error {
+// restoreEdits puts a failed Apply's edits back in config.yaml. Only pass it when someone
+// is there to see them: the boot unit applies whatever config.yaml holds.
+func rollbackLocked(ctx context.Context, cfgPath string, s *ConfirmSession, reason string, restoreEdits bool) error {
 	stopRevertTimer(ctx, s.Token)
 	if s.RevertReason == "" {
 		s.RevertReason = reason
@@ -365,7 +394,7 @@ func rollbackLocked(ctx context.Context, cfgPath string, s *ConfirmSession, reas
 
 	// A failed Apply isn't a rejection: the edits go back to being unapplied changes,
 	// as they do when an Apply fails without a session.
-	if s.RevertReason == RevertReasonFailedApply {
+	if s.RevertReason == RevertReasonFailedApply && restoreEdits {
 		if err := os.Rename(RevertedConfigPath(cfgPath), cfgPath); err != nil && !os.IsNotExist(err) {
 			slog.Error("restore edits after failed apply", "err", err)
 		}
@@ -395,17 +424,19 @@ func clearLastRevert(cfgPath string) {
 }
 
 // checkOneWayReload runs before a reload that won't be confirmed, with the apply lock
-// held. A live session refuses it. One that outlived its timer is reverted first: its
-// config.yaml was never confirmed, and this may be the boot unit about to apply it.
+// held. A live session refuses it, and so does an unclear answer: that can't be a boot,
+// so the firewall is still in place. One that outlived its timer is reverted first: its
+// config.yaml was never confirmed, and this may be the boot unit about to apply it. That
+// leaves config.yaml as the baseline, so the reload that follows applies nothing rejected.
 func checkOneWayReload(ctx context.Context, cfgPath string) error {
 	s, err := readConfirmSession(cfgPath)
 	if err != nil || s == nil {
 		return err
 	}
-	if s.Phase == ConfirmPhaseActive && revertTimerLive(ctx, s.Token) {
+	if s.Phase == ConfirmPhaseActive && sessionTimerState(ctx, s) != revertTimerDead {
 		return ErrConfirmSessionActive
 	}
-	return rollbackLocked(ctx, cfgPath, s, RevertReasonInterrupted)
+	return rollbackLocked(ctx, cfgPath, s, RevertReasonInterrupted, false)
 }
 
 // RecoverConfirmSession reverts a session that outlived its timer. `evuproxy serve` calls
@@ -423,10 +454,10 @@ func RecoverConfirmSession(ctx context.Context, cfgPath string) error {
 	if err != nil || s == nil {
 		return err
 	}
-	if s.Phase == ConfirmPhaseActive && revertTimerLive(ctx, s.Token) {
+	if s.Phase == ConfirmPhaseActive && sessionTimerState(ctx, s) != revertTimerDead {
 		return nil
 	}
-	return rollbackLocked(ctx, cfgPath, s, RevertReasonInterrupted)
+	return rollbackLocked(ctx, cfgPath, s, RevertReasonInterrupted, false)
 }
 
 // ReloadWithConfirm applies config.yaml and reverts it unless ConfirmApply is called
@@ -474,7 +505,7 @@ func ReloadWithConfirm(ctx context.Context, cfgPath string, timeoutSeconds int, 
 
 	if err := reload(ctx, cfgPath, progress); err != nil {
 		_ = state.RecordApplyFailure(cfgPath)
-		if rerr := rollbackLocked(ctx, cfgPath, s, RevertReasonFailedApply); rerr != nil {
+		if rerr := rollbackLocked(ctx, cfgPath, s, RevertReasonFailedApply, true); rerr != nil {
 			return nil, errors.Join(err, rerr)
 		}
 		return nil, err
@@ -500,6 +531,7 @@ func rearmConfirmSession(ctx context.Context, cfgPath string, s *ConfirmSession)
 	}
 	next := *s
 	next.Token = token
+	next.BootID = currentBootID()
 	next.Deadline = time.Now().UTC().Add(time.Duration(s.TimeoutSeconds) * time.Second)
 	if err := writeConfirmSession(cfgPath, &next); err != nil {
 		stopRevertTimer(ctx, token)
@@ -562,7 +594,7 @@ func RevertApply(ctx context.Context, cfgPath, reason, token string) error {
 	if token != "" && token != s.Token {
 		return ErrNoConfirmSession
 	}
-	return rollbackLocked(ctx, cfgPath, s, reason)
+	return rollbackLocked(ctx, cfgPath, s, reason, true)
 }
 
 func (s *ConfirmSession) view(now time.Time) *ConfirmSessionView {
@@ -580,8 +612,22 @@ func (s *ConfirmSession) view(now time.Time) *ConfirmSessionView {
 	}
 }
 
+// rollbackInterrupted reports whether a session still says rolling_back with nobody doing
+// it. A revert holds the apply lock throughout, so a free lock means it was killed. The
+// session is read again under the lock, since the revert may have just finished.
+func rollbackInterrupted(cfgPath string) bool {
+	unlock, ok := tryApplyLock(cfgPath)
+	if !ok {
+		return false
+	}
+	defer unlock()
+	s, err := readConfirmSession(cfgPath)
+	return err == nil && s != nil && s.Phase == ConfirmPhaseRollingBack
+}
+
 // ReadConfirmStatus reports the setting, any session and the last revert. A session well
-// past its deadline with no timer left will never revert by itself, so it reads as failed.
+// past its deadline with no timer left will never revert by itself, and a killed revert
+// will never finish, so both read as failed: that's what offers a retry.
 func ReadConfirmStatus(ctx context.Context, cfgPath string) (ConfirmStatus, error) {
 	st := ConfirmStatus{ConfirmTimeoutSeconds: config.DefaultConfirmTimeoutSeconds}
 	if c, err := config.Load(cfgPath); err == nil {
@@ -595,9 +641,13 @@ func ReadConfirmStatus(ctx context.Context, cfgPath string) (ConfirmStatus, erro
 	if s != nil {
 		now := time.Now()
 		st.Session = s.view(now)
-		if s.Phase == ConfirmPhaseActive && now.After(s.Deadline.Add(confirmOverdueGrace)) && !revertTimerLive(ctx, s.Token) {
+		if s.Phase == ConfirmPhaseActive && now.After(s.Deadline.Add(confirmOverdueGrace)) && sessionTimerState(ctx, s) == revertTimerDead {
 			st.Session.Phase = ConfirmPhaseFailed
 			st.Session.Failure = "the revert timer ended without reverting"
+		}
+		if s.Phase == ConfirmPhaseRollingBack && rollbackInterrupted(cfgPath) {
+			st.Session.Phase = ConfirmPhaseFailed
+			st.Session.Failure = "the revert was stopped before it finished"
 		}
 	}
 	if b, err := os.ReadFile(lastRevertPath(cfgPath)); err == nil {

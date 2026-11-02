@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,11 +24,17 @@ type confirmEnv struct {
 	failNft  bool
 	failWG   bool
 	failArm  bool
+	bootID   string
+	// isActive overrides the fake systemd's answer about a timer, when set.
+	isActive func() ([]byte, error)
 }
 
 func newConfirmEnv(t *testing.T) *confirmEnv {
 	t.Helper()
-	e := &confirmEnv{t: t, timers: map[string]bool{}}
+	e := &confirmEnv{t: t, timers: map[string]bool{}, bootID: "boot-1"}
+	prevBootID := currentBootID
+	currentBootID = func() string { return e.bootID }
+	t.Cleanup(func() { currentBootID = prevBootID })
 	e.f = &fakeRunner{handler: e.handle}
 	withFakeReloadEnv(t, e.f, true)
 	prevDelay := rollbackRetryDelay
@@ -63,6 +70,9 @@ func (e *confirmEnv) handle(name string, args []string) ([]byte, error) {
 		case "stop":
 			delete(e.timers, unit)
 		case "is-active":
+			if e.isActive != nil {
+				return e.isActive()
+			}
 			if e.timers[unit] {
 				return []byte("active\n"), nil
 			}
@@ -625,6 +635,252 @@ func TestStatus_stuckSessionReadsAsFailed(t *testing.T) {
 	}
 	if st.Session.Phase != ConfirmPhaseFailed || st.Session.RemainingSeconds != 0 {
 		t.Fatalf("session: %+v", st.Session)
+	}
+}
+
+// An Apply that fails after the firewall went live, with a revert that fails the same way.
+// reload loads nft before WireGuard, so one WireGuard fault does both.
+func (e *confirmEnv) failApplyAndRevert() []byte {
+	e.t.Helper()
+	edited := e.edit("failed apply")
+	e.failWG = true
+	if _, err := ReloadWithConfirm(context.Background(), e.cfgPath, 60, func(string) {}); !errors.Is(err, ErrRollbackFailed) {
+		e.t.Fatalf("got %v", err)
+	}
+	s := e.session()
+	if s == nil || s.Phase != ConfirmPhaseFailed || s.RevertReason != RevertReasonFailedApply {
+		e.t.Fatalf("session: %+v", s)
+	}
+	e.wantFile(e.cfgPath, e.baseline)
+	e.failWG = false
+	return edited
+}
+
+func (e *confirmEnv) wantEditsKeptOut(edited []byte) {
+	e.t.Helper()
+	if e.session() != nil {
+		e.t.Fatal("session should be cleared")
+	}
+	e.wantFile(e.cfgPath, e.baseline)
+	e.wantFile(state.ConfigYAMLBackupPath(e.cfgPath), e.baseline)
+	e.wantFile(RevertedConfigPath(e.cfgPath), edited)
+	st, err := ReadConfirmStatus(context.Background(), e.cfgPath)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if st.LastRevert == nil || st.LastRevert.Reason != RevertReasonFailedApply || !st.LastRevert.ConfigAvailable {
+		e.t.Fatalf("status: %+v", st.LastRevert)
+	}
+}
+
+// The boot unit applies whatever config.yaml holds, with no timer to undo it, so the failed
+// edits must not be back there when it does, on this boot or the next.
+func TestFailedApplyAndRevert_bootKeepsEditsOut(t *testing.T) {
+	e := newConfirmEnv(t)
+	edited := e.failApplyAndRevert()
+	e.bootID = "boot-2"
+	clear(e.timers)
+
+	if err := Reload(context.Background(), e.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	e.wantEditsKeptOut(edited)
+
+	e.bootID = "boot-3"
+	if err := Reload(context.Background(), e.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	e.wantFile(e.cfgPath, e.baseline)
+}
+
+func TestFailedApplyAndRevert_serveStartupKeepsEditsOut(t *testing.T) {
+	e := newConfirmEnv(t)
+	edited := e.failApplyAndRevert()
+	if err := RecoverConfirmSession(context.Background(), e.cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	e.wantEditsKeptOut(edited)
+}
+
+func TestFailedApplyAndRevert_stillFailingBootKeepsFirewallReverted(t *testing.T) {
+	e := newConfirmEnv(t)
+	edited := e.failApplyAndRevert()
+	e.bootID = "boot-2"
+	e.failWG = true
+	if err := Reload(context.Background(), e.cfgPath); !errors.Is(err, ErrRollbackFailed) {
+		t.Fatalf("got %v", err)
+	}
+	if s := e.session(); s == nil || s.Phase != ConfirmPhaseFailed {
+		t.Fatalf("session: %+v", s)
+	}
+	e.wantFile(e.cfgPath, e.baseline)
+	e.wantFile(RevertedConfigPath(e.cfgPath), edited)
+}
+
+// Someone pressing Retry sees the result, so the edits come back as unapplied changes.
+func TestFailedApplyAndRevert_retryRestoresEdits(t *testing.T) {
+	e := newConfirmEnv(t)
+	edited := e.failApplyAndRevert()
+	if err := RevertApply(context.Background(), e.cfgPath, RevertReasonManual, ""); err != nil {
+		t.Fatal(err)
+	}
+	if e.session() != nil {
+		t.Fatal("session should be cleared")
+	}
+	e.wantFile(e.cfgPath, edited)
+	e.wantNoFile(RevertedConfigPath(e.cfgPath))
+	st, _ := ReadConfirmStatus(context.Background(), e.cfgPath)
+	if st.LastRevert != nil {
+		t.Fatalf("status: %+v", st.LastRevert)
+	}
+}
+
+// killedCommandError is the error os/exec really returns for a command that hit its
+// timeout, which is not context.DeadlineExceeded.
+func killedCommandError(t *testing.T) error {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	err := exec.CommandContext(ctx, "sleep", "30").Run()
+	if err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("got %v", err)
+	}
+	return err
+}
+
+func unclearSystemctlAnswers(t *testing.T) map[string]func() ([]byte, error) {
+	killed := killedCommandError(t)
+	return map[string]func() ([]byte, error){
+		"hung":   func() ([]byte, error) { return nil, killed },
+		"no bus": func() ([]byte, error) { return nil, errors.New("exit status 1") },
+		"binary": func() ([]byte, error) { return nil, exec.ErrNotFound },
+	}
+}
+
+func TestUnclearTimerState_leavesSessionAlone(t *testing.T) {
+	for name, answer := range unclearSystemctlAnswers(t) {
+		t.Run(name, func(t *testing.T) {
+			e := newConfirmEnv(t)
+			edited := e.edit("change")
+			e.apply()
+			e.isActive = answer
+
+			if err := RecoverConfirmSession(context.Background(), e.cfgPath); err != nil {
+				t.Fatal(err)
+			}
+			if s := e.session(); s == nil || s.Phase != ConfirmPhaseActive {
+				t.Fatalf("serve startup should leave the session: %+v", s)
+			}
+			if err := Reload(context.Background(), e.cfgPath); !errors.Is(err, ErrConfirmSessionActive) {
+				t.Fatalf("one-way reload: %v", err)
+			}
+			e.wantFile(e.cfgPath, edited)
+
+			s := e.session()
+			s.Deadline = time.Now().Add(-time.Hour)
+			if err := writeConfirmSession(e.cfgPath, s); err != nil {
+				t.Fatal(err)
+			}
+			st, err := ReadConfirmStatus(context.Background(), e.cfgPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Session.Phase != ConfirmPhaseActive {
+				t.Fatalf("an overdue session with an unclear timer isn't known to be stuck: %+v", st.Session)
+			}
+		})
+	}
+}
+
+// At boot the host has no firewall yet, so systemctl's answer must not be able to stop the
+// revert and the reload after it. The timer can't have survived, whatever it says.
+func TestReboot_unclearSystemctlStillReverts(t *testing.T) {
+	for name, answer := range unclearSystemctlAnswers(t) {
+		t.Run(name, func(t *testing.T) {
+			e := newConfirmEnv(t)
+			rejected := e.edit("change")
+			e.apply()
+			clear(e.timers)
+			e.bootID = "boot-2"
+			e.isActive = answer
+
+			if err := Reload(context.Background(), e.cfgPath); err != nil {
+				t.Fatal(err)
+			}
+			if e.session() != nil {
+				t.Fatal("session should be cleared")
+			}
+			e.wantFile(e.cfgPath, e.baseline)
+			e.wantFile(RevertedConfigPath(e.cfgPath), rejected)
+		})
+	}
+}
+
+func TestTimerState_clearAnswers(t *testing.T) {
+	e := newConfirmEnv(t)
+	e.edit("change")
+	e.apply()
+	s := e.session()
+	for answer, want := range map[string]revertTimerState{
+		"active\n":       revertTimerLive,
+		"deactivating\n": revertTimerLive,
+		"inactive\n":     revertTimerDead,
+		"failed\n":       revertTimerDead,
+		"unknown\n":      revertTimerDead,
+		"\n":             revertTimerUnclear,
+	} {
+		e.isActive = func() ([]byte, error) { return []byte(answer), errors.New("exit 3") }
+		if got := sessionTimerState(context.Background(), s); got != want {
+			t.Errorf("%q: got %v want %v", answer, got, want)
+		}
+	}
+}
+
+// A revert holds the apply lock throughout, so rolling_back with a free lock is one that
+// was killed. It has to offer a retry instead of saying "Reverting…" forever.
+func TestStatus_killedRevertReadsAsFailed(t *testing.T) {
+	e := newConfirmEnv(t)
+	rejected := e.edit("change")
+	e.apply()
+	s := e.session()
+	s.Phase = ConfirmPhaseRollingBack
+	s.RevertReason = RevertReasonTimeout
+	if err := writeConfirmSession(e.cfgPath, s); err != nil {
+		t.Fatal(err)
+	}
+
+	unlock, err := acquireApplyLock(context.Background(), e.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := ReadConfirmStatus(context.Background(), e.cfgPath)
+	unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Session.Phase != ConfirmPhaseRollingBack {
+		t.Fatalf("while the lock is held it is still running: %+v", st.Session)
+	}
+
+	st, err = ReadConfirmStatus(context.Background(), e.cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Session.Phase != ConfirmPhaseFailed || st.Session.Failure == "" {
+		t.Fatalf("session: %+v", st.Session)
+	}
+	// Reading it must leave the lock free for the retry.
+	if err := RevertApply(context.Background(), e.cfgPath, RevertReasonManual, ""); err != nil {
+		t.Fatal(err)
+	}
+	if e.session() != nil {
+		t.Fatal("session should be cleared")
+	}
+	e.wantFile(e.cfgPath, e.baseline)
+	e.wantFile(RevertedConfigPath(e.cfgPath), rejected)
+	st, _ = ReadConfirmStatus(context.Background(), e.cfgPath)
+	if st.LastRevert == nil || st.LastRevert.Reason != RevertReasonTimeout {
+		t.Fatalf("status: %+v", st.LastRevert)
 	}
 }
 

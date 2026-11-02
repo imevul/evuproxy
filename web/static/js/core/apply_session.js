@@ -22,6 +22,7 @@ const REVERT_REASONS = {
   timeout: "It wasn't confirmed in time.",
   manual: "You chose to revert it.",
   interrupted: "The host or its timer restarted before it was confirmed.",
+  failed_apply: "The Apply failed, and the revert only finished later.",
 };
 
 /** The last /apply/session body, or null before the first answer and on an API without it. */
@@ -82,6 +83,7 @@ function render() {
   }
   $("apply-session-title").textContent = title;
   $("apply-session-detail").textContent = detail;
+  $("apply-session-check").hidden = !active;
   $("apply-session-keep").hidden = !active;
   $("apply-session-revert").hidden = !active && !failed;
   $("apply-session-revert").textContent = failed ? "Retry revert" : "Revert now";
