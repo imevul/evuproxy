@@ -473,8 +473,8 @@ def _rate_limit_burst(per_second: int) -> int:
     return per_second * 2
 
 
-def _rate_limit_conn_threshold(max_conn: int) -> int:
-    return max_conn - 1
+def _rate_limit_conn_set(route_index: int, proto: str) -> str:
+    return "ratelimit_conn_r%d_%s" % (route_index, proto)
 
 
 def _rate_limit_set_needs(cfg: dict) -> tuple[bool, bool, set[int], set[int]]:
@@ -536,26 +536,25 @@ def _rate_limit_mock_lines(
         return []
     out: list[str] = []
     if rl["conn_n"] > 0:
-        thr = _rate_limit_conn_threshold(rl["conn_n"])
+        conn_set = _rate_limit_conn_set(route_index, proto)
         out.append(
-            '%s%s%s dport %s ct state established,related ct count over %d log prefix "evuproxy-ratelimit: " drop'
-            % (scope, exempt, proto, port_expr, thr)
+            '%s%s%s dport %s ct state established,related add @%s { ip saddr ct count over %d } log prefix "evuproxy-ratelimit: " drop'
+            % (scope, exempt, proto, port_expr, conn_set, rl["conn_n"])
         )
-        if proto == "tcp":
-            out.append(
-                '%s%s%s dport %s ct state new ct count over %d log prefix "evuproxy-ratelimit: " drop'
-                % (scope, exempt, proto, port_expr, thr)
-            )
+        out.append(
+            '%s%s%s dport %s ct state new add @%s { ip saddr ct count over %d } log prefix "evuproxy-ratelimit: " drop'
+            % (scope, exempt, proto, port_expr, conn_set, rl["conn_n"])
+        )
     if proto == "tcp" and rl["syn_set"] and rl["syn_n"] > 0:
         burst = _rate_limit_burst(rl["syn_n"])
         out.append(
-            '%s%s%s dport %s tcp flags syn ct state new add @%s { ip saddr limit rate %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
+            '%s%s%s dport %s tcp flags syn ct state new update @%s { ip saddr limit rate over %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
             % (scope, exempt, proto, port_expr, rl["syn_set"], rl["syn_n"], burst)
         )
     if proto == "udp" and rl["udp_set"] and rl["udp_n"] > 0:
         burst = _rate_limit_burst(rl["udp_n"])
         out.append(
-            '%s%s%s dport %s add @%s { ip saddr limit rate %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
+            '%s%s%s dport %s update @%s { ip saddr limit rate over %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
             % (scope, exempt, proto, port_expr, rl["udp_set"], rl["udp_n"], burst)
         )
     return out
@@ -658,6 +657,20 @@ def _nft_from_config(cfg: dict) -> str:
                 "",
             ]
         )
+    for ri, r in enumerate(cfg.get("forwarding", {}).get("routes") or []):
+        if r.get("disabled"):
+            continue
+        if (r.get("rate_limit") or {}).get("max_conn_per_ip") or global_rl.get("max_conn_per_ip"):
+            for pr in _route_protocols(r.get("proto")):
+                lines.extend(
+                    [
+                        "    set %s {" % _rate_limit_conn_set(ri, pr),
+                        "        type ipv4_addr",
+                        "        flags dynamic",
+                        "    }",
+                        "",
+                    ]
+                )
 
     lines.extend(
         [
