@@ -579,8 +579,6 @@ export async function refreshTopologyPage(opts) {
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initTopologyPage() {
   initTopologyViewport();
-  const topoRef = $("topology-refresh");
-  if (topoRef) topoRef.addEventListener("click", () => void refreshTopologyPage());
   const topoCenter = $("topology-center");
   if (topoCenter) topoCenter.addEventListener("click", resetTopologyView);
 }
