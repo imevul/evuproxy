@@ -2,8 +2,9 @@ import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
-import { showToast, reportBesideControl } from "../core/toast.js";
+import { reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
 import { ipv4CoveredByCIDRList, ipv4ToInt } from "../core/net.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -447,34 +448,15 @@ export async function refreshLogsPage() {
 /** One break-glass write at a time so overlapping GET→PUT cannot drop a sibling /32. */
 let logsBreakGlassBusy = false;
 
-/** Runs `write` as the one break-glass write, then redraws the table from what it saved. */
-async function writeBreakGlass(write) {
+async function addBreakGlass(ip, rowIndex) {
   if (logsBreakGlassBusy) return;
   logsBreakGlassBusy = true;
+  const cidr = ip + "/32";
   // Drop any in-flight Logs refresh so its older config cannot overwrite this write.
   state.logsRefreshSeq++;
   setLogsMsg("…");
   try {
     state.lastConfig = await api("/v1/config");
-    await write();
-    state.logsRefreshSeq++;
-    setApiStatus(true);
-    await refreshPendingBadge();
-    renderLogsView();
-    // The add button was in the table that just redrew: keep keyboard users near it.
-    if (document.activeElement === document.body) $("main-content").focus();
-  } catch (e) {
-    setLogsMsg("", true);
-    reportBesideControl($("logs-msg"), String(e.message || e));
-  } finally {
-    logsBreakGlassBusy = false;
-  }
-}
-
-/** A draft edit, so it saves at once and offers Undo. Nothing reaches the host until Apply. */
-function addBreakGlass(ip) {
-  const cidr = ip + "/32";
-  return writeBreakGlass(async () => {
     let alreadyCovered = false;
     await saveConfigEdit((cfg) => {
       if (!cfg.geo) cfg.geo = {};
@@ -484,28 +466,53 @@ function addBreakGlass(ip) {
       list.push(cidr);
       cfg.geo.break_glass_cidrs = list;
     });
+    state.logsRefreshSeq++;
     if (alreadyCovered) {
       setLogsMsg(ip + " is already covered by the break-glass list.");
+      renderLogsView();
       return;
     }
     setLogsMsg("");
-    showToast("Added " + cidr + " to break-glass. Review Pending changes, then Apply.", {
-      action: { label: "Undo", onClick: () => void removeBreakGlass(cidr) },
+    setApiStatus(true);
+    await refreshPendingBadge();
+    renderLogsView();
+    focusLogsRow(rowIndex);
+    showUndoToast("Added " + cidr + " to break-glass. It bypasses country rules after you Apply.", {
+      page: "logs",
+      edit: (cfg) => {
+        const list = (cfg.geo && cfg.geo.break_glass_cidrs) || [];
+        // Taken off elsewhere since: nothing to reverse.
+        if (!list.includes(cidr)) return false;
+        cfg.geo.break_glass_cidrs = list.filter((c) => c !== cidr);
+      },
+      afterSave: (_cfg, focus) => {
+        // Drop any in-flight Logs refresh so its older config cannot overwrite this write.
+        state.logsRefreshSeq++;
+        setLogsMsg("");
+        refreshPendingBadge();
+        renderLogsView();
+        if (focus) {
+          const btn = $("logs-table-wrap").querySelector('[data-logs-breakglass="' + ip + '"]');
+          if (btn) btn.focus();
+        }
+      },
+      message: () => "Removed " + cidr + " from break-glass.",
     });
-  });
+  } catch (e) {
+    setLogsMsg("", true);
+    reportBesideControl($("logs-msg"), String(e.message || e));
+  } finally {
+    logsBreakGlassBusy = false;
+  }
 }
 
-/** Undo takes out only this entry, from fresh config, so later additions survive. */
-function removeBreakGlass(cidr) {
-  return writeBreakGlass(async () => {
-    await saveConfigEdit((cfg) => {
-      const list = (cfg.geo && cfg.geo.break_glass_cidrs) || [];
-      if (!list.includes(cidr)) return false;
-      cfg.geo.break_glass_cidrs = list.filter((c) => c !== cidr);
-    });
-    setLogsMsg("");
-    showToast("Removed " + cidr + " from break-glass.");
-  });
+/** Keeps focus on the row whose add button just went away, unless the user has moved on. */
+function focusLogsRow(rowIndex) {
+  if (document.activeElement && document.activeElement !== document.body) return;
+  const row = $("logs-table-wrap").querySelectorAll("tbody tr")[rowIndex];
+  if (!row) return;
+  row.tabIndex = -1;
+  row.focus();
 }
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
@@ -517,7 +524,7 @@ export function initLogsPage() {
       const btn = ev.target.closest("[data-logs-breakglass]");
       if (!btn || !tableWrap.contains(btn)) return;
       const ip = btn.getAttribute("data-logs-breakglass");
-      if (ip) void addBreakGlass(ip);
+      if (ip) addBreakGlass(ip, [...tableWrap.querySelectorAll("tbody tr")].indexOf(btn.closest("tr")));
     });
   }
   const logsFilterType = $("logs-filter-type");

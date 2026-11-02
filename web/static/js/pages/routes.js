@@ -15,14 +15,16 @@ import {
   clearRowError,
   rowErrorHtml,
   restoreRowSwitchFocus,
+  focusTableRow,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { showToast } from "../core/toast.js";
-import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
+import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
 import { setRouteEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
-import { openModal, closeModal, dismissModal, openConfirmModal, registerModalForm } from "../core/modal.js";
+import { openModal, closeModal, dismissModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
 function expandRoutePortTokens(portsArr) {
@@ -239,7 +241,7 @@ function renderRoutesTable(cfg) {
             "</span> <span class=\"meta\">CIDR</span></td>"
           : '<td><span class="meta">any</span></td>';
       return (
-        `<tr data-filter="${escapeHtml(f)}"${r.disabled ? ' class="is-row-disabled"' : ""}><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
+        `<tr data-row="${i}" tabindex="-1" data-filter="${escapeHtml(f)}"${r.disabled ? ' class="is-row-disabled"' : ""}><td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
         monoIpCopyCellHtml(r.target_ip, targetPeerName) +
         `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-test="${i}">Test</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-del="${i}">Remove</button></td></tr>` +
         rowErrorHtml("data-route-disabled", i, 6)
@@ -255,7 +257,10 @@ function renderRoutesTable(cfg) {
     b.addEventListener("click", () => runRouteProbe(+b.getAttribute("data-route-test")));
   });
   wrap.querySelectorAll("[data-route-del]").forEach((b) => {
-    b.addEventListener("click", () => removeRoute(+b.getAttribute("data-route-del")));
+    b.addEventListener("click", (ev) => {
+      // The next row slides under the pointer, so a double-click must not remove it too.
+      if (ev.detail <= 1) removeRoute(+b.getAttribute("data-route-del"));
+    });
   });
   wrap.querySelectorAll("input[data-route-disabled]").forEach((inp) => {
     inp.addEventListener("click", (ev) => ev.stopPropagation());
@@ -443,7 +448,21 @@ async function patchRouteDisabled(index, disabled) {
     setApiStatus(true);
     refreshPendingBadge();
     renderRoutesTable(cfg);
-    showToast(disabled ? "Route disabled" : "Route enabled");
+    const label = (off) => (off ? "Route disabled" : "Route enabled");
+    showUndoToast(label(disabled), {
+      page: "routes",
+      edit: (c) => {
+        const routes = c.forwarding && c.forwarding.routes;
+        routes[findConfigRow(routes, index, identity, routeIdentity, "route")].disabled = !disabled;
+      },
+      afterSave: (next, focus) => {
+        setRoutesMsg("");
+        refreshPendingBadge();
+        renderRoutesTable(next);
+        if (focus) restoreRowSwitchFocus($("routes-table-wrap"), "data-route-disabled", currentIndex(), { force: true });
+      },
+      message: () => label(!disabled),
+    });
   } catch (e) {
     const at = e instanceof ConfigMergeError ? -1 : currentIndex();
     setRoutesMsg("");
@@ -526,59 +545,63 @@ async function saveRouteEditor() {
   }
 }
 
-function routeIdentity(r) {
-  return (
-    String(r.proto || "").toLowerCase() +
-    "\0" +
-    (r.ports || []).join(",") +
-    "\0" +
-    String(r.target_ip || "")
-  );
-}
+/** One removal at a time: a second click on the same row would fail as "removed elsewhere". */
+let routeRemoveBusy = false;
 
 async function removeRoute(index) {
   const cfg = state.lastConfig;
-  if (!cfg || !cfg.forwarding || !cfg.forwarding.routes || !cfg.forwarding.routes[index]) return;
-  const route = cfg.forwarding.routes[index];
-  const identity = routeIdentity(route);
-  const openIndex = index;
-  const portList = route.ports || [];
-  const ports = portList.join(", ") || "—";
-  const proto = routeProtoPlainText(route.proto).toUpperCase();
-  const targetHost = String(route.target_ip || "").trim();
-  const target = peerNameForTargetHost(cfg, targetHost) || targetHost || "its target";
-  openConfirmModal({
-    title: "Remove route?",
-    message:
-      proto +
-      (portList.length > 1 ? " ports " : " port ") +
-      ports +
-      " will stop forwarding to " +
-      target +
-      ". The host is not updated until you apply on Pending changes.",
-    confirmLabel: "Remove route",
-    onConfirm: async () => {
-      try {
-        const removeBtn = document.querySelector(`#routes-table-wrap [data-route-del="${openIndex}"]`);
-        const row = removeBtn && removeBtn.closest("tr");
-        // Re-resolve in the edit: the list may have changed while the dialog was open, or since this tab loaded.
-        const c = await saveConfigEdit((draft) => {
-          const routes = draft.forwarding && draft.forwarding.routes;
-          const i = findConfigRow(routes, openIndex, identity, routeIdentity, "route");
-          routes.splice(i, 1);
-        });
-        await fadeOutRow(row);
+  if (routeRemoveBusy || !cfg || !cfg.forwarding || !cfg.forwarding.routes || !cfg.forwarding.routes[index]) return;
+  const identity = routeIdentity(cfg.forwarding.routes[index]);
+  const wrap = $("routes-table-wrap");
+  const removeBtn = wrap.querySelector(`[data-route-del="${index}"]`);
+  const row = removeBtn && removeBtn.closest("tr");
+  routeRemoveBusy = true;
+  try {
+    let removed = null;
+    let removedAt = index;
+    const c = await saveConfigEdit((draft) => {
+      const routes = draft.forwarding && draft.forwarding.routes;
+      removedAt = findConfigRow(routes, index, identity, routeIdentity, "route");
+      [removed] = routes.splice(removedAt, 1);
+    });
+    await fadeOutRow(row);
+    setRoutesMsg("");
+    renderRoutesTable(c);
+    setApiStatus(true);
+    refreshPendingBadge();
+    focusTableRow(wrap, removedAt, $("routes-add"));
+    const targetHost = String(removed.target_ip || "").trim();
+    const target = peerNameForTargetHost(c, targetHost) || targetHost || "—";
+    const label = routeProtoPlainText(removed.proto) + " " + ((removed.ports || []).join(", ") || "—") + " to " + target;
+    const removedJson = JSON.stringify(removed);
+    let restoredAt = removedAt;
+    showUndoToast("Removed route " + label + ".", {
+      page: "routes",
+      edit: (draft) => {
+        if (!draft.forwarding) draft.forwarding = {};
+        if (!draft.forwarding.routes) draft.forwarding.routes = [];
+        const routes = draft.forwarding.routes;
+        // Already back (saved elsewhere since): nothing to reverse. Only the whole row counts,
+        // since identity also matches a twin that is disabled or has other source CIDRs.
+        restoredAt = routes.findIndex((r) => JSON.stringify(r) === removedJson);
+        if (restoredAt !== -1) return false;
+        restoredAt = Math.min(removedAt, routes.length);
+        routes.splice(restoredAt, 0, removed);
+      },
+      afterSave: (next, focus) => {
         setRoutesMsg("");
-        renderRoutesTable(c);
-        setApiStatus(true);
         refreshPendingBadge();
-        showToast("Route removed. Apply on Pending changes when ready.");
-      } catch (e) {
-        setRoutesMsg(String(e.message || e), true);
-        renderRoutesTable(state.lastConfig);
-      }
-    },
-  });
+        renderRoutesTable(next);
+        if (focus) focusTableRow(wrap, restoredAt, $("routes-add"), { force: true });
+      },
+      message: () => "Restored route " + label + ".",
+    });
+  } catch (e) {
+    setRoutesMsg(String(e.message || e), true);
+    renderRoutesTable(state.lastConfig);
+  } finally {
+    routeRemoveBusy = false;
+  }
 }
 
 export async function refreshRoutesPage() {

@@ -2,8 +2,8 @@
  * Toast behaviour and the save feedback built on it.
  *
  * The pause tests use a fake clock so they assert the 10 second budget rather than
- * sit through it. The action button has no caller in the app yet, so those tests
- * drive the module directly, the way a page would.
+ * sit through it. The action button tests drive the module directly, the way a page
+ * would; remove-confirm.spec covers the Undo built on it.
  */
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
@@ -202,10 +202,8 @@ test.describe("save feedback", () => {
 
       await gotoRoute(page, origin, "peers");
       await switchTrack(page.locator("#peers-table-wrap"), "input[data-peer-disabled]").click();
-      // The seeded peers have routes pointing at them, so this one asks first.
-      const ok = page.locator("#confirm-modal-ok");
-      if (await ok.isVisible()) await ok.click();
-      await expect(toast(page)).toHaveText(/Peer( and its routes)? disabled/);
+      // The seeded peers have routes pointing at them, so the toast counts those too.
+      await expect(toast(page)).toContainText(/Peer disabled|Disabled .+ and \d+ routes?\./);
     } finally {
       await putConfig(request, snapshot);
     }
@@ -267,8 +265,6 @@ test.describe("toast and dimmed rows (axe)", () => {
         await seed(page, { scheme });
         await gotoRoute(page, origin, "peers");
         await switchTrack(page.locator("#peers-table-wrap"), "input[data-peer-disabled]").click();
-        const ok = page.locator("#confirm-modal-ok");
-        if (await ok.isVisible()) await ok.click();
         await expect(toast(page)).toBeVisible();
         await show(page, "Peer disabled", { withAction: true });
         // Let the entrance transition land: axe reads a half-faded toast as low contrast.
