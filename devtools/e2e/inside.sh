@@ -15,8 +15,15 @@ if [ "${#scenarios[@]}" -eq 0 ]; then
 		scenarios+=("$(basename "$f" .sh)")
 	done
 fi
+# A heavy scenario lives in on-demand/, so it only runs when asked for by name.
+scenario_file() {
+	local dir
+	for dir in scenarios on-demand; do
+		[ ! -f "$E2E_DIR/$dir/$1.sh" ] || { echo "$E2E_DIR/$dir/$1.sh"; return; }
+	done
+}
 for s in "${scenarios[@]}"; do
-	[ -f "$E2E_DIR/scenarios/$s.sh" ] || die "no such scenario: $s"
+	[ -n "$(scenario_file "$s")" ] || die "no such scenario: $s"
 done
 
 install_tools
@@ -27,7 +34,7 @@ for s in "${scenarios[@]}"; do
 	log "##### scenario: $s"
 	topology_up
 	# shellcheck source=/dev/null
-	. "$E2E_DIR/scenarios/$s.sh"
+	. "$(scenario_file "$s")"
 	[ "$failures" -eq 0 ] || dump_diagnostics
 	check "firewall rules stayed inside the namespaces" runner_namespace_untouched
 	topology_down

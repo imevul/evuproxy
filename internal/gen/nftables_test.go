@@ -736,13 +736,19 @@ func TestNFTables_rateLimit_tcpSynAndConn(t *testing.T) {
 	if !strings.Contains(s, "set ratelimit_syn_v4") {
 		t.Fatalf("missing rate limit dynamic sets: %s", s)
 	}
-	if strings.Contains(s, "set ratelimit_conn_v4") || strings.Contains(s, "update @ratelimit_conn") {
-		t.Fatalf("max conn should use inline ct count drop, not sticky conn set: %s", s)
+	if !strings.Contains(s, "set ratelimit_conn_r0_tcp") {
+		t.Fatalf("max conn must count per source in a set: %s", s)
 	}
-	if !strings.Contains(s, "ct state established,related ct count over 79 log prefix \"evuproxy-ratelimit: \" drop") {
-		t.Fatalf("missing inline max conn drop: %s", s)
+	if strings.Contains(s, "update @ratelimit_conn") {
+		t.Fatalf("max conn must not refresh a sticky set: %s", s)
 	}
-	if !strings.Contains(s, "tcp flags syn ct state new add @ratelimit_syn_v4 { ip saddr limit rate 40/second") {
+	if !strings.Contains(s, "ct state new add @ratelimit_conn_r0_tcp { ip saddr ct count over 80 } log prefix \"evuproxy-ratelimit: \" drop") {
+		t.Fatalf("missing max conn drop on new connections: %s", s)
+	}
+	if !strings.Contains(s, "ct state established,related add @ratelimit_conn_r0_tcp { ip saddr ct count over 80 } log prefix \"evuproxy-ratelimit: \" drop") {
+		t.Fatalf("missing max conn drop on established connections: %s", s)
+	}
+	if !strings.Contains(s, "tcp flags syn ct state new update @ratelimit_syn_v4 { ip saddr limit rate over 40/second") {
 		t.Fatalf("missing syn rate rule: %s", s)
 	}
 	if !strings.Contains(s, `iifname "eth0" oifname "wg0"`) || !strings.Contains(s, "evuproxy-ratelimit:") {
@@ -783,7 +789,7 @@ func TestNFTables_rateLimit_maxConnBeforeEstablishedAccept(t *testing.T) {
 		t.Fatal("missing forward chain")
 	}
 	chunk := s[fwdIdx:]
-	connIdx := strings.Index(chunk, "ct state established,related ct count over 4 log prefix \"evuproxy-ratelimit: \" drop")
+	connIdx := strings.Index(chunk, "ct state established,related add @ratelimit_conn_r0_tcp { ip saddr ct count over 5 } log prefix \"evuproxy-ratelimit: \" drop")
 	estIdx := strings.Index(chunk, "ct state established,related accept")
 	if connIdx < 0 || estIdx < 0 || connIdx > estIdx {
 		t.Fatalf("max conn must precede blanket established accept in forward; chunk=%q", chunk)
@@ -805,7 +811,7 @@ func TestNFTables_rateLimit_udpBeforeEstablishedAccept(t *testing.T) {
 		t.Fatal("missing forward chain")
 	}
 	chunk := s[fwdIdx:]
-	udpIdx := strings.Index(chunk, "add @ratelimit_udp_v4 { ip saddr limit rate 50/second")
+	udpIdx := strings.Index(chunk, "update @ratelimit_udp_v4 { ip saddr limit rate over 50/second")
 	estIdx := strings.Index(chunk, "ct state established,related accept")
 	if udpIdx < 0 || estIdx < 0 || udpIdx > estIdx {
 		t.Fatalf("udp rate limit must precede blanket established accept in forward; chunk=%q", chunk)
@@ -872,10 +878,10 @@ func TestNFTables_rateLimit_routeOverrideUDP(t *testing.T) {
 	if !strings.Contains(s, "set ratelimit_udp_r0") {
 		t.Fatalf("route override should use per-route udp set: %s", s)
 	}
-	if !strings.Contains(s, "udp dport") || !strings.Contains(s, "add @ratelimit_udp_r0 { ip saddr limit rate 200/second") {
+	if !strings.Contains(s, "udp dport") || !strings.Contains(s, "update @ratelimit_udp_r0 { ip saddr limit rate over 200/second") {
 		t.Fatalf("missing udp rate: %s", s)
 	}
-	if strings.Contains(s, "ct state new add @ratelimit_udp") {
+	if strings.Contains(s, "ct state new update @ratelimit_udp") {
 		t.Fatalf("udp rate must meter all packets, not ct state new only: %s", s)
 	}
 }
@@ -900,11 +906,55 @@ func TestNFTables_rateLimit_globalAndPerRouteSets(t *testing.T) {
 	if strings.Contains(s, "set ratelimit_syn_r1") {
 		t.Fatal("route 1 should use global set, not per-route set")
 	}
-	if !strings.Contains(s, "add @ratelimit_syn_r0 { ip saddr limit rate 100/second") {
+	if !strings.Contains(s, "update @ratelimit_syn_r0 { ip saddr limit rate over 100/second") {
 		t.Fatalf("route 0 should use 100/s on per-route set: %s", s)
 	}
-	if !strings.Contains(s, "add @ratelimit_syn_v4 { ip saddr limit rate 10/second") {
+	if !strings.Contains(s, "update @ratelimit_syn_v4 { ip saddr limit rate over 10/second") {
 		t.Fatalf("route 1 should use global 10/s: %s", s)
+	}
+}
+
+// A drop rule with a bare "limit rate" drops the traffic under the limit and passes the excess.
+func TestNFTables_rateLimit_dropsOnlyTheExcess(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{TCPSynPerSecond: 10, UDPPerSecond: 10}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+		{Proto: "udp", Ports: []string{"19132"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "limit rate over") {
+		t.Fatalf("expected metered rules: %s", s)
+	}
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, "evuproxy-ratelimit:") && strings.Contains(line, "limit rate") && !strings.Contains(line, "limit rate over") {
+			t.Fatalf("rate limit rule without over: %s", line)
+		}
+	}
+}
+
+// Each route and protocol counts on its own, and only the sets a rule uses are declared.
+func TestNFTables_rateLimit_maxConnSetPerRouteAndProto(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.RateLimit = config.RateLimit{MaxConnPerIP: 5}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp,udp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+		{Proto: "tcp", Ports: []string{"8080"}, TargetIP: "10.100.0.3", Disabled: true},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"set ratelimit_conn_r0_tcp", "set ratelimit_conn_r0_udp", "ct state new add @ratelimit_conn_r0_udp"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q: %s", want, s)
+		}
+	}
+	if strings.Contains(s, "ratelimit_conn_r1") {
+		t.Fatalf("a disabled route needs no set: %s", s)
 	}
 }
 

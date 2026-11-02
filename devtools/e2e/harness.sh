@@ -62,7 +62,7 @@ install_tools() {
 	apt-get update -qq >/dev/null || die "apt-get update"
 	apt-get install -y -qq --no-install-recommends \
 		iproute2 iputils-ping nftables procps socat wireguard-tools >/dev/null || die "apt-get install"
-	install -m 0755 /e2e-bin/evuproxy /usr/local/bin/evuproxy || die "install evuproxy"
+	install -m 0755 /e2e-bin/evuproxy /e2e-bin/loadgen /usr/local/bin/ || die "install binaries"
 	# The container mounts /proc/sys read-only. Only its net subtree needs writing, and that
 	# is per-namespace, so the host's sysctls stay out of reach.
 	mount --bind /proc/sys/net /proc/sys/net || die "bind /proc/sys/net"
