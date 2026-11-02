@@ -6,13 +6,16 @@
  * drive the module directly, the way a page would.
  */
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 import { SCHEMES, gotoRoute, seed, token } from "./helpers";
 
 const origin = process.env.PW_BASE_URL?.trim() || process.env.BASE_URL?.trim() || "http://127.0.0.1:9080";
 const apiHeaders = { "X-API-Token": token() };
 const toast = (page: Page) => page.locator("#toaster .evu-toast");
+/** The visible part of a row switch: its input is 0x0, so it cannot be clicked directly. */
+const switchTrack = (scope: Locator, input: string) =>
+  scope.locator(`label.evu-switch:has(${input})`).first();
 
 async function fetchConfig(request: APIRequestContext): Promise<unknown> {
   const r = await request.get(`${origin}/api/v1/config`, { headers: apiHeaders });
@@ -194,12 +197,11 @@ test.describe("save feedback", () => {
     const snapshot = await fetchConfig(request);
     try {
       await gotoRoute(page, origin, "inbound");
-      await page.locator("#inbound-table-wrap input[data-inbound-disabled]").first().uncheck({ force: true });
+      await switchTrack(page.locator("#inbound-table-wrap"), "input[data-inbound-disabled]").click();
       await expect(toast(page)).toHaveText(/Inbound rule disabled/);
 
       await gotoRoute(page, origin, "peers");
-      const sw = page.locator("#peers-table-wrap input[data-peer-disabled]").first();
-      await sw.uncheck({ force: true });
+      await switchTrack(page.locator("#peers-table-wrap"), "input[data-peer-disabled]").click();
       // The seeded peers have routes pointing at them, so this one asks first.
       const ok = page.locator("#confirm-modal-ok");
       if (await ok.isVisible()) await ok.click();
@@ -217,7 +219,7 @@ test.describe("save feedback", () => {
         : route.fallback()
     );
     const row = page.locator("#routes-table-wrap tbody tr").first();
-    await row.locator("input[data-route-disabled]").uncheck({ force: true });
+    await switchTrack(row, "input[data-route-disabled]").click();
 
     const err = page.locator("#routes-table-wrap tr.row-error");
     await expect(err).toHaveText(/disk full/);
@@ -247,12 +249,13 @@ test.describe("save feedback", () => {
 
   test("browser-only settings do not toast", async ({ page }) => {
     await gotoRoute(page, origin, "settings");
+    await page.locator("#settings-tab-adv-btn").click();
     const width = page.locator("#settings-content-width");
-    if (await width.count()) {
-      await width.selectOption({ index: 1 });
-      await page.waitForTimeout(300);
-      await expect(toast(page)).toHaveCount(0);
-    }
+    const before = await width.inputValue();
+    await width.selectOption({ index: before === "small" ? 1 : 0 });
+    await expect(width).not.toHaveValue(before);
+    await page.waitForTimeout(300);
+    await expect(toast(page)).toHaveCount(0);
   });
 });
 
@@ -263,8 +266,7 @@ test.describe("toast and dimmed rows (axe)", () => {
       try {
         await seed(page, { scheme });
         await gotoRoute(page, origin, "peers");
-        const sw = page.locator("#peers-table-wrap input[data-peer-disabled]").first();
-        await sw.uncheck({ force: true });
+        await switchTrack(page.locator("#peers-table-wrap"), "input[data-peer-disabled]").click();
         const ok = page.locator("#confirm-modal-ok");
         if (await ok.isVisible()) await ok.click();
         await expect(toast(page)).toBeVisible();
