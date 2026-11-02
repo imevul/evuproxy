@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EvuProxy Admin</title>
+  <title>EvuProxy</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -49,15 +50,6 @@
       </div>
     </div>
     <div class="evu-app-header__meta">
-      <label class="evu-sr-only" for="global-table-search">Filter peers and routes tables</label>
-      <input
-        type="search"
-        id="global-table-search"
-        class="header-search evu-input"
-        placeholder="Filter peers/routes (press /)"
-        autocomplete="off"
-        spellcheck="false"
-      />
       <span id="api-status" class="evu-pill" aria-live="polite">API</span>
     </div>
   </header>
@@ -369,6 +361,12 @@
           <button type="button" class="btn-help-trigger" aria-label="More about the API token (dialog)" data-help-title="API token" data-help-template="help-token-intro">?</button>
         </div>
         <p class="hint">Credentials this browser uses to talk to the EvuProxy API. Never sent anywhere else.</p>
+        <div id="token-not-connected" class="evu-alert token-not-connected is-hidden">
+          <div class="evu-alert__body">
+            <p class="evu-alert__title">Not connected</p>
+            <p>Paste the API token from this host to get started.</p>
+          </div>
+        </div>
         <div class="evu-card card">
           <div class="field">
             <label for="token">API token</label>
@@ -407,8 +405,10 @@
         </p>
         <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="peers-refresh">Refresh</button>
-            <button type="button" class="evu-btn evu-btn--outline" id="peers-add-start">Add peer</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="peers-add-start">Add peer</button>
+            <button type="button" class="evu-btn evu-btn--ghost" id="peers-refresh">Refresh</button>
+            <label class="evu-sr-only" for="peers-filter">Filter peers</label>
+            <input type="search" id="peers-filter" class="table-filter evu-input" data-filter-table="peers-table-wrap" placeholder="Filter peers (press /)" autocomplete="off" spellcheck="false" />
           </div>
           <div id="peers-table-wrap" class="table-wrap"></div>
           <p id="peers-msg" class="msg" aria-live="polite"></p>
@@ -621,8 +621,10 @@
         </p>
         <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="routes-refresh">Refresh</button>
-            <button type="button" class="evu-btn evu-btn--outline" id="routes-add">Add route</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="routes-add">Add route</button>
+            <button type="button" class="evu-btn evu-btn--ghost" id="routes-refresh">Refresh</button>
+            <label class="evu-sr-only" for="routes-filter">Filter routes</label>
+            <input type="search" id="routes-filter" class="table-filter evu-input" data-filter-table="routes-table-wrap" placeholder="Filter routes (press /)" autocomplete="off" spellcheck="false" />
           </div>
           <div id="routes-table-wrap" class="table-wrap"></div>
           <p id="routes-msg" class="msg" aria-live="polite"></p>
@@ -832,7 +834,6 @@
         <p class="hint">How WAN, this host, and each peer connect for the forwards you have configured.</p>
         <div class="evu-card card topology-card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="topology-refresh">Refresh</button>
             <button
               type="button"
               class="evu-btn evu-btn--outline"
@@ -881,8 +882,8 @@
         <p class="hint">Which ports on this host itself accept connections — SSH, HTTP and friends. Forwarded services live on Routes.</p>
         <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="inbound-refresh">Refresh</button>
-            <button type="button" class="evu-btn evu-btn--outline" id="inbound-add">Add rule</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="inbound-add">Add rule</button>
+            <button type="button" class="evu-btn evu-btn--ghost" id="inbound-refresh">Refresh</button>
           </div>
           <div id="inbound-table-wrap" class="table-wrap"></div>
           <p id="inbound-msg" class="msg" aria-live="polite"></p>
@@ -1320,8 +1321,8 @@
         <p class="hint">Live counters read from the host: WireGuard transfer and handshakes, plus nftables rule hits.</p>
         <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="stats-refresh">Refresh</button>
             <button type="button" class="evu-btn evu-btn--outline" id="stats-export-metrics-csv">Export peer metrics CSV</button>
+            <button type="button" class="evu-btn evu-btn--ghost" id="stats-refresh">Refresh</button>
           </div>
           <h3>WireGuard peers</h3>
           <div id="stats-wg-wrap" class="table-wrap"></div>
@@ -1348,7 +1349,7 @@
         <div class="evu-card card">
           <div class="logs-toolbar-wrap">
             <div class="toolbar logs-toolbar logs-toolbar-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="logs-refresh">Refresh</button>
+              <button type="button" class="evu-btn evu-btn--ghost" id="logs-refresh">Refresh</button>
               <button type="button" class="evu-btn evu-btn--outline" id="logs-filter-clear">Clear filters</button>
               <span class="logs-toolbar-spacer" aria-hidden="true"></span>
               <div class="evu-tabs section-tabs logs-view-mode" role="group" aria-label="Log view mode">
@@ -1459,7 +1460,7 @@
           <p id="confirm-modal-desc" class="confirm-modal-body"></p>
           <p id="confirm-modal-status" class="msg" aria-live="polite"></p>
           <div class="btn-row confirm-modal-actions">
-            <button type="button" class="evu-btn evu-btn--primary" id="confirm-modal-ok">OK</button>
+            <button type="button" class="evu-btn evu-btn--danger" id="confirm-modal-ok">OK</button>
             <button type="button" class="evu-btn evu-btn--outline is-hidden" id="confirm-modal-extra"></button>
             <button type="button" class="evu-btn evu-btn--outline" id="confirm-modal-cancel">Cancel</button>
           </div>
@@ -1477,7 +1478,7 @@
         <div class="modal-panel">
           <h3 id="shortcuts-modal-title">Keyboard shortcuts</h3>
           <ul class="shortcuts-list meta">
-            <li><kbd class="kbd">/</kbd> — Focus peer/route filter</li>
+            <li><kbd class="kbd">/</kbd> — Focus the filter on Peers and Routes</li>
             <li><kbd class="kbd">?</kbd> — This help</li>
             <li><kbd class="kbd">Esc</kbd> — Close the topmost dialog, or the navigation drawer</li>
           </ul>

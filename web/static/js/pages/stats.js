@@ -1,6 +1,7 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus, downloadTextFile, metricsPeersToCsv } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
+import { formatBytes, formatCount, timeHtml } from "../core/format.js";
 import { api } from "../core/api.js";
 
 /* ——— Stats ——— */
@@ -10,10 +11,8 @@ function setStatsMsg(text, isErr) {
   el.classList.toggle("err", !!isErr);
 }
 
-function fmtHandshake(u) {
-  if (!u) return "never";
-  const d = new Date(u * 1000);
-  return isNaN(d.getTime()) ? String(u) : d.toISOString();
+function handshakeHtml(u) {
+  return u ? timeHtml(new Date(u * 1000)) : "never";
 }
 
 /** Map public_key -> peer name from the loaded config ({} when config unavailable). */
@@ -56,7 +55,7 @@ export async function refreshStatsPage() {
       const rows = st.wireguard_peers
         .map(
           (p) =>
-            `<tr><td>${escapeHtml(names[String(p.public_key || "").trim()] || "—")}</td><td class="mono">${escapeHtml(trunc(p.public_key, 24))}</td><td>${escapeHtml(p.endpoint || "—")}</td><td class="mono">${escapeHtml(fmtHandshake(p.latest_handshake_unix))}</td><td>${escapeHtml(String(p.transfer_rx ?? ""))} / ${escapeHtml(String(p.transfer_tx ?? ""))}</td></tr>`
+            `<tr><td>${escapeHtml(names[String(p.public_key || "").trim()] || "—")}</td><td class="mono">${escapeHtml(trunc(p.public_key, 24))}</td><td>${escapeHtml(p.endpoint || "—")}</td><td>${handshakeHtml(p.latest_handshake_unix)}</td><td>${escapeHtml(formatBytes(p.transfer_rx))} / ${escapeHtml(formatBytes(p.transfer_tx))}</td></tr>`
         )
         .join("");
       wgW.innerHTML = `<table class="data"><thead><tr><th scope="col">Peer</th><th scope="col">Public key</th><th scope="col">Endpoint</th><th scope="col">Handshake</th><th scope="col">RX / TX</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -68,7 +67,7 @@ export async function refreshStatsPage() {
       const rows = st.nftables_counters
         .map(
           (r) =>
-            `<tr><td>${escapeHtml(r.family)}</td><td>${escapeHtml(r.table)}</td><td>${escapeHtml(String(r.packets ?? ""))}</td><td>${escapeHtml(String(r.bytes ?? ""))}</td><td class="mono stats-nft-rule">${escapeHtml(r.line)}</td></tr>`
+            `<tr><td>${escapeHtml(r.family)}</td><td>${escapeHtml(r.table)}</td><td>${escapeHtml(formatCount(r.packets))}</td><td>${escapeHtml(formatBytes(r.bytes))}</td><td class="mono stats-nft-rule">${escapeHtml(r.line)}</td></tr>`
         )
         .join("");
       nftW.innerHTML = `<table class="data"><thead><tr><th scope="col">Family</th><th scope="col">Table</th><th scope="col">Packets</th><th scope="col">Bytes</th><th scope="col">Rule</th></tr></thead><tbody>${rows}</tbody></table>`;

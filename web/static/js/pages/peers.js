@@ -2,12 +2,13 @@ import { state, defaultPeerSubnetCidr } from "../core/state.js";
 import {
   $,
   escapeHtml,
-  trunc,
   setApiStatus,
   tableDisabledToggleCell,
   monoIpCopyCellHtml,
   bindTunnelIpCopyButtons,
-  applyPeersRoutesTableFilter,
+  applyTableFilter,
+  fadeOutRow,
+  publicKeyCellHtml,
   downloadTextFile,
   setEditorMsg,
   setRowError,
@@ -170,7 +171,8 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       return (
         `<tr data-row="${i}" tabindex="-1" data-filter="${escapeHtml(f)}"${p.disabled ? ' class="is-row-disabled"' : ""}><td>${escapeHtml(p.name)}</td>` +
         monoIpCopyCellHtml(p.tunnel_ip) +
-        `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>` +
+        publicKeyCellHtml(p.public_key, p.name) +
+        `${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>` +
         rowErrorHtml("data-peer-disabled", i, pingOn ? 7 : 6)
       );
     })
@@ -194,7 +196,7 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       await patchPeerDisabled(idx, !inp.checked);
     });
   });
-  applyPeersRoutesTableFilter();
+  applyTableFilter("peers-table-wrap");
 }
 
 function peerTunnelHost(peer) {
@@ -568,6 +570,8 @@ async function removePeer(index) {
   if (peerRemoveBusy || !cfg || !cfg.peers || !cfg.peers[index]) return;
   const identity = peerIdentity(cfg.peers[index]);
   const wrap = $("peers-table-wrap");
+  const removeBtn = wrap.querySelector(`[data-peer-del="${index}"]`);
+  const row = removeBtn && removeBtn.closest("tr");
   peerRemoveBusy = true;
   try {
     let removed = null;
@@ -578,6 +582,7 @@ async function removePeer(index) {
       cascaded = disableDependentRoutes(draft, draft.peers[removedAt]);
       [removed] = draft.peers.splice(removedAt, 1);
     });
+    await fadeOutRow(row);
     setPeersMsg("");
     renderPeersTable(c);
     setApiStatus(true);

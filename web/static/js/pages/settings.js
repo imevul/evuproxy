@@ -503,7 +503,7 @@ export function initSettingsPage() {
         title: "Restore " + name + "?",
         message:
           "This replaces files under /etc/evuproxy with the archive " + path + dated + ". Reload the host if needed.",
-        confirmLabel: "Restore " + name,
+        confirmLabel: "Replace host files",
         extraAction: {
           label: "Back up current config first",
           run: async () => {

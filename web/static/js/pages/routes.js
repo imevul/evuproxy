@@ -6,7 +6,8 @@ import {
   tableDisabledToggleCell,
   monoIpCopyCellHtml,
   bindTunnelIpCopyButtons,
-  applyPeersRoutesTableFilter,
+  applyTableFilter,
+  fadeOutRow,
   writeRateLimitFields,
   readRateLimitFromForm,
   setEditorMsg,
@@ -269,7 +270,7 @@ function renderRoutesTable(cfg) {
       await patchRouteDisabled(idx, !inp.checked);
     });
   });
-  applyPeersRoutesTableFilter();
+  applyTableFilter("routes-table-wrap");
 }
 
 /** JSON of the route open in the editor, to detect it changing elsewhere before Save. */
@@ -552,6 +553,8 @@ async function removeRoute(index) {
   if (routeRemoveBusy || !cfg || !cfg.forwarding || !cfg.forwarding.routes || !cfg.forwarding.routes[index]) return;
   const identity = routeIdentity(cfg.forwarding.routes[index]);
   const wrap = $("routes-table-wrap");
+  const removeBtn = wrap.querySelector(`[data-route-del="${index}"]`);
+  const row = removeBtn && removeBtn.closest("tr");
   routeRemoveBusy = true;
   try {
     let removed = null;
@@ -561,13 +564,15 @@ async function removeRoute(index) {
       removedAt = findConfigRow(routes, index, identity, routeIdentity, "route");
       [removed] = routes.splice(removedAt, 1);
     });
+    await fadeOutRow(row);
     setRoutesMsg("");
     renderRoutesTable(c);
     setApiStatus(true);
     refreshPendingBadge();
     focusTableRow(wrap, removedAt, $("routes-add"));
-    const label =
-      routeProtoPlainText(removed.proto) + " " + ((removed.ports || []).join(", ") || "—") + " → " + String(removed.target_ip || "—");
+    const targetHost = String(removed.target_ip || "").trim();
+    const target = peerNameForTargetHost(c, targetHost) || targetHost || "—";
+    const label = routeProtoPlainText(removed.proto) + " " + ((removed.ports || []).join(", ") || "—") + " to " + target;
     const removedJson = JSON.stringify(removed);
     let restoredAt = removedAt;
     showUndoToast("Removed route " + label + ".", {

@@ -1,8 +1,9 @@
 import { state } from "./state.js";
-import { $ } from "./dom.js";
+import { $, setApiNotConnected, setApiStatus } from "./dom.js";
 import { ensureApiGate, applyNavRestriction, token } from "./api.js";
 import { setGeoEditorTab } from "./advanced.js";
 import { beginLoading } from "./loading.js";
+import { setTitlePage } from "./title.js";
 import { ensureUIPrefs } from "./prefs.js";
 import { anyOpenModalDirty, closeAllModals, closeConfirmModal, confirmDiscard } from "./modal.js";
 import { pageForm } from "./dirty.js";
@@ -92,6 +93,7 @@ function showPage(name) {
   });
   const sec = $("page-" + name);
   if (sec) sec.hidden = false;
+  setTitlePage(name);
   const contentEl = document.querySelector("main.content");
   if (contentEl) contentEl.scrollTop = 0;
   document.querySelectorAll(".nav-link").forEach((a) => {
@@ -128,8 +130,9 @@ export async function navigate(name, opts) {
     return;
   }
   const seq = ++navSeq;
-  // No token means the gate cannot pass and needs no request to say so.
-  if (name !== "overview" && name !== "token" && !token().trim()) name = "overview";
+  // No token means the gate cannot pass and needs no request to say so. Every
+  // page would be a dead end, so the one page that can fix it comes first.
+  if (name !== "token" && !token().trim()) name = "token";
   closeConfirmModal();
   if (name !== "routes") {
     closeRouteProbeModal();
@@ -178,7 +181,10 @@ export async function navigate(name, opts) {
     if (name === "settings") await refreshSettingsPage();
     if (name === "token") {
       refreshTokenPage();
-      await ensureApiGate();
+      const connected = await ensureApiGate();
+      if (seq !== navSeq) return;
+      if (token().trim()) setApiStatus(connected);
+      else setApiNotConnected();
     }
     if (name === "peers") {
       await refreshPeersPage();

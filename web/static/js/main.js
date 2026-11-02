@@ -1,5 +1,5 @@
 import { hasUnsavedEdits, navigate, onHash } from "./core/router.js";
-import { $, applyPeersRoutesTableFilter } from "./core/dom.js";
+import { $, applyTableFilter } from "./core/dom.js";
 import {
   initModals,
   openModal,
@@ -163,16 +163,18 @@ if (ctxHelpClose) ctxHelpClose.addEventListener("click", closeContextHelpModal);
 const ctxHelpBd = $("context-help-backdrop");
 if (ctxHelpBd) ctxHelpBd.addEventListener("click", closeContextHelpModal);
 
-const gSearch = $("global-table-search");
-if (gSearch) {
-  gSearch.addEventListener("input", () => applyPeersRoutesTableFilter());
-}
+document.querySelectorAll(".table-filter").forEach((input) => {
+  input.addEventListener("input", () => applyTableFilter(input.dataset.filterTable));
+});
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
     const tag = (ev.target && ev.target.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ev.target?.isContentEditable) return;
+    // Only Peers and Routes have a filter; elsewhere the key does nothing.
+    const filter = document.querySelector(".page:not([hidden]) .table-filter");
+    if (!filter) return;
     ev.preventDefault();
-    if (gSearch) gSearch.focus();
+    filter.focus();
     return;
   }
   const helpKey = ev.key === "?" || (ev.shiftKey && ev.key === "/");

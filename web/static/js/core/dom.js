@@ -27,6 +27,38 @@ export function downloadTextFile(filename, text, mime) {
   URL.revokeObjectURL(a.href);
 }
 
+/*
+ * Motion is skipped for anything driven by the keyboard: at that speed it only
+ * delays the next key press.
+ */
+let keyboardDriven = false;
+document.addEventListener("keydown", () => { keyboardDriven = true; }, true);
+document.addEventListener("pointerdown", () => { keyboardDriven = false; }, true);
+
+export function lastInputWasKeyboard() {
+  return keyboardDriven;
+}
+
+/**
+ * Fades a removed row before the table re-renders without it. Rows below then
+ * move up at once: height is deliberately not animated.
+ */
+export async function fadeOutRow(tr) {
+  if (!tr || !tr.isConnected || keyboardDriven) return;
+  tr.classList.add("is-row-leaving");
+  // A re-render cancels the transition, which rejects `finished`; the row is gone either way.
+  await Promise.allSettled(tr.getAnimations().map((a) => a.finished));
+}
+
+/** Before a token exists nothing has failed, so this reads neutral rather than as an error. */
+export function setApiNotConnected() {
+  const el = $("api-status");
+  if (!el) return;
+  if (el.textContent !== "Not connected") el.textContent = "Not connected";
+  el.classList.remove("evu-pill--ok", "evu-pill--err");
+  el.title = "No API token in this browser";
+}
+
 export function setApiStatus(ok, detail) {
   const el = $("api-status");
   if (!el) return;
@@ -86,13 +118,11 @@ export function markFieldInvalid(msgEl, field) {
   field.focus();
 }
 
-export function applyPeersRoutesTableFilter() {
-  const q = ($("global-table-search") && $("global-table-search").value.trim().toLowerCase()) || "";
-  document.querySelectorAll("#peers-table-wrap tbody tr[data-filter]").forEach((tr) => {
-    const h = tr.getAttribute("data-filter") || "";
-    tr.classList.toggle("is-filter-hidden", !!q && !h.includes(q));
-  });
-  document.querySelectorAll("#routes-table-wrap tbody tr[data-filter]").forEach((tr) => {
+/** Applies the toolbar filter tied to the table in `wrapId`. */
+export function applyTableFilter(wrapId) {
+  const input = document.querySelector(`.table-filter[data-filter-table="${wrapId}"]`);
+  const q = (input && input.value.trim().toLowerCase()) || "";
+  document.querySelectorAll(`#${wrapId} tbody tr[data-filter]`).forEach((tr) => {
     const h = tr.getAttribute("data-filter") || "";
     tr.classList.toggle("is-filter-hidden", !!q && !h.includes(q));
   });
@@ -170,13 +200,23 @@ export function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {
   );
 }
 
+function copyButtonHtml(value, ariaLabel, title) {
+  return `<button type="button" class="evu-btn evu-btn--outline btn-tunnel-ip-copy" data-tunnel-ip-copy="${escapeHtml(value)}" aria-label="${escapeHtml(ariaLabel)}" title="${escapeHtml(title)}"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg></button>`;
+}
+
+/** A public key on one line, shortened; the copy button and the hover both give the whole key. */
+export function publicKeyCellHtml(value, peerName) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return '<td class="mono">—</td>';
+  const label = "Copy public key" + (peerName ? " of " + peerName : "");
+  return `<td class="mono public-key-cell"><span class="tunnel-ip-inner"><span class="public-key-text" title="${escapeHtml(raw)}">${escapeHtml(trunc(raw, 20))}</span>${copyButtonHtml(raw, label, "Copy public key")}</span></td>`;
+}
+
 export function monoIpCopyCellHtml(value, displayName) {
   const raw = String(value ?? "").trim();
   const display = escapeHtml(raw);
   const copyVal = tunnelIpWithoutSuffix(raw);
-  const copyBtn = copyVal
-    ? `<button type="button" class="evu-btn evu-btn--outline btn-tunnel-ip-copy" data-tunnel-ip-copy="${escapeHtml(copyVal)}" aria-label="Copy IP address" title="Copy IP (without subnet mask)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg></button>`
-    : "";
+  const copyBtn = copyVal ? copyButtonHtml(copyVal, "Copy IP address", "Copy IP (without subnet mask)") : "";
   const label = String(displayName ?? "").trim();
   const labelHtml = label ? `<span class="route-target-name">${escapeHtml(label)}</span>` : "";
   const cellClass = label ? "mono tunnel-ip-cell route-target-cell" : "mono tunnel-ip-cell";

@@ -10,6 +10,7 @@ import {
   rowErrorHtml,
   restoreRowSwitchFocus,
   focusTableRow,
+  fadeOutRow,
 } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
@@ -71,6 +72,11 @@ function setInboundMsg(text, isErr) {
   if (!text) clearRowError("data-inbound-disabled");
 }
 
+/** The API stores several ports as an nft set, `{ 80, 443 }`. Operators read `80, 443`. */
+function dportDisplay(dport) {
+  return String(dport || "").replace(/[{}]/g, "").trim();
+}
+
 function renderInboundTable(cfg) {
   const wrap = $("inbound-table-wrap");
   if (!wrap) return;
@@ -89,9 +95,9 @@ function renderInboundTable(cfg) {
         "Enabled: INPUT " +
         String(r.proto || "").toLowerCase() +
         " " +
-        String(r.dport || r.note || "#" + i);
+        (dportDisplay(r.dport) || r.note || "#" + i);
       return (
-        `<tr data-row="${i}" tabindex="-1"${r.disabled ? ' class="is-row-disabled"' : ""}><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>` +
+        `<tr data-row="${i}" tabindex="-1"${r.disabled ? ' class="is-row-disabled"' : ""}><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(dportDisplay(r.dport))}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>` +
         rowErrorHtml("data-inbound-disabled", i, 5)
       );
     })
@@ -233,6 +239,8 @@ async function removeInboundRule(index) {
   if (inboundRemoveBusy || !cfg || !cfg.input_allows || cfg.input_allows[index] === undefined) return;
   const identity = inboundRuleIdentity(cfg.input_allows[index]);
   const wrap = $("inbound-table-wrap");
+  const removeBtn = wrap.querySelector(`[data-inbound-del="${index}"]`);
+  const row = removeBtn && removeBtn.closest("tr");
   inboundRemoveBusy = true;
   try {
     let removed = null;
@@ -241,6 +249,7 @@ async function removeInboundRule(index) {
       removedAt = findConfigRow(draft.input_allows, index, identity, inboundRuleIdentity, "inbound rule");
       [removed] = draft.input_allows.splice(removedAt, 1);
     });
+    await fadeOutRow(row);
     setInboundMsg("");
     renderInboundTable(c);
     setApiStatus(true);
@@ -248,7 +257,7 @@ async function removeInboundRule(index) {
     focusTableRow(wrap, removedAt, $("inbound-add"));
     const proto = String(removed.proto || "").toLowerCase() || "—";
     const note = String(removed.note || "").trim();
-    const label = proto + " " + String(removed.dport || "—") + (note ? " (" + note + ")" : "");
+    const label = proto + " " + (dportDisplay(removed.dport) || "—") + (note ? " (" + note + ")" : "");
     const removedJson = JSON.stringify(removed);
     let restoredAt = removedAt;
     showUndoToast("Removed inbound rule " + label + ".", {
