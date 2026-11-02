@@ -56,6 +56,12 @@ Runs axe-core against WCAG 2.0/2.1 A and AA on all 11 routes in both schemes, at
 
 Failure output lists the rule, the offending selectors, and a trimmed HTML snippet for each.
 
+## CI
+
+[`.github/workflows/ui-tests.yml`](../../.github/workflows/ui-tests.yml) runs `make a11y` and `make ui-behavior` on pull requests and on `main`, each on its own runner with a fresh mock stack. When a suite fails, the HTML report and traces are kept as the `playwright-a11y` or `playwright-ui-behavior` artifact for 14 days. Open a trace with `npx playwright show-trace <trace.zip>`.
+
+`make playwright-visual` doesn't run in CI, because its screenshots have no baseline to compare against.
+
 ## Troubleshooting
 
 If **`docker compose`** shows an empty **`web/`** mount inside **evuproxy-ui** (HTTP 403 / blank pages), restart **evuproxy-ui** so the bind-mount picks up host files again.
