@@ -97,6 +97,17 @@ All paths below are under **`/api/v1`** unless noted.
 | `POST`        | `/peers/onboard-bundle`                                         | Build an **EVUB** onboarding blob (JSON body: `passphrase`, `peer_private_key`, `peer_tunnel_address`, `server_public_key`, `endpoint`, `allowed_ips`, optional `interface_name`). Returns `{blob_base64}`. Same HTTP caveat as keypair generation. |
 
 
+**`POST /validate` lockout risks:** warnings whose **`code`** starts with **`lockout_risk_`** must be acknowledged in the UI before Apply or Reload config. Nothing on the server refuses the reload.
+
+| Code | Meaning |
+|------|---------|
+| `lockout_risk_maintenance` | Maintenance mode is on, so public port forwards are omitted. |
+| `lockout_risk_source_deny` | The client address is in the global or a route's forward denylist. |
+| `lockout_risk_source_allow` | A route's allowlist does not include the client address. |
+| `lockout_risk_geo` | Geoblocking may block the client address on a route. |
+| `lockout_risk_input_allows` | The last applied config (`config.yaml.bak`) accepts TCP port 22 (SSH), 9080 (admin UI) or the port of the current connection, and this config does not, through either an enabled **`input_allows`** rule or **`network.admin_tcp_ports`**. One warning per port. With no readable snapshot, every one of those ports without a rule warns. The connection port comes from **`X-Forwarded-Port`** (set by the UI nginx), otherwise from the API's own socket, and loopback sockets are ignored. SSH on another port or a custom UI port is only caught when it is the current connection. |
+| `lockout_risk_check_unavailable` | The client IPv4 address could not be detected, so the address-specific checks did not run. |
+
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
 
 ### Config revisions (`ETag` / `If-Match`)

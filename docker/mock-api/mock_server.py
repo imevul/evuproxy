@@ -968,6 +968,44 @@ def _mock_ip_in_cidrs(ip: str, cidrs) -> bool:
     return False
 
 
+def _dport_covers(dport: str, port: int) -> bool:
+    for tok in str(dport or "").strip().strip("{}").split(","):
+        lo, _, hi = tok.strip().partition("-")
+        try:
+            if int(lo) <= port <= int(hi or lo):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _tcp_port_accepted(cfg: dict, port: int) -> bool:
+    for a in cfg.get("input_allows") or []:
+        if a.get("disabled") or str(a.get("proto") or "").strip().lower() != "tcp":
+            continue
+        if _dport_covers(a.get("dport"), port):
+            return True
+    return port in ((cfg.get("network") or {}).get("admin_tcp_ports") or [])
+
+
+def _input_allow_warnings(cfg: dict, applied: dict) -> list:
+    """Same rule as apply.InputAllowLockoutWarnings; the mock has no connection port."""
+    warnings = []
+    for port, label in ((22, "SSH"), (9080, "admin UI")):
+        if _tcp_port_accepted(cfg, port) or not _tcp_port_accepted(applied, port):
+            continue
+        warnings.append(
+            {
+                "code": "lockout_risk_input_allows",
+                "message": (
+                    f"No enabled inbound rule allows TCP port {port} ({label}) in this config; "
+                    "new connections to it would be dropped."
+                ),
+            }
+        )
+    return warnings
+
+
 def _geo_check_ip_mock(ip: str, cfg: dict, from_draft: bool) -> dict:
     geo = cfg.get("geo") or {}
     fwd = cfg.get("forwarding") or {}
@@ -1340,6 +1378,7 @@ class Handler(BaseHTTPRequestHandler):
                         "message": "Mock: your IP may not match geo allow list.",
                     }
                 )
+            warnings.extend(_input_allow_warnings(cfg, MOCK_CONFIG_BASELINE))
             return self._send_json(
                 200,
                 {

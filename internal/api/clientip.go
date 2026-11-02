@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/imevul/evuproxy/internal/apply"
@@ -44,6 +45,21 @@ func DetectClientIP(r *http.Request) apply.ClientIPInfo {
 		return apply.ClientIPInfo{IP: ip, Source: apply.ClientIPSourceDirect, Note: note}
 	}
 	return apply.ClientIPInfo{Source: apply.ClientIPSourceUnavailable, Note: "could not determine IPv4 client address"}
+}
+
+// detectConnPort returns the host TCP port the operator's request arrived on, for the
+// input_allows lockout check: X-Forwarded-Port from the UI nginx, otherwise the API's own
+// socket. Loopback sockets return 0 because INPUT accepts lo unconditionally. The header
+// needs no EVUPROXY_TRUST_XFF gate: it can only change the warning shown to its own sender.
+func detectConnPort(r *http.Request) int {
+	if p, err := strconv.Atoi(strings.TrimSpace(r.Header.Get("X-Forwarded-Port"))); err == nil && p >= 1 && p <= 65535 {
+		return p
+	}
+	addr, ok := r.Context().Value(http.LocalAddrContextKey).(*net.TCPAddr)
+	if !ok || addr.IP.IsLoopback() {
+		return 0
+	}
+	return addr.Port
 }
 
 func parseIPv4Literal(s string) string {

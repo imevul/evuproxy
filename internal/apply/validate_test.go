@@ -63,7 +63,7 @@ func TestValidateConfigWithWarnings_includesClientIP(t *testing.T) {
 	c := validTestConfig(t)
 	c.Forwarding.MaintenanceMode = true
 	info := ClientIPInfo{IP: "203.0.113.5", Source: ClientIPSourceDirect}
-	res := ValidateConfigWithWarnings(c, info, nil, true)
+	res := ValidateConfigWithWarnings(c, nil, info, nil, true)
 	if res.DetectedClientIP != "203.0.113.5" || !res.ValidatedFromDraft {
 		t.Fatalf("got %+v", res)
 	}
@@ -78,7 +78,7 @@ func TestValidateConfigWithWarnings_includesClientIP(t *testing.T) {
 func TestValidateConfigWithWarnings_unknownClientIPWarnsCheckSkipped(t *testing.T) {
 	skipUnlessNFTablesCheck(t)
 	info := ClientIPInfo{Source: ClientIPSourceUnavailable, Note: "could not determine IPv4 client address"}
-	res := ValidateConfigWithWarnings(validTestConfig(t), info, nil, false)
+	res := ValidateConfigWithWarnings(validTestConfig(t), nil, info, nil, false)
 	if !res.OK {
 		t.Fatalf("validate failed: %+v", res.Errors)
 	}
@@ -99,7 +99,7 @@ func TestValidateConfigWithWarnings_maintenanceWarnsWithoutClientIP(t *testing.T
 	skipUnlessNFTablesCheck(t)
 	c := validTestConfig(t)
 	c.Forwarding.MaintenanceMode = true
-	res := ValidateConfigWithWarnings(c, ClientIPInfo{Source: ClientIPSourceUnavailable}, nil, false)
+	res := ValidateConfigWithWarnings(c, nil, ClientIPInfo{Source: ClientIPSourceUnavailable}, nil, false)
 	found := false
 	for _, w := range res.Warnings {
 		if w.Code == "lockout_risk_maintenance" {

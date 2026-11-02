@@ -2,6 +2,8 @@ package apply
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/oschwald/geoip2-golang"
@@ -9,6 +11,7 @@ import (
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/gen"
 	"github.com/imevul/evuproxy/internal/geoip"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 // LockoutWarning is a best-effort lockout risk for the detected client IP.
@@ -60,6 +63,101 @@ func LockoutWarnings(c *config.Config, clientIP string, geoReader *geoip2.Reader
 		out = append(out, *w)
 	}
 	return out
+}
+
+const (
+	lockoutSSHPort = 22
+	// lockoutUIPort is the default admin UI port. The API cannot see EVUPROXY_UI_LISTEN
+	// (it is set on the UI container), so a custom port is only known through connPort.
+	lockoutUIPort = 9080
+)
+
+// LoadAppliedConfig returns the last applied snapshot (config.yaml.bak), or nil when
+// there is none or it no longer loads.
+func LoadAppliedConfig(cfgPath string) *config.Config {
+	c, err := config.Load(state.ConfigYAMLBackupPath(cfgPath))
+	if err != nil {
+		return nil
+	}
+	return c
+}
+
+// InputAllowLockoutWarnings reports SSH, admin UI and current-connection ports (connPort,
+// 0 when unknown) that applied accepts on INPUT and c no longer does. The chain policy is
+// drop, so new connections to such a port are refused once c is applied.
+//
+// It compares against applied rather than looking at c alone: a removed rule leaves nothing
+// to inspect, and a host that deliberately has no 9080 rule must not warn on every apply.
+// A nil applied (nothing applied yet, or an unreadable snapshot) assumes every port is in
+// use, because the running firewall is unknown.
+func InputAllowLockoutWarnings(c, applied *config.Config, connPort int) []LockoutWarning {
+	if c == nil {
+		return nil
+	}
+	targets := []struct {
+		port  int
+		label string
+	}{
+		{lockoutSSHPort, "SSH"},
+		{lockoutUIPort, "admin UI"},
+	}
+	if connPort > 0 {
+		merged := false
+		for i := range targets {
+			if targets[i].port == connPort {
+				targets[i].label += ", your current connection"
+				merged = true
+			}
+		}
+		if !merged {
+			targets = append(targets, struct {
+				port  int
+				label string
+			}{connPort, "your current connection"})
+		}
+	}
+	var out []LockoutWarning
+	for _, t := range targets {
+		if tcpPortAccepted(c, t.port) || (applied != nil && !tcpPortAccepted(applied, t.port)) {
+			continue
+		}
+		out = append(out, LockoutWarning{
+			Code: "lockout_risk_input_allows",
+			Message: fmt.Sprintf(
+				"No enabled inbound rule allows TCP port %d (%s) in this config; new connections to it would be dropped.",
+				t.port, t.label,
+			),
+		})
+	}
+	return out
+}
+
+// tcpPortAccepted reports whether c emits an INPUT accept for the TCP port, from an
+// enabled input_allows rule or network.admin_tcp_ports.
+func tcpPortAccepted(c *config.Config, port int) bool {
+	for _, a := range c.InputAllows {
+		if !a.Disabled && strings.EqualFold(strings.TrimSpace(a.Proto), "tcp") && dportCovers(a.DPort, port) {
+			return true
+		}
+	}
+	return slices.Contains(c.Network.AdminTCPPorts, port)
+}
+
+// dportCovers matches port against an input_allows dport: a port, a range or a {...} list.
+func dportCovers(dport string, port int) bool {
+	list := strings.Trim(strings.TrimSpace(dport), "{}")
+	for _, tok := range strings.Split(list, ",") {
+		loStr, hiStr, isRange := strings.Cut(strings.TrimSpace(tok), "-")
+		if !isRange {
+			hiStr = loStr
+		}
+		lo, errLo := strconv.Atoi(strings.TrimSpace(loStr))
+		hi, errHi := strconv.Atoi(strings.TrimSpace(hiStr))
+		if errLo == nil && errHi == nil && lo <= port && port <= hi {
+			return true
+		}
+	}
+	return false
 }
 
 func geoLockoutWarning(c *config.Config, ip string, geoReader *geoip2.Reader) *LockoutWarning {

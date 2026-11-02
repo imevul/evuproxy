@@ -13,4 +13,6 @@ type ClientIPInfo struct {
 	IP     string `json:"detected_client_ip,omitempty"`
 	Source string `json:"ip_detection_source"`
 	Note   string `json:"ip_detection_note,omitempty"`
+	// ConnPort is the host TCP port this request came in on; 0 when unknown or loopback.
+	ConnPort int `json:"-"`
 }
