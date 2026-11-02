@@ -204,7 +204,7 @@ test.describe("pre-apply check", () => {
     expect(applied, "the earlier tick must not authorise the new risk").toBe(false);
   });
 
-  test("refreshing the preview invalidates an earlier acknowledgement", async ({ page }) => {
+  test("Refresh invalidates an earlier acknowledgement", async ({ page }) => {
     await stubValidate(page, RISKY);
     await gotoRoute(page, origin, "pending");
 
@@ -300,17 +300,17 @@ test.describe("inbound rule lockout risk", () => {
 });
 
 /*
- * Overview's "Reload config" posts to the same /reload endpoint as Apply, so it
- * needs the same gate. It used to have none — and the maintenance-mode copy right
+ * Overview's Apply posts to the same /reload endpoint as the one on Pending
+ * changes, so it needs the same gate. It used to have none — and the maintenance-mode copy right
  * next to it tells the operator to press it, while maintenance mode is itself one
  * of the lockout risks.
  */
-test.describe("Overview reload", () => {
+test.describe("Overview Apply", () => {
   test.beforeEach(async ({ page }) => {
     await seed(page, { scheme: "light" });
   });
 
-  test("a lockout risk requires confirmation before reloading", async ({ page }) => {
+  test("a lockout risk requires confirmation before applying", async ({ page }) => {
     await stubValidate(page, RISKY);
     await gotoRoute(page, origin, "overview");
 
@@ -320,17 +320,17 @@ test.describe("Overview reload", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#btn-reload").click();
+    await page.locator("#btn-apply").click();
     const dialog = page.locator("#confirm-modal");
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(/lock you out/i);
     await expect(dialog).toContainText("source allowlist");
-    expect(applied, "reload must wait for confirmation").toBe(false);
+    expect(applied, "apply must wait for confirmation").toBe(false);
 
     await page.locator("#confirm-modal-cancel").click();
     expect(applied).toBe(false);
 
-    await page.locator("#btn-reload").click();
+    await page.locator("#btn-apply").click();
     await page.locator("#confirm-modal-ok").click();
     await expect.poll(() => applied).toBe(true);
   });
@@ -345,7 +345,7 @@ test.describe("Overview reload", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#btn-reload").click();
+    await page.locator("#btn-apply").click();
     await expect(page.locator("#confirm-modal")).toBeVisible();
 
     // Someone else saved a config carrying a different risk while the operator
@@ -362,7 +362,7 @@ test.describe("Overview reload", () => {
     expect(applied).toBe(false);
   });
 
-  test("a clean check reloads without a prompt", async ({ page }) => {
+  test("a clean check applies without a prompt", async ({ page }) => {
     await stubValidate(page, CLEAN);
     await gotoRoute(page, origin, "overview");
 
@@ -372,12 +372,12 @@ test.describe("Overview reload", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#btn-reload").click();
+    await page.locator("#btn-apply").click();
     await expect.poll(() => applied).toBe(true);
     await expect(page.locator("#confirm-modal")).toBeHidden();
   });
 
-  test("a failed check blocks the reload", async ({ page }) => {
+  test("a failed check blocks the apply", async ({ page }) => {
     await stubValidate(page, BROKEN);
     await gotoRoute(page, origin, "overview");
 
@@ -387,7 +387,7 @@ test.describe("Overview reload", () => {
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
 
-    await page.locator("#btn-reload").click();
+    await page.locator("#btn-apply").click();
     await expect(page.locator("#overview-action-msg")).toContainText(/Config check failed/i);
     expect(applied).toBe(false);
   });

@@ -5,8 +5,8 @@
  * cut the operator off from SSH and from this UI. `POST /v1/validate` reports
  * that risk as `lockout_risk_*` warnings; nothing on the server refuses the
  * reload, so this is the only thing standing between the operator and a
- * self-inflicted lockout. Both Apply (Pending changes) and Reload config
- * (Overview) go through here — a second, ungated apply button is the same hole
+ * self-inflicted lockout. Apply on both Pending changes and Overview
+ * goes through here — a second, ungated apply button is the same hole
  * as having no gate at all.
  *
  * Two rules the callers depend on:

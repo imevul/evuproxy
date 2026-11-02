@@ -55,6 +55,7 @@ export function formatCount(value) {
 }
 
 const EVENT_LABELS = {
+  reload_started: "Apply started",
   reload_ok: "Applied config",
   reload_failed: "Apply failed",
   config_put_ok: "Saved config",
@@ -77,4 +78,9 @@ export function eventLabel(code) {
   if (EVENT_LABELS[raw]) return EVENT_LABELS[raw];
   const words = raw.replace(/_/g, " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** An event's detail to show. A bare "reload" is only the API's name for an Apply. */
+export function eventDetail(e) {
+  return e.detail === "reload" ? "" : e.detail || "";
 }
