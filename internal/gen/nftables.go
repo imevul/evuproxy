@@ -63,21 +63,26 @@ func nftablesRoutes(c *config.Config) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("forwarding.routes[%d]: %w", i, err)
 			}
+			forwardPorts, err := routeForwardPorts(r, expr)
+			if err != nil {
+				return "", fmt.Errorf("forwarding.routes[%d]: %w", i, err)
+			}
 			for _, p := range protos {
 				routes = append(routes, routePolicy{
-					routeIndex:  i,
-					proto:       p,
-					portExpr:    expr,
-					target:      target,
-					srcAllow:    srcAllow,
-					srcDeny:     srcDeny,
-					geo:         gp,
-					globalRL:    c.Forwarding.RateLimit,
-					routeRL:     r.RateLimit,
-					dnat:        dnatLines,
-					crowdsecSet: crowdsecSet,
-					breakGlass:  breakGlass,
-					globalDeny:  globalDeny,
+					routeIndex:   i,
+					proto:        p,
+					portExpr:     expr,
+					forwardPorts: forwardPorts,
+					target:       target,
+					srcAllow:     srcAllow,
+					srcDeny:      srcDeny,
+					geo:          gp,
+					globalRL:     c.Forwarding.RateLimit,
+					routeRL:      r.RateLimit,
+					dnat:         dnatLines,
+					crowdsecSet:  crowdsecSet,
+					breakGlass:   breakGlass,
+					globalDeny:   globalDeny,
 				})
 				uniqTargets[target] = struct{}{}
 			}
@@ -114,7 +119,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 			return "", fmt.Errorf("input_allows: %w", err)
 		}
 		if applyGeoInput {
-			writeGeoProtoPortInputRules(&b, true, blockListed, geoSet, proto, dport, "")
+			writeGeoProtoPortInputRules(&b, true, blockListed, geoSet, breakGlass, proto, dport, "")
 		} else {
 			fmt.Fprintf(&b, "        %s dport %s accept\n", proto, dport)
 		}
@@ -152,9 +157,9 @@ func nftablesRoutes(c *config.Config) (string, error) {
 
 	for _, r := range routes {
 		if r.srcAllow != "" {
-			fmt.Fprintf(&b, "        iifname %q oifname %q ip saddr @%s ip daddr %s %s dport %s accept\n", pub, wg, r.srcAllow, r.target, r.proto, r.portExpr)
+			fmt.Fprintf(&b, "        iifname %q oifname %q ip saddr @%s ip daddr %s %s dport %s accept\n", pub, wg, r.srcAllow, r.target, r.proto, r.forwardPorts)
 		} else {
-			fmt.Fprintf(&b, "        iifname %q oifname %q ip daddr %s %s dport %s accept\n", pub, wg, r.target, r.proto, r.portExpr)
+			fmt.Fprintf(&b, "        iifname %q oifname %q ip daddr %s %s dport %s accept\n", pub, wg, r.target, r.proto, r.forwardPorts)
 		}
 	}
 
@@ -323,7 +328,8 @@ func writeGeoSet(b *strings.Builder, geoSet string) {
 
 // writeGeoProtoPortInputRules emits INPUT accepts for published service ports (and geo filtering when enabled).
 // routeSrcSet limits sources to an ipv4_addr set; empty = any source (subject to geo when enabled).
-func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed bool, geoSet, proto, portExpr, routeSrcSet string) {
+// breakGlass names the set that skips geo; empty = none.
+func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed bool, geoSet, breakGlass, proto, portExpr, routeSrcSet string) {
 	if portExpr == "" {
 		return
 	}
@@ -336,7 +342,7 @@ func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed boo
 		return
 	}
 	if blockListed {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", geoSet, proto, portExpr)
+		writePolicyGeoBlockDropLogged(b, geoSet, breakGlass, proto, portExpr)
 		if routeSrcSet != "" {
 			fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", routeSrcSet, proto, portExpr)
 			return
@@ -349,7 +355,10 @@ func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed boo
 	} else {
 		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", geoSet, proto, portExpr)
 	}
-	fmt.Fprintf(b, "        %s dport %s ip saddr != @%s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", proto, portExpr, geoSet)
+	if breakGlass != "" {
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", breakGlass, proto, portExpr)
+	}
+	writeGeoLogDrop(b, fmt.Sprintf("%s dport %s ip saddr != @%s", proto, portExpr, geoSet))
 }
 
 func inputAllowProtoPort(a config.AllowRule) (proto, dport string, err error) {

@@ -278,7 +278,7 @@ func TestNFTablesInputAllowsGeoBlockMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport 2222 limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop") {
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport 2222 drop") {
 		t.Fatalf("expected block-list geo drop on input 2222: %s", s)
 	}
 	if !strings.Contains(s, "tcp dport 2222 accept") {
@@ -460,7 +460,7 @@ func TestNFTablesRouteSourceAllowlistGeoBlock(t *testing.T) {
 	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport 443 dnat to 10.100.0.2") {
 		t.Fatalf("expected whitelist-only dnat after geo drop: %s", s)
 	}
-	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport { 443 } limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop") {
+	if !strings.Contains(s, "ip saddr @geo_v4 tcp dport { 443 } drop") {
 		t.Fatalf("expected geo block on input for published port: %s", s)
 	}
 	if !strings.Contains(s, "ip saddr @route_src_0 tcp dport { 443 } accept") {
@@ -480,6 +480,111 @@ func TestNFTablesPortMapping(t *testing.T) {
 	}
 	if !strings.Contains(s, "tcp dport 25565 dnat to 10.100.0.2:19132") {
 		t.Fatalf("expected mapped dnat: %s", s)
+	}
+	// The forward chain runs after DNAT, so it sees the internal port.
+	if !strings.Contains(s, `ip daddr 10.100.0.2 tcp dport { 19132 } ct original proto-dst { 25565 } accept`) {
+		t.Fatalf("expected forward accept on the internal port, only after this DNAT: %s", s)
+	}
+	if strings.Contains(s, `ip daddr 10.100.0.2 tcp dport { 25565 } accept`) {
+		t.Fatalf("forward accept must not match the public port of a mapped route: %s", s)
+	}
+}
+
+func TestNFTablesPortMappingForwardDropsUseInternalPort(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.SourceDenyCIDRs = []string{"192.0.2.1"}
+	c.Forwarding.Routes = []config.ForwardRoute{{
+		Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2",
+		SourceDenyCIDRs: []string{"192.0.2.2"},
+		PortMaps:        []config.PortMap{{Public: "25565", Internal: "19132"}},
+	}}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, set := range []string{"global_src_deny_v4", "route_deny_0"} {
+		want := "ip saddr @" + set + ` tcp dport { 19132 } ct original proto-dst { 25565 } drop`
+		if !strings.Contains(s, want) {
+			t.Fatalf("expected %q: %s", want, s)
+		}
+	}
+}
+
+func TestNFTablesPortMappingRangeKeepsOffset(t *testing.T) {
+	c := baseNFTConfig()
+	c.Forwarding.Routes = []config.ForwardRoute{{
+		Proto: "tcp", Ports: []string{"18400-18402", "8080"}, TargetIP: "10.100.0.2",
+		PortMaps: []config.PortMap{{Public: "18400-18402", Internal: "28400-28402"}},
+	}}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"tcp dport 18400 dnat to 10.100.0.2:28400",
+		"tcp dport 18401 dnat to 10.100.0.2:28401",
+		"tcp dport 18402 dnat to 10.100.0.2:28402",
+		"tcp dport 8080 dnat to 10.100.0.2\n",
+		"tcp dport { 28400-28402, 8080 } ct original proto-dst { 18400-18402, 8080 } accept",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("expected %q: %s", want, s)
+		}
+	}
+	if strings.Contains(s, "10.100.0.2:28400-28402") {
+		t.Fatalf("a dnat port range is a pool and loses the offset: %s", s)
+	}
+}
+
+func TestNFTablesBreakGlassCoversInputAllows(t *testing.T) {
+	for _, mode := range []string{"allow", "block"} {
+		t.Run(mode, func(t *testing.T) {
+			c := baseNFTConfig()
+			c.InputAllows = []config.AllowRule{{Proto: "tcp", DPort: "2222"}}
+			c.Geo = config.Geo{
+				Enabled: true, Mode: mode, SetName: "geo_v4", Countries: []string{"ru"}, ZoneDir: "/z",
+				ApplyToInputAllows: true,
+				BreakGlassCIDRs:    []string{"192.0.2.1"},
+			}
+			s, err := NFTables(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "ip saddr @geo_v4 ip saddr != @break_glass_v4 tcp dport 2222 drop"
+			if mode == "allow" {
+				want = "ip saddr @break_glass_v4 tcp dport 2222 accept"
+			}
+			if !strings.Contains(s, want) {
+				t.Fatalf("expected %q: %s", want, s)
+			}
+		})
+	}
+}
+
+// Past its limit a limit statement stops the rule matching, so no drop may depend on one.
+func TestNFTablesGeoDropsDoNotDependOnLogLimit(t *testing.T) {
+	c := baseNFTConfig()
+	c.InputAllows = []config.AllowRule{{Proto: "tcp", DPort: "2222"}}
+	c.Forwarding.Routes = []config.ForwardRoute{{Proto: "tcp", Ports: []string{"443"}, TargetIP: "10.100.0.2"}}
+	for _, mode := range []string{"allow", "block"} {
+		c.Geo = config.Geo{
+			Enabled: true, Mode: mode, SetName: "geo_v4", Countries: []string{"ru"}, ZoneDir: "/z",
+			ApplyToInputAllows: true,
+		}
+		s, err := NFTables(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(s, `"evuproxy-geo-block: " drop`) {
+			t.Fatalf("%s: geo drop tied to the log limit: %s", mode, s)
+		}
+		want := "ip saddr @geo_v4 tcp dport 2222 drop"
+		if mode == "allow" {
+			want = "tcp dport 2222 ip saddr != @geo_v4 drop"
+		}
+		if !strings.Contains(s, want) {
+			t.Fatalf("%s: expected %q: %s", mode, want, s)
+		}
 	}
 }
 

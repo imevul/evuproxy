@@ -138,8 +138,8 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | `target_ip` | string | **IPv4 host address only** (no `/mask`), e.g. `10.100.0.2`. Must match the **IPv4** of a **non-disabled** peer’s `tunnel_ip`. |
 | `disabled` | bool (optional) | If `true`, the route is kept in config but **omitted** from generated nftables (no DNAT/forward rules until re-enabled). Other fields are not validated while disabled. |
 | `source_allow_cidrs` | list of strings (optional) | If non-empty, only these WAN IPv4 sources may use this route (allowlist). |
-| `source_deny_cidrs` | list of strings (optional) | Per-route WAN IPv4/CIDR denylist (after allowlist / geo). |
-| `port_maps` | list of objects (optional) | Maps **public** port expressions (must match a `ports[]` entry) to **internal** DNAT ports on `target_ip`. Omitted = 1:1 (public port equals internal). Each object: `public`, `internal` (same syntax as `ports[]`; ranges must have equal width). |
+| `source_deny_cidrs` | list of strings (optional) | Per-route WAN IPv4/CIDR denylist. Checked before the allowlist and geo, so a source on both lists is refused. |
+| `port_maps` | list of objects (optional) | Maps **public** port expressions (must match a `ports[]` entry) to **internal** DNAT ports on `target_ip`. Omitted = 1:1 (public port equals internal). Each object: `public`, `internal` (same syntax as `ports[]`; ranges must have equal width, and each public port maps to the port at the same offset, one DNAT rule per port). The internal port is only open to traffic that came in on its public port. |
 | `geo_mode` | string (optional) | `inherit` (default), `off` (skip global geo for this route), or `custom` (use `geo_countries`). |
 | `geo_countries` | list of strings | Required when `geo_mode` is `custom` (same country codes as global `geo.countries`). |
 | `rate_limit` | object (optional) | Per-route overrides; merges with `forwarding.rate_limit`. |

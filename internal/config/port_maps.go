@@ -191,6 +191,53 @@ func sortPortSlice(out []uint16) {
 	}
 }
 
+// PortPair is one public port and the internal port it maps to.
+type PortPair struct {
+	Public   uint16
+	Internal uint16
+}
+
+// RangePortPairs returns the port-by-port pairs when publicToken is mapped as a range, and nil
+// when it isn't. A range has to be rendered this way: `dnat to ip:low-high` doesn't keep the
+// offset, because the kernel treats it as a pool and sends every public port to the low end.
+func RangePortPairs(publicToken string, maps []PortMap) ([]PortPair, error) {
+	publicToken = strings.TrimSpace(publicToken)
+	for _, m := range maps {
+		intn := strings.TrimSpace(m.Internal)
+		if strings.TrimSpace(m.Public) != publicToken || !strings.Contains(intn, "-") || strings.Contains(intn, "{") {
+			continue
+		}
+		pub, err := expandPortToken(publicToken)
+		if err != nil {
+			return nil, err
+		}
+		internal, err := expandPortToken(intn)
+		if err != nil {
+			return nil, err
+		}
+		if len(pub) != len(internal) {
+			return nil, fmt.Errorf("public range %q and internal range %q differ in width", publicToken, intn)
+		}
+		pairs := make([]PortPair, len(pub))
+		for i := range pub {
+			pairs[i] = PortPair{Public: pub[i], Internal: internal[i]}
+		}
+		return pairs, nil
+	}
+	return nil, nil
+}
+
+// InternalPort returns the port expression a public port token reaches on the peer.
+func InternalPort(publicToken string, maps []PortMap) string {
+	publicToken = strings.TrimSpace(publicToken)
+	for _, m := range maps {
+		if strings.TrimSpace(m.Public) == publicToken {
+			return strings.TrimSpace(m.Internal)
+		}
+	}
+	return publicToken
+}
+
 // DNATDestination returns the nft dnat target for a public port token (host or host:port).
 func DNATDestination(targetIP, publicToken string, maps []PortMap) (string, error) {
 	targetIP = strings.TrimSpace(targetIP)
@@ -202,13 +249,6 @@ func DNATDestination(targetIP, publicToken string, maps []PortMap) (string, erro
 			continue
 		}
 		intn := strings.TrimSpace(m.Internal)
-		if strings.Contains(intn, "-") && !strings.Contains(intn, "{") {
-			// Parallel range: dnat to ip:low-high
-			parts := strings.SplitN(intn, "-", 2)
-			lo := strings.TrimSpace(parts[0])
-			hi := strings.TrimSpace(parts[1])
-			return fmt.Sprintf("%s:%s-%s", targetIP, lo, hi), nil
-		}
 		if strings.HasPrefix(intn, "{") {
 			return "", fmt.Errorf("brace internal port mapping is not supported in DNAT; use discrete ports or ranges")
 		}

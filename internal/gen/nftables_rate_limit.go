@@ -184,17 +184,17 @@ func rateLimitExemptPrefix(breakGlass string) string {
 
 // writePolicyForwardDrops emits global/route deny, CrowdSec, and rate limits on forward (before accept).
 func writePolicyForwardDrops(b *strings.Builder, pub, wg string, r routePolicy) {
-	if r.portExpr == "" {
+	if r.forwardPorts == "" {
 		return
 	}
 	if r.globalDeny != "" {
-		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, r.globalDeny, r.proto, r.portExpr)
+		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, r.globalDeny, r.proto, r.forwardPorts)
 	}
 	if r.srcDeny != "" {
-		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, r.srcDeny, r.proto, r.portExpr)
+		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, r.srcDeny, r.proto, r.forwardPorts)
 	}
 	if r.crowdsecSet != "" {
-		writePolicyCrowdsecForwardDrop(b, pub, wg, r.crowdsecSet, r.breakGlass, r.proto, r.portExpr)
+		writePolicyCrowdsecForwardDrop(b, pub, wg, r.crowdsecSet, r.breakGlass, r.proto, r.forwardPorts)
 	}
-	writePolicyForwardRateLimit(b, pub, wg, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.breakGlass)
+	writePolicyForwardRateLimit(b, pub, wg, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.forwardPorts, r.breakGlass)
 }

@@ -84,6 +84,17 @@ check "the forward answers" reaches "tcp-ok" tcp_reply wan "$CLIENT_IN_ZONE" "$P
 
 With `AllowedIPs = 0.0.0.0/0` the LAN stays reachable anyway, because connected routes win. The route and `AllowedIPs` checks are what fail then, not the LAN probes.
 
+## What `policy` shows
+
+A refusal on its own could just mean a dead service, so each one sits next to a case that passes under the same config.
+
+- **Port maps:** a public TCP or UDP port reaches its internal port, and only the internal port has a listener, so an answer proves the translation. A range keeps its offset, and an unmapped port on the same route stays 1:1. The internal port stays closed from the WAN, even when routed straight at the peer. Lists still apply to a mapped route.
+- **Deny and allow lists:** a route's allow list and deny list refuse the right clients, and deny beats allow. Neither touches other routes. The global deny list covers every route and beats a route's allow list, and lifting it lets the client back.
+- **Break-glass:** a client gets past geo in allow mode and block mode, on forwards and on geo-filtered `input_allows`. It doesn't get past the global deny list or a route's allow list.
+- **Geo on `input_allows`:** a blocked client stays blocked once it has used up the log limit's burst.
+- **Route geo:** `inherit`, `off` and `custom` each pass and refuse the right country, under global allow and block.
+- **Maintenance mode:** forwards are refused while the peer's services stay up, the tunnel and `input_allows` keep working, other proxy ports stay closed, and forwards come back afterwards.
+
 `devtools/rollback-vm` covers what this can't, because it needs systemd and reboots: confirm-or-revert. The container has no `systemd-run`, so this harness never turns on `apply.confirm`.
 
 ## Stress test
