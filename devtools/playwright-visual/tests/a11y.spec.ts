@@ -6,7 +6,7 @@
  * Runs in both colour schemes because contrast results differ between them.
  */
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 import type { Result } from "axe-core";
 
 import { ROUTES, SCHEMES, gotoRoute, largeConfig, seed } from "./helpers";

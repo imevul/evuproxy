@@ -5,7 +5,7 @@
  *
  * Every surface is captured in both light and dark: `<name>-light.png` / `<name>-dark.png`.
  */
-import { test } from "@playwright/test";
+import { test } from "./fixtures";
 
 import { assertNoCacheMisses } from "./freeze";
 import { ROUTES, SCHEMES, capture, gotoRoute, seed } from "./helpers";

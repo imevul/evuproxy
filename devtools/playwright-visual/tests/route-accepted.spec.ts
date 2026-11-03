@@ -3,7 +3,7 @@
  * describes the applied config, while the rows come from the saved one.
  */
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { SCHEMES, gotoRoute, seed } from "./helpers";
 

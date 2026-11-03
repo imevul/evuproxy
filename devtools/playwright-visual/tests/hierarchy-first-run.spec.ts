@@ -5,7 +5,7 @@
  * dports, known byte counts) are stubbed per test. Only the row removal tests
  * write config, and they put the config back.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { gotoRoute, seed, token } from "./helpers";
 
