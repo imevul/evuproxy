@@ -130,7 +130,9 @@ scrape_configs:
 
 ## File logging (`evuproxy serve`)
 
-When **`EVUPROXY_LOG_DIR`** is set (e.g. **`/var/log/evuproxy`**), **`evuproxy serve`** writes **JSON lines** to **`$EVUPROXY_LOG_DIR/evuproxy.jsonl`** in addition to **stderr** (journald). Unset in development to skip file logging. See [contrib/logrotate.d/evuproxy](../contrib/logrotate.d/evuproxy) for rotation notes.
+When **`EVUPROXY_LOG_DIR`** is set (e.g. **`/var/log/evuproxy`**), **`evuproxy serve`** writes **JSON lines** to **`$EVUPROXY_LOG_DIR/evuproxy.jsonl`** in addition to **stderr** (journald). Unset in development to skip file logging.
+
+**Rotation:** with file logging on, **`SIGHUP`** makes **`evuproxy serve`** reopen the file, so logrotate can rename it and signal the process without losing lines (see [contrib/logrotate.d/evuproxy](../contrib/logrotate.d/evuproxy)). If the reopen fails, the error goes to stderr and logging continues in the previous file. With **`EVUPROXY_LOG_DIR`** unset, **`SIGHUP`** is not handled and stops the process, so only install the logrotate snippet when file logging is on.
 
 **`EVUPROXY_TRUST_XFF`:** when set to **`1`**, **`true`**, or **`yes`**, **`GET /client-ip`** and **`POST /validate`** use the first IPv4 hop in **`X-Forwarded-For`**. Default: ignore **`X-Forwarded-For`** and use the connection address only. Enable only behind a trusted reverse proxy.
 
