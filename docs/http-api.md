@@ -50,13 +50,77 @@ The installer runs the API as **root** when enabled (full functionality). If you
 
 ## Binding, CORS, and authentication
 
-- **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment variable **`EVUPROXY_API_TOKEN`** or **`evuproxy serve --token-file`** (default `/etc/evuproxy/api.token`).
+- **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment variable **`EVUPROXY_API_TOKEN`** or **`evuproxy serve --token-file`** (default `/etc/evuproxy/api.token`). To require a client certificate as well, see [Optional mTLS listener](#optional-mtls-listener).
 - **GeoLite2 (log flags):** Optional **`EVUPROXY_GEOLITE_MMDB`** path to a Country **`.mmdb`** file. If the file cannot be opened, **`evuproxy serve`** writes an explanation to **stderr** (see **`journalctl -u evuproxy-api`**) and starts without **`line_geo`** on **`GET /api/v1/logs`**. Details: [Third-party data](third-party-data.md).
 - **Cross-origin UI:** If the admin UI is opened from another origin (different scheme/host/port than the API), the browser needs CORS. Enable with **`evuproxy serve --cors-origins`**: a comma-separated list of exact `Origin` values (for example `https://myui.example.com,http://10.0.0.2:9080`), or `*` to allow any origin. The API remains protected by the bearer token; prefer an explicit list over `*` when the API is reachable from untrusted networks. With `*`, any website the operator opens can read API responses and send state-changing requests through the browser if it has the token or a proxy adds it, and the cross-origin check below is off — keep the API on localhost or use an explicit origin list when the browser can load untrusted pages. **`evuproxy serve` logs a warning** when CORS is `*`, and another when the API bind is also not loopback.
 - **Cross-origin refusal:** State-changing requests (any method except `GET`, `HEAD` and `OPTIONS`) from a browser on another origin get **HTTP 403** with **`error_code: cross_origin_refused`**, unless that origin is in **`--cors-origins`**. Clients that send neither **`Origin`** nor **`Sec-Fetch-Site`**, such as curl and CI, are not affected. A reverse proxy serving the UI on plain HTTP must forward the original **`Host`** including the port. Details: [Security and privacy](security-and-privacy.md#cross-site-request-forgery-csrf).
 - **No DNS name required:** The API often runs on **`127.0.0.1:9847`** without a hostname. For cross-origin UI, list the **exact browser Origin** (scheme + host + port), e.g. `http://127.0.0.1:9080` or `http://192.168.1.10:9080`. Same-origin setups (UI and API behind one reverse proxy, or UI opened via SSH tunnel to the API host) do not need CORS.
 - **QR codes and CORS:** **`POST /api/v1/peers/{index}/qr.png`** sends the WireGuard config in the POST body (not the query string). The global CORS middleware answers **OPTIONS** preflight for allowed origins, so cross-origin QR works when `--cors-origins` includes your UI origin.
 - **Auth:** `Authorization: Bearer …` or `X-API-Token` on `/api/v1/*` routes. **`GET /healthz`** is unauthenticated (for probes). **Reverse proxies** should not log `Authorization` or `X-API-Token` values (redact or omit these headers in access logs).
+
+## Optional mTLS listener
+
+Off by default. Without the flags below, **`evuproxy serve`** behaves exactly as described above. Turning it on adds a second listener that serves the same API over TLS 1.3 and requires **both** a client certificate and the API token:
+
+| Client presents | Result on the mTLS listener |
+| --- | --- |
+| Valid client certificate and token | Accepted |
+| Valid client certificate, missing or wrong token | **401** |
+| Token only, or a client certificate that is expired, signed by another CA, or has an extended key usage list without **`clientAuth`** | Refused during the TLS handshake (no HTTP response) |
+
+A certificate from the CA with no extended key usage at all is accepted, because X.509 treats that as valid for any purpose. The commands below always set one.
+
+### Setup
+
+1. **Create a private CA for this API.** Do not use a public or shared CA: every certificate it has issued would be accepted.
+   ```bash
+   cd /etc/evuproxy && mkdir -p mtls && chmod 700 mtls && cd mtls
+   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+     -keyout ca.key -out ca.pem -subj "/CN=EvuProxy API CA"
+   ```
+   `serve` only needs **`ca.pem`**, so move **`ca.key`** off the server once the certificates are issued. Backups of **`/etc/evuproxy`** include everything under **`mtls/`**, including keys.
+2. **Issue the server certificate.** Clients connect to this name or IP, so it must be in the SAN (the example uses a WireGuard or LAN address).
+   ```bash
+   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+     -keyout server.key -out server.csr -subj "/CN=evuproxy-api"
+   openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 365 -out server.pem \
+     -extfile <(printf "subjectAltName=IP:10.100.0.1\nextendedKeyUsage=serverAuth\n")
+   ```
+3. **Issue a client certificate** for each client, ideally on the client so its key never leaves it. Short lifetimes limit the damage from a lost key (see [revocation](security-and-privacy.md#optional-mtls-for-the-api)).
+   ```bash
+   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+     -keyout client.key -out client.csr -subj "/CN=automation"
+   openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 30 -out client.pem \
+     -extfile <(printf "extendedKeyUsage=clientAuth\n")
+   ```
+4. **Enable the listener** with **`systemctl edit evuproxy-api.service`**:
+   ```ini
+   [Unit]
+   After=evuproxy.service
+   StartLimitIntervalSec=0
+
+   [Service]
+   ExecStart=
+   ExecStart=/usr/local/bin/evuproxy serve --config /etc/evuproxy/config.yaml --listen 127.0.0.1:9847 --token-file /etc/evuproxy/api.token --mtls-listen 10.100.0.1:9848 --mtls-cert /etc/evuproxy/mtls/server.pem --mtls-key /etc/evuproxy/mtls/server.key --mtls-client-ca /etc/evuproxy/mtls/ca.pem
+   RestartSec=5
+   ```
+   **`serve`** exits if it cannot bind **`--mtls-listen`**, and that stops the plain listener and the admin UI too. A WireGuard address does not exist until **`evuproxy.service`** has brought the interface up, so **`After=`** makes the API wait for it at boot. **`RestartSec`** and **`StartLimitIntervalSec=0`** keep systemd retrying if the address appears later, for example after a failed **`reload`** at boot, instead of giving up after five quick failures.
+
+   Then restart the service and add an **`input_allows`** rule for TCP 9848 (see [config](config.md)). These rules have no source filter, so this one opens the port to every source on every interface. The bind address is what limits who can reach the listener, and the certificate and token decide who gets in. It is not a strict boundary: Linux also accepts packets for that address on other interfaces, so a host on a directly connected network can reach a WireGuard address by routing it through this host.
+5. **Call the API** with the certificate and the token:
+   ```bash
+   curl --cacert ca.pem --cert client.pem --key client.key \
+     -H "Authorization: Bearer $(cat api.token)" https://10.100.0.1:9848/api/v1/status
+   ```
+
+### Behavior
+
+- **Flags:** **`--mtls-listen`**, **`--mtls-cert`**, **`--mtls-key`**, and **`--mtls-client-ca`** must be set together. A partial setup, or an unreadable or invalid file, stops **`serve`** at startup; it never falls back to serving without the check. If the mTLS listener cannot bind or fails later, the whole process exits, including the plain listener, so systemd can restart it.
+- **Plain listener:** **`--listen`** keeps accepting the token alone. Keep it on loopback, where the admin UI's nginx reaches it. **`serve` logs a warning** if it is not loopback while mTLS is on. If you do not use the UI, **`--listen ""`** turns it off.
+- **Admin UI:** the UI proxies plain HTTP to **`--listen`** and does not use the mTLS listener. Browsers are not a supported mTLS client here. Do not give the UI's proxy a client certificate: anyone who can reach the proxy would then pass the check with its certificate.
+- **`GET /healthz`:** needs no token, but on the mTLS listener it still needs a client certificate. Point unauthenticated probes at the plain listener.
+- **Rotation:** certificates and the CA are read at startup, so restart **`serve`** after replacing them.
+- **Prometheus:** **`--metrics-listen`** is separate and does not use mTLS.
 
 ## Mutating operations (serialization)
 

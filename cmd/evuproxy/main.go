@@ -217,6 +217,7 @@ func cmdDiagnostics() *cobra.Command {
 
 func cmdServe() *cobra.Command {
 	var listen, tokenFile, corsOrigins, metricsDB, metricsListen string
+	var mtlsListen, mtlsCert, mtlsKey, mtlsClientCA string
 	var metricsListenInsecure bool
 	c := &cobra.Command{
 		Use:   "serve",
@@ -259,6 +260,10 @@ func cmdServe() *cobra.Command {
 				Logger:                slog.Default(),
 				Version:               version,
 				CORSOrigins:           corsOrigins,
+				MTLSListen:            mtlsListen,
+				MTLSCertFile:          mtlsCert,
+				MTLSKeyFile:           mtlsKey,
+				MTLSClientCAFile:      mtlsClientCA,
 			}
 			geopath := strings.TrimSpace(os.Getenv("EVUPROXY_GEOLITE_MMDB"))
 			if geopath != "" {
@@ -277,7 +282,11 @@ func cmdServe() *cobra.Command {
 			return s.Run()
 		},
 	}
-	c.Flags().StringVar(&listen, "listen", "127.0.0.1:9847", "listen address")
+	c.Flags().StringVar(&listen, "listen", "127.0.0.1:9847", "listen address (token only); empty disables it when --mtls-listen is set")
+	c.Flags().StringVar(&mtlsListen, "mtls-listen", "", "optional extra listen address requiring a client certificate and the token; needs --mtls-cert, --mtls-key and --mtls-client-ca")
+	c.Flags().StringVar(&mtlsCert, "mtls-cert", "", "PEM server certificate for --mtls-listen")
+	c.Flags().StringVar(&mtlsKey, "mtls-key", "", "PEM server private key for --mtls-listen")
+	c.Flags().StringVar(&mtlsClientCA, "mtls-client-ca", "", "PEM private CA that signs client certificates for --mtls-listen")
 	c.Flags().StringVar(&tokenFile, "token-file", "/etc/evuproxy/api.token", "file containing API bearer token")
 	c.Flags().StringVar(&corsOrigins, "cors-origins", "", "comma-separated allowed Origin values for cross-origin browser UIs; avoid * except local dev (token auth still required)")
 	c.Flags().StringVar(&metricsDB, "metrics-db", "", "peer metrics SQLite path (default: metrics.sqlite beside --config)")
