@@ -23,7 +23,7 @@ import { api } from "../core/api.js";
 import { markPageLoaded } from "../core/connection.js";
 import { showToast } from "../core/toast.js";
 import { formatBytes, formatCount } from "../core/format.js";
-import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
+import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml, isSortedBy } from "../core/table_sort.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
 import { tunnelToHost, parsePortsList, parseSourceAllowListInput, routeProtoPlainText } from "../core/net.js";
@@ -297,6 +297,9 @@ async function refreshAutoPaused() {
 /** Last GET /stats route_accepted rows, by routeAcceptedKey. */
 let routeAccepted = new Map();
 
+/** False until GET /stats first answers, so a cell can say it is waiting rather than that there is no count. */
+let routeAcceptedSettled = false;
+
 /**
  * By what the route is, not route_index: that is a position in the applied config, and the rows
  * come from the saved one. A route changed since the last Apply has no counter yet.
@@ -356,24 +359,26 @@ function syncRouteAcceptedCells(cfg) {
     const cell = tr.querySelector(".route-accepted-cell");
     if (!r || !cell) return;
     const packets = routeAcceptedTotal(r, "packets", keyUse);
-    const count = packets === null ? "—" : formatCount(packets);
+    const waiting = packets === null && !routeAcceptedSettled;
+    const count = waiting ? "…" : packets === null ? "—" : formatCount(packets);
     const unit = packets === null ? "" : "pkts · " + formatBytes(routeAcceptedTotal(r, "bytes", keyUse));
     if (cell.textContent !== (unit ? count + " " + unit : count)) {
       cell.innerHTML = unit ? `${escapeHtml(count)} <span class="meta">${escapeHtml(unit)}</span>` : `<span class="meta">${count}</span>`;
     }
-    cell.title = routeAcceptedTitle(r, keyUse);
+    cell.title = waiting ? "Loading the count for this route." : routeAcceptedTitle(r, keyUse);
   });
 }
 
 /** Never rejects: on failure what is on screen stays, and the connection state covers an outage. */
 async function refreshRouteAccepted() {
-  let res;
+  let res = null;
   try {
     res = await api("/v1/stats");
   } catch {
-    return;
+    if (routeAcceptedSettled) return;
   }
-  routeAccepted = new Map((res.route_accepted || []).map((x) => [routeAcceptedKey(x.proto, x.ports, x.target_ip), x]));
+  routeAcceptedSettled = true;
+  if (res) routeAccepted = new Map((res.route_accepted || []).map((x) => [routeAcceptedKey(x.proto, x.ports, x.target_ip), x]));
   syncRouteAcceptedCells(state.lastConfig);
 }
 
@@ -819,13 +824,19 @@ async function removeRoute(index) {
 export async function refreshRoutesPage() {
   setRoutesMsg("");
   const doneLoading = beginLoading("routes-table-wrap");
+  // Not awaited: with large geo sets GET /stats can take seconds, and only one column needs it.
+  const accepted = refreshRouteAccepted();
   try {
-    const [cfg] = await Promise.all([api("/v1/config"), refreshAutoPaused(), refreshRouteAccepted()]);
+    const [cfg] = await Promise.all([api("/v1/config"), refreshAutoPaused()]);
     state.lastConfig = cfg;
     setApiStatus(true);
     renderRoutesTable(state.lastConfig);
     peerTunnelIPv4Options(state.lastConfig);
     markPageLoaded("routes");
+    // A poll never moves rows, but these are the first counts this draw has to sort on.
+    void accepted.then(() => {
+      if (isSortedBy("routes", "accepted")) renderRoutesTable(state.lastConfig);
+    });
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setRoutesMsg(String(e.message || e), true);

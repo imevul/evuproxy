@@ -42,6 +42,12 @@ export function sortedRows(tableId, items, columns) {
   return keyed.map((k) => k.row);
 }
 
+/** Whether `tableId` is currently sorted on `col`, in either direction. */
+export function isSortedBy(tableId, col) {
+  const sort = sorts.get(tableId);
+  return !!sort && sort.col === col;
+}
+
 /** A `<th>` whose label is a button that sorts on `col`. */
 export function sortHeaderHtml(tableId, col, label) {
   const sort = sorts.get(tableId);

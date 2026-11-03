@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/imevul/evuproxy/internal/config"
@@ -50,6 +51,22 @@ func TestNFTCounterLines_optionsBeforeCommand(t *testing.T) {
 
 	got := nftCounterLines("inet", "evuproxy")
 	if len(got) != 1 || got[0].Packets != 3 {
+		t.Fatalf("got %+v from calls %v", got, f.calls)
+	}
+}
+
+func TestNFTCounterLines_omitsSetContents(t *testing.T) {
+	f := &fakeRunner{handler: func(name string, args []string) ([]byte, error) {
+		if !slices.Contains(args, "-t") {
+			return nil, errors.New("listing would print every geo set element")
+		}
+		return []byte("tcp dport 22 counter packets 3 bytes 180 drop # handle 2\n"), nil
+	}}
+	prev := runner
+	runner = f
+	t.Cleanup(func() { runner = prev })
+
+	if got := nftCounterLines("inet", "evuproxy"); len(got) != 1 {
 		t.Fatalf("got %+v from calls %v", got, f.calls)
 	}
 }
