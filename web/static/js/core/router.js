@@ -21,7 +21,13 @@ import {
 import { refreshSettingsPage, setSettingsEditorTab } from "../pages/settings.js";
 import { refreshTokenPage } from "../pages/token.js";
 import { refreshPeersPage, stopPeersPingPolling, closePeerEditor } from "../pages/peers.js";
-import { refreshRoutesPage, closeRouteEditor, closeRouteProbeModal } from "../pages/routes.js";
+import {
+  refreshRoutesPage,
+  closeRouteEditor,
+  closeRouteProbeModal,
+  restartAutoPausePolling,
+  stopAutoPausePolling,
+} from "../pages/routes.js";
 import { refreshTopologyPage, stopTopologyPolling } from "../pages/topology.js";
 import { refreshInboundPage, closeInboundEditor } from "../pages/inbound.js";
 import { refreshGeoblockingPage } from "../pages/geoblocking.js";
@@ -147,6 +153,7 @@ export async function navigate(name, opts) {
   if (name !== "token" && !token().trim()) name = "token";
   if (!keepView) closeConfirmModal();
   if (name !== "routes") {
+    stopAutoPausePolling();
     closeRouteProbeModal();
     closeRouteEditor();
   }
@@ -204,7 +211,9 @@ export async function navigate(name, opts) {
     }
     if (name === "routes") {
       await refreshRoutesPage();
-      if (seq === navSeq) applyHashPeerRouteHighlight();
+      if (seq !== navSeq) return;
+      applyHashPeerRouteHighlight();
+      restartAutoPausePolling();
     }
     if (name === "topology") {
       state.topologyPrevPeerBytes = new Map();

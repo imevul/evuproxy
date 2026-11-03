@@ -55,6 +55,8 @@ type Server struct {
 	logsRL    *slidingLimiter
 	diagRL    *slidingLimiter
 	geoCheck  *slidingLimiter
+	// autoPause is set by Run before the listener starts; nil means no route is paused.
+	autoPause *autopause.Loop
 }
 
 func tokenMatch(got, want string) bool {
@@ -128,6 +130,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.handleMetrics))
 	mux.HandleFunc("GET /api/v1/overview", s.auth(s.handleOverview))
 	mux.HandleFunc("GET /api/v1/events", s.auth(s.handleEventsGet))
+	mux.HandleFunc("GET /api/v1/auto-pause", s.auth(s.handleAutoPause))
 	mux.HandleFunc("GET /api/v1/geo/summary", s.auth(s.handleGeoSummary))
 	mux.HandleFunc("POST /api/v1/geo/check-ip", s.auth(s.handleGeoCheckIP))
 	mux.HandleFunc("GET /api/v1/config.yaml", s.auth(s.handleConfigYAMLGet))
@@ -216,13 +219,13 @@ func (s *Server) Run() error {
 	} else {
 		s.EventLog = el
 	}
-	autoPause := &autopause.Loop{
+	s.autoPause = &autopause.Loop{
 		Load:   func() (*config.Config, error) { return autopause.LoadConfig(s.Config) },
 		Prober: autopause.HostProber{},
 		Logger: s.Logger,
 		Emit:   s.emit,
 	}
-	go autoPause.Run(context.Background())
+	go s.autoPause.Run(context.Background())
 	handler := http.Handler(s.Routes())
 	if cors := parseCORSOrigins(s.CORSOrigins); cors != nil {
 		if cors.allowAll && !isLoopbackListen(s.Listen) {

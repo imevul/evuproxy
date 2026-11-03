@@ -1,7 +1,7 @@
 /**
- * The route editor rebuilds a route from its form, so a setting with no form control
- * yet has to be carried over by hand. `pause_when_peer_offline` can only be set in YAML
- * for now; saving the route from the UI must not silently turn it off.
+ * `pause_when_peer_offline` in the route editor: a checkbox that saves with the dialog.
+ * The form rebuilds the route, so saving must keep the setting, and a route without it
+ * must stay without the key rather than gain `false`.
  */
 import { expect, test } from "@playwright/test";
 
@@ -71,5 +71,58 @@ test.describe("route editor keeps pause_when_peer_offline", () => {
     await editAndSave(page, 1);
     expect(saved?.forwarding.routes[1].pause_when_peer_offline).toBeUndefined();
     expect(saved?.forwarding.routes[0].pause_when_peer_offline).toBe(true);
+  });
+
+  const checkbox = (page: import("@playwright/test").Page) => page.locator("#route-f-pause-offline");
+
+  test("the checkbox shows the route's setting", async ({ page }) => {
+    await page.locator('[data-route-edit="0"]').click();
+    await expect(checkbox(page)).toBeChecked();
+    await page.locator("#route-cancel").click();
+    await page.locator('[data-route-edit="1"]').click();
+    await expect(checkbox(page)).not.toBeChecked();
+  });
+
+  test("it uses the theme checkbox and has a label", async ({ page }) => {
+    await page.locator('[data-route-edit="1"]').click();
+    await expect(checkbox(page)).toHaveClass(/evu-checkbox/);
+    await expect(page.getByRole("checkbox", { name: "Pause when peer is offline" })).toBeVisible();
+  });
+
+  test("ticking it saves the setting with the dialog, not before", async ({ page }) => {
+    await page.locator('[data-route-edit="1"]').click();
+    await checkbox(page).check();
+    expect(saved).toBeUndefined();
+    await page.locator("#route-save").click();
+    await expect.poll(() => saved).toBeTruthy();
+    expect(saved?.forwarding.routes[1].pause_when_peer_offline).toBe(true);
+  });
+
+  test("unticking it removes the setting", async ({ page }) => {
+    await page.locator('[data-route-edit="0"]').click();
+    await checkbox(page).uncheck();
+    await page.locator("#route-save").click();
+    await expect.poll(() => saved).toBeTruthy();
+    expect(saved?.forwarding.routes[0].pause_when_peer_offline).toBeUndefined();
+  });
+
+  test("a change counts as unsaved in the dialog", async ({ page }) => {
+    await page.locator('[data-route-edit="1"]').click();
+    await checkbox(page).check();
+    await page.locator("#route-cancel").click();
+    await expect(page.locator("#confirm-modal")).toBeVisible();
+  });
+
+  test("a new route starts with it off, even after editing one that has it", async ({ page }) => {
+    await page.locator('[data-route-edit="0"]').click();
+    await expect(checkbox(page)).toBeChecked();
+    await page.locator("#route-cancel").click();
+    await page.locator("#routes-add").click();
+    await expect(checkbox(page)).not.toBeChecked();
+    await checkbox(page).check();
+    await page.locator("#route-f-ports").fill("9000");
+    await page.locator("#route-save").click();
+    await expect.poll(() => saved).toBeTruthy();
+    expect(saved?.forwarding.routes[2].pause_when_peer_offline).toBe(true);
   });
 });

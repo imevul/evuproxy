@@ -191,7 +191,7 @@ Auto-pause is optional and off by default. Only routes with `pause_when_peer_off
 | `interval` | string | `15s` | Time between probes, as a Go duration (`5s` to `1h`). |
 | `icmp_fallback` | bool | `false` | If `true`, ping the peer over the tunnel when its WireGuard handshake is stale. Turn on when peers can be quiet for long periods. |
 
-**Current effect:** a pause is recorded in the `serve` log and the event log (`route_auto_paused`, `route_auto_resumed`). It does **not** remove forwarding rules yet, so traffic still reaches the route; omitting DNAT for paused routes is separate roadmap work.
+**Current effect:** a pause is recorded in the `serve` log and the event log (`route_auto_paused`, `route_auto_resumed`), and shown by the **Auto-paused** banner on Routes (from [`GET /auto-pause`](http-api.md#endpoints)). It does **not** remove forwarding rules yet, so traffic still reaches the route; omitting DNAT for paused routes is separate roadmap work.
 
 **Each probe** gives one result per peer:
 
