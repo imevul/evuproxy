@@ -106,7 +106,7 @@ A refusal on its own could just mean a dead service, so each one sits next to a 
 On demand, with `devtools/e2e/run.sh auto_pause`. It takes about 11 minutes, because handshakes take 180 seconds to go stale. It runs the real `evuproxy serve` and reads the event log, the live `prerouting` chain and real traffic.
 
 - **Idle peer:** with no traffic for longer than the handshake threshold, a healthy peer doesn't pause.
-- **Peer gone:** the route pauses once the real handshake is stale, and `config.yaml` is untouched. Its DNAT goes without replacing the filter table, and a listener on the proxy gets nothing on the paused port.
+- **Peer gone:** the route pauses once the real handshake is stale, and `config.yaml` is untouched. Its DNAT goes without replacing the filter table. A client the route accepts gets nothing from a listener on the proxy on the paused port, and a client off the route's allowlist still reaches that listener through `input_allows`, as it does while the route runs.
 - **Full Apply while paused:** the Apply puts the DNAT back, and the next probe takes it out again with no new event.
 - **Restart and return:** a restart restores the DNAT on its first probe, and the route pauses again only once the threshold is reached. When the peer comes back the DNAT returns, and a UDP client that kept the same source port throughout reaches the peer.
 - **ICMP fallback:** a peer that's gone doesn't answer ping, so it still pauses.

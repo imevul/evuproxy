@@ -18,8 +18,11 @@ forwarding:
       proto: udp
       ports: ["$PORT"]
       target_ip: $PEER_TUNNEL_IP
+      source_allow_cidrs: ["$CLIENT_IN_ZONE"]
       pause_when_peer_offline: true
-input_allows: []
+input_allows:
+  - proto: udp
+    dport: "$PORT"
 geo:
   enabled: false
 auto_pause:
@@ -63,8 +66,17 @@ stale_handshake() {
 	[ $((now - last)) -gt 180 ]
 }
 config_has_no_disabled() { ! grep -q 'disabled' /etc/evuproxy/config.yaml; }
-has_dnat() { in_ns proxy nft list chain ip evuproxy prerouting | grep -q "dnat to $PEER_TUNNEL_IP"; }
-no_dnat() { ! has_dnat; }
+# Not `nft | grep -q`: nft writes in small pieces, so grep can exit first, and SIGPIPE plus pipefail
+# then reads as "no DNAT". Both of these fail if nft does, so that can't pass as the rule being gone.
+prerouting_rules() { in_ns proxy nft list chain ip evuproxy prerouting; }
+has_dnat() {
+	local rules
+	rules=$(prerouting_rules) && [[ $rules == *"dnat to $PEER_TUNNEL_IP"* ]]
+}
+no_dnat() {
+	local rules
+	rules=$(prerouting_rules) && [[ $rules != *"dnat to $PEER_TUNNEL_IP"* ]]
+}
 # $1 how long to wait in seconds, then the command to wait for.
 wait_until() {
 	local i limit=$1
@@ -84,6 +96,10 @@ same_flow_reply() {
 	echo probe | in_ns wan timeout 6 socat -T2 -t2 - "UDP:$PROXY_PUBLIC_IP:$PORT,bind=$CLIENT_IN_ZONE:40077" 2>/dev/null
 }
 UDP_OK="udp-ok from=$PROXY_TUNNEL_IP"
+# The route only takes CLIENT_IN_ZONE. Anyone else gets the input_allows entry on the same port,
+# which answers with the client's own address, and a pause must not change that.
+HOST_OK="udp-ok from=$CLIENT_OUT_OF_ZONE"
+host_listener_answers() { reaches "$HOST_OK" udp_reply wan "$CLIENT_OUT_OF_ZONE" "$PROXY_PUBLIC_IP" "$PORT"; }
 
 log "=== 1. An idle, healthy peer stays up ==="
 pause_config | apply_config || die "reload"
@@ -95,6 +111,8 @@ check "no traffic for ${IDLE_SECONDS}s doesn't pause the route" event_count_is r
 check "a running route has its DNAT" has_dnat
 serve_udp peer "$PEER_TUNNEL_IP" "$PORT"
 check "a running route forwards" reaches "$UDP_OK" udp_reply wan "$CLIENT_IN_ZONE" "$PROXY_PUBLIC_IP" "$PORT"
+serve_udp proxy "$PROXY_PUBLIC_IP" "$PORT"
+check "a client off the route's allowlist gets the input_allows listener" host_listener_answers
 
 log "=== 2. A peer that goes away pauses ==="
 before=$(sha256sum /etc/evuproxy/config.yaml)
@@ -106,9 +124,9 @@ check "the event names the route and peer" grep -q 'game: udp 15355 .*(peer peer
 check "the paused route loses its DNAT" wait_until 15 no_dnat
 check "the filter table wasn't replaced" test "$filter_before" = "$(filter_table)"
 check "WireGuard is still up" wg_listening
-# Without the drop this would reach the input chain's accept for the route's port.
-serve_udp proxy "$PROXY_PUBLIC_IP" "$PORT"
-check "a listener on the proxy gets nothing on the paused port" blocked udp_reply wan "$CLIENT_IN_ZONE" "$PROXY_PUBLIC_IP" "$PORT"
+# Without the drop this would reach the input chain's accept for the port.
+check "a client the route accepts doesn't reach the listener on the proxy" blocked udp_reply wan "$CLIENT_IN_ZONE" "$PROXY_PUBLIC_IP" "$PORT"
+check "a client off the allowlist still reaches the listener while paused" host_listener_answers
 
 log "=== 3. Pause state stays out of config ==="
 check "config.yaml is untouched" test "$before" = "$(sha256sum /etc/evuproxy/config.yaml)"
@@ -119,6 +137,7 @@ proxy_reload || die "reload while paused"
 check "the Apply puts the DNAT back" has_dnat
 check "the next probe takes it out again" wait_until 15 no_dnat
 check "no extra pause event, as the paused set didn't change" event_count_is route_auto_paused 1
+check "a client off the allowlist still reaches the listener after that" host_listener_answers
 
 log "=== 5. A restart starts as up, and re-trips ==="
 stop_serve

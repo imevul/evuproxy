@@ -147,7 +147,7 @@ func TestSyncPausedRoutes_pauseAndResume(t *testing.T) {
 	fw.calls = nil
 	syncPaused(t, cfgPath, 1)
 	assertRoutes(t, fw, []string{dnatRunning}, []string{dnatPausing}, 1)
-	if !strings.Contains(fw.live, `udp dport { 27015 } drop comment "evuproxy-paused:1"`) {
+	if !strings.Contains(fw.live, `udp dport 27015 drop comment "evuproxy-paused:1"`) {
 		t.Fatalf("the paused port isn't closed:\n%s", fw.live)
 	}
 	check, load := fw.callIndex("nft -c -f"), fw.callIndex("nft -f")

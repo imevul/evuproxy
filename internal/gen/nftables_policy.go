@@ -185,25 +185,30 @@ func writePolicyDnatLine(b *strings.Builder, r routePolicy, line routeDNATLine) 
 	if line.publicDport == "" || line.dnatTo == "" {
 		return
 	}
+	writePolicyPrerouting(b, r, line.publicDport, "dnat to "+line.dnatTo)
+}
+
+// writePolicyPrerouting emits a route's prerouting rules for one public port, with verdict for
+// the sources the route accepts. Every other source falls through to the input chain.
+func writePolicyPrerouting(b *strings.Builder, r routePolicy, publicDport, verdict string) {
 	if r.globalDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.globalDeny, r.proto, line.publicDport, r.counter)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.globalDeny, r.proto, publicDport, r.counter)
 	}
 	if r.srcDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.srcDeny, r.proto, line.publicDport, r.counter)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.srcDeny, r.proto, publicDport, r.counter)
 	}
-	dnatVerdict := "dnat to " + line.dnatTo
 	if !r.geo.enabled {
-		writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, "", dnatVerdict)
+		writePolicyAllow(b, r.proto, publicDport, r.srcAllow, "", verdict)
 		return
 	}
 	if r.geo.blockListed {
-		writePolicyGeoBlockDrop(b, r.geo.setName, r.breakGlass, r.proto, line.publicDport, r.counter)
-		writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, "", dnatVerdict)
+		writePolicyGeoBlockDrop(b, r.geo.setName, r.breakGlass, r.proto, publicDport, r.counter)
+		writePolicyAllow(b, r.proto, publicDport, r.srcAllow, "", verdict)
 		return
 	}
-	writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, r.geo.setName, dnatVerdict)
+	writePolicyAllow(b, r.proto, publicDport, r.srcAllow, r.geo.setName, verdict)
 	if r.breakGlass != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", r.breakGlass, r.proto, line.publicDport, line.dnatTo)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %s\n", r.breakGlass, r.proto, publicDport, verdict)
 	}
 }
 

@@ -65,11 +65,18 @@ func writeNATPreroutingRules(b *strings.Builder, routes []routePolicy, paused []
 	}
 }
 
-// writePausedRouteDrop closes a paused route's public ports. Leaving them out of the chain isn't
-// enough: the packet would stay addressed to this host and reach the route's accept in the input
-// chain. That would expose anything listening on the port here, and the conntrack entry it leaves
-// would keep a UDP client that doesn't stop sending away from the DNAT after the route resumes.
-// Routes can't share a public port, so this can't catch another route's traffic.
+// writePausedRouteDrop renders a paused route's rules with a drop in place of each DNAT, so it
+// closes the route for exactly the sources the route accepts. Leaving the rules out of the chain
+// isn't enough: the packet would stay addressed to this host and reach the route's accept in the
+// input chain. That would expose anything listening on the port here, and the conntrack entry it
+// leaves would keep a UDP client that doesn't stop sending away from the DNAT after the route
+// resumes. Any other source never matched the DNAT, so it still falls through to the input and
+// forward chains: an input_allows entry on the same port stays reachable while the route is paused.
 func writePausedRouteDrop(b *strings.Builder, r routePolicy) {
-	fmt.Fprintf(b, "        %s dport %s %sdrop comment \"%s%d\"\n", r.proto, r.portExpr, r.counter, pausedRouteComment, r.routeIndex)
+	verdict := fmt.Sprintf("%sdrop comment \"%s%d\"", r.counter, pausedRouteComment, r.routeIndex)
+	for _, line := range r.dnat {
+		if line.publicDport != "" && line.dnatTo != "" {
+			writePolicyPrerouting(b, r, line.publicDport, verdict)
+		}
+	}
 }
