@@ -72,6 +72,11 @@ func NFTablesChainsForMetrics() (forward, input []byte, err error) {
 	return fwd, inp, nil
 }
 
+// WireGuardPeers returns the peer rows of `wg show IFACE dump`.
+func WireGuardPeers(iface string) ([]WGPeerDump, error) {
+	return wgDumpPeers(iface)
+}
+
 func wgDumpPeers(iface string) ([]WGPeerDump, error) {
 	out, err := runCmdOutput(context.Background(), "wg", "show", iface, "dump")
 	if err != nil {

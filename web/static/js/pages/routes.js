@@ -544,6 +544,8 @@ async function saveRouteEditor() {
   const idxRaw = $("route-edit-index").value;
   setEditorMsg("route-editor-msg", "");
   const base = routeEditBase;
+  // Set in YAML for now: the form has no control for it, so carry it over or a save turns it off.
+  if (idxRaw !== "" && base && JSON.parse(base).pause_when_peer_offline) entry.pause_when_peer_offline = true;
   try {
     const cfg = await saveConfigEdit((c) => {
       if (!c.forwarding) c.forwarding = {};

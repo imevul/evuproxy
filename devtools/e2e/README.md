@@ -101,6 +101,17 @@ A refusal on its own could just mean a dead service, so each one sits next to a 
 - **On:** geo allow, geo block, the global deny list, CrowdSec, UDP rate limits and the forward catch-all each count the packets they refuse, read the way **Stats** reads them, and a client that passes isn't counted. The catch-all counts past its log limit.
 - **Reload:** a reload starts the counts from zero.
 
+## What `auto_pause` shows
+
+On demand, with `devtools/e2e/run.sh auto_pause`. It takes about 11 minutes, because handshakes take 180 seconds to go stale. It runs the real `evuproxy serve` and reads the event log.
+
+- **Idle peer:** with no traffic for longer than the handshake threshold, a healthy peer doesn't pause.
+- **Peer gone:** the route pauses once the real handshake is stale, and `config.yaml` is untouched.
+- **Restart and return:** after a restart the route pauses again only once the threshold is reached, and it resumes when the peer comes back.
+- **ICMP fallback:** a peer that's gone doesn't answer ping, so it still pauses.
+
+This records pause state only. It doesn't check traffic, because a pause doesn't remove forwarding rules yet.
+
 `devtools/rollback-vm` covers what this can't, because it needs systemd and reboots: confirm-or-revert. The container has no `systemd-run`, so this harness never turns on `apply.confirm`.
 
 ## Stress test

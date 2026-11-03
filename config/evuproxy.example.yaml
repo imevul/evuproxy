@@ -41,6 +41,14 @@ forwarding:
   #   max_conn_per_ip: 200
   #   udp_per_second: 500
 
+# Optional auto-pause (off by default). Set pause_when_peer_offline: true on a route to track its target peer.
+# Values below are the defaults; see docs/config.md for what a pause does today.
+# auto_pause:
+#   failures_to_pause: 3 # consecutive offline probes before the peer's routes pause
+#   successes_to_resume: 2 # consecutive online probes before they resume
+#   interval: 15s # time between probes (5s to 1h)
+#   icmp_fallback: false # true = ping the peer when its WireGuard handshake is stale
+
 # Optional CrowdSec nftables bouncer (off by default). See contrib/crowdsec/README.md.
 # crowdsec:
 #   enabled: false

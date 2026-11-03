@@ -19,6 +19,8 @@ import (
 	"github.com/oschwald/geoip2-golang"
 
 	"github.com/imevul/evuproxy/internal/apply"
+	"github.com/imevul/evuproxy/internal/autopause"
+	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/eventlog"
 	"github.com/imevul/evuproxy/internal/observability"
 	"github.com/imevul/evuproxy/internal/state"
@@ -214,6 +216,13 @@ func (s *Server) Run() error {
 	} else {
 		s.EventLog = el
 	}
+	autoPause := &autopause.Loop{
+		Load:   func() (*config.Config, error) { return autopause.LoadConfig(s.Config) },
+		Prober: autopause.HostProber{},
+		Logger: s.Logger,
+		Emit:   s.emit,
+	}
+	go autoPause.Run(context.Background())
 	handler := http.Handler(s.Routes())
 	if cors := parseCORSOrigins(s.CORSOrigins); cors != nil {
 		if cors.allowAll && !isLoopbackListen(s.Listen) {

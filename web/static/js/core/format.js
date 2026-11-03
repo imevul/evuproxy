@@ -73,6 +73,8 @@ const EVENT_LABELS = {
   backup_failed: "Backup failed",
   restore_ok: "Restored backup",
   restore_failed: "Backup restore failed",
+  route_auto_paused: "Route auto-paused",
+  route_auto_resumed: "Route auto-resumed",
 };
 
 /** Plain wording for an event code. The CSV export keeps the raw codes. */
