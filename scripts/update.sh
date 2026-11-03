@@ -9,7 +9,8 @@ set -euo pipefail
 #   the binary to PREFIX (default /usr/local) and restarts active units. Installing
 #   also refreshes an unmodified evuproxy.service.
 # - If this repo's default Docker Compose UI stack is running, rebuilds and
-#   recreates those containers.
+#   recreates those containers, or pulls first when EVUPROXY_UI_IMAGE selects a
+#   published image.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -58,7 +59,15 @@ fi
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   if [[ -f "$REPO_ROOT/docker-compose.yml" ]]; then
     if docker compose -f "$REPO_ROOT/docker-compose.yml" ps -q 2>/dev/null | grep -q .; then
-      docker compose -f "$REPO_ROOT/docker-compose.yml" up --build -d
+      ui_image="$(docker compose -f "$REPO_ROOT/docker-compose.yml" config --images)"
+      if [[ "$ui_image" == "evuproxy-ui:local" ]]; then
+        docker compose -f "$REPO_ROOT/docker-compose.yml" up --build -d
+      else
+        # EVUPROXY_UI_IMAGE is set: a build would overwrite that image with this checkout.
+        docker compose -f "$REPO_ROOT/docker-compose.yml" pull
+        docker compose -f "$REPO_ROOT/docker-compose.yml" up -d --no-build
+        echo "UI runs the published image $ui_image; to change version, edit EVUPROXY_UI_IMAGE in .env."
+      fi
     fi
   fi
 fi

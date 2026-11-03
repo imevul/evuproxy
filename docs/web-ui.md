@@ -6,9 +6,34 @@ The admin UI is intended to run **in Docker only**. From the repo root:
 docker compose up --build
 ```
 
+This builds the image from your checkout. To run a released image instead, see [Published image](#published-image).
+
 Browse `http://127.0.0.1:9080`. On a remote VPS, use an **SSH tunnel** instead of exposing the UI publicly. The UI container uses **host networking** so nginx can proxy `/api` to **`127.0.0.1:9847`** without binding the API on `0.0.0.0`. Override **`EVUPROXY_UI_LISTEN`** (e.g. `0.0.0.0:9080`) only for temporary LAN tests — the UI then listens on all interfaces; combine with firewall rules and treat the token like a password. **Host network is Linux-oriented**; use the dev mock stack on other setups if needed. Docker Compose defines an optional **`healthcheck`** against **`GET /healthz`** on the UI nginx port.
 
-Production nginx sends **`Cache-Control: no-cache, private, must-revalidate`** for HTML and `/static/*` so a rebuilt UI image is picked up after a normal reload (without relying on hard refresh). Ensure **`evuproxy serve`** on the host is updated when API behavior changes (e.g. new JSON fields); `scripts/update.sh` restarts the API service and rebuilds the UI container when compose is in use.
+Production nginx sends **`Cache-Control: no-cache, private, must-revalidate`** for HTML and `/static/*` so a rebuilt UI image is picked up after a normal reload (without relying on hard refresh). Ensure **`evuproxy serve`** on the host is updated when API behavior changes (e.g. new JSON fields); `scripts/update.sh` restarts the API service and rebuilds the UI container when compose is in use, or pulls it when you run a published image.
+
+## Published image
+
+Each release publishes the UI to **`ghcr.io/imevul/evuproxy-ui`** for `linux/amd64` and `linux/arm64`, so you don't need to build it on the server. It's tagged with the release version without the `v` (for example `0.17.0`), and the newest release is also tagged `latest`. Pulling needs no login.
+
+To use it, set **`EVUPROXY_UI_IMAGE`** in `.env` next to `docker-compose.yml`. Pick the version that matches `evuproxy version` on the host, because the UI and the API change together:
+
+```bash
+EVUPROXY_UI_IMAGE=ghcr.io/imevul/evuproxy-ui:0.17.0
+```
+
+Then start it from the repo root:
+
+```bash
+docker compose pull
+docker compose up -d --no-build
+```
+
+To upgrade, change the version in `.env` and run both commands again. `scripts/update.sh` pulls and recreates the container but doesn't change the version, so edit `.env` when it updates the binary to a new release.
+
+While `EVUPROXY_UI_IMAGE` is set, don't run `docker compose up --build`: it builds this checkout and tags the result with the published name. `docker compose pull` puts the published image back.
+
+**Building locally** keeps working: leave `EVUPROXY_UI_IMAGE` unset and run `docker compose up --build`, which tags the result `evuproxy-ui:local`.
 
 See also [Security and privacy](security-and-privacy.md) and [Local HTTP API](http-api.md).
 

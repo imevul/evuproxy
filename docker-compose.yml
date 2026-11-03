@@ -3,11 +3,16 @@
 #
 #   docker compose up --build
 #
+# To run a published image instead of building, set EVUPROXY_UI_IMAGE (see docs/web-ui.md):
+#
+#   docker compose pull && docker compose up -d --no-build
+#
 # UI: http://127.0.0.1:9080 — remote: SSH -L 9080:127.0.0.1:9080
 # LAN testing: EVUPROXY_UI_LISTEN=0.0.0.0:9080 docker compose up -d
 
 services:
   evuproxy-ui:
+    image: ${EVUPROXY_UI_IMAGE:-evuproxy-ui:local}
     build:
       context: .
       dockerfile: docker/Dockerfile
