@@ -941,6 +941,31 @@ def _mock_wireguard_peers_payload() -> list[dict]:
     return out
 
 
+def _mock_route_accepted() -> list:
+    """One row per route and protocol, shaped like apply.RouteAcceptedCounter."""
+    out = []
+    routes = MOCK_CONFIG.get("forwarding", {}).get("routes", [])
+    for i, r in enumerate(routes):
+        if r.get("disabled"):
+            continue
+        for proto in ("tcp", "udp"):
+            if r.get("proto") not in (proto, "both"):
+                continue
+            packets = 8516 * (i + 1) + (0 if proto == "tcp" else 41)
+            row = {
+                "route_index": i,
+                "proto": proto,
+                "ports": r.get("ports", []),
+                "target_ip": r.get("target_ip", ""),
+                "packets": packets,
+                "bytes": packets * 832,
+            }
+            if r.get("name"):
+                row["name"] = r["name"]
+            out.append(row)
+    return out
+
+
 def _mock_stats_response() -> dict:
     return {
         "wireguard_interface": MOCK_CONFIG.get("wireguard", {}).get(
@@ -964,6 +989,7 @@ def _mock_stats_response() -> dict:
                 "bytes": 180,
             },
         ],
+        "route_accepted": _mock_route_accepted(),
     }
 
 

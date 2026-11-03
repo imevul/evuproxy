@@ -62,7 +62,7 @@ The Settings bar writes up to three separate stores: UI preferences, config (**P
 
 ## Stats page
 
-**WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft -a list table …`).
+**WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft -a list table …`), apart from the per-route [accepted counters](http-api.md#route-accepted-counters), which the API reports separately.
 
 By default, generated EvuProxy drop rules (deny lists, geoblock, rate limits, CrowdSec, forward catch-all) have no **`counter`**, so this table is empty and hit counts only show up on the **Logs** page (journal/dmesg). Set **[`stats.drop_counters`](config.md#stats)** to `true` to list those rules here with their packet and byte counts. Geoblock **SRC** cells on **Logs** offer a break-glass add control when that IPv4 is not already covered by **`geo.break_glass_cidrs`**.
 

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/gen"
 )
 
 // Stats bundles observability data for the admin UI.
@@ -18,6 +20,21 @@ type Stats struct {
 	WireGuardDumpFailed bool             `json:"wireguard_dump_failed,omitempty"`
 	WireGuardPeers      []WGPeerDump     `json:"wireguard_peers"`
 	NFTables            []NFTCounterLine `json:"nftables_counters"`
+	// RouteAccepted is never null: no live rules gives an empty list.
+	RouteAccepted []RouteAcceptedCounter `json:"route_accepted"`
+}
+
+// RouteAcceptedCounter is the traffic the firewall accepted for one route and protocol since the
+// last Apply. It is accepted traffic, not players or legitimate clients: see docs/http-api.md.
+type RouteAcceptedCounter struct {
+	// RouteIndex is the route's position in forwarding.routes of the applied config.
+	RouteIndex int      `json:"route_index"`
+	Name       string   `json:"name,omitempty"`
+	Proto      string   `json:"proto"` // tcp or udp, so a route with both has two rows
+	Ports      []string `json:"ports"`
+	TargetIP   string   `json:"target_ip"`
+	Packets    uint64   `json:"packets"`
+	Bytes      uint64   `json:"bytes"`
 }
 
 // WGPeerDump is one line from `wg show IFACE dump` (peer rows only).
@@ -56,7 +73,57 @@ func StatsFromHost(cfgPath string) (*Stats, error) {
 	}
 	st.NFTables = append(st.NFTables, nftCounterLines("inet", "evuproxy")...)
 	st.NFTables = append(st.NFTables, nftCounterLines("ip", "evuproxy")...)
+	st.RouteAccepted = routeAcceptedCounters(cfgPath)
 	return st, nil
+}
+
+// routeAcceptedCounters reads the live counters. It describes them from the applied config,
+// because the live rules were rendered from that, and the saved one may have moved routes since.
+func routeAcceptedCounters(cfgPath string) []RouteAcceptedCounter {
+	c := LoadAppliedConfig(cfgPath)
+	if c == nil {
+		return []RouteAcceptedCounter{}
+	}
+	out, err := runCmdCombined(context.Background(), "nft", "list", "chain", "inet", "evuproxy", gen.RouteAcceptedChain)
+	if err != nil {
+		return []RouteAcceptedCounter{}
+	}
+	return parseRouteAccepted(c, string(out))
+}
+
+// parseRouteAccepted leaves out a rule that doesn't fit the route its comment names: a failed
+// Apply can leave the live rules and the applied config apart, and a missing row is better than
+// one route's traffic shown against another.
+func parseRouteAccepted(c *config.Config, listing string) []RouteAcceptedCounter {
+	res := []RouteAcceptedCounter{}
+	for _, line := range strings.Split(listing, "\n") {
+		i, proto, ok := gen.ParseRouteAcceptedComment(line)
+		if !ok || i >= len(c.Forwarding.Routes) {
+			continue
+		}
+		r := c.Forwarding.Routes[i]
+		target := strings.TrimSpace(r.TargetIP)
+		protos, err := config.ParseRouteProtocols(r.Proto)
+		if err != nil || !slices.Contains(protos, proto) || !strings.Contains(line, "ip daddr "+target+" ") {
+			continue
+		}
+		m := nftCounterRE.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		pk, _ := strconv.ParseUint(m[1], 10, 64)
+		bk, _ := strconv.ParseUint(m[2], 10, 64)
+		res = append(res, RouteAcceptedCounter{
+			RouteIndex: i,
+			Name:       r.Name,
+			Proto:      proto,
+			Ports:      r.Ports,
+			TargetIP:   target,
+			Packets:    pk,
+			Bytes:      bk,
+		})
+	}
+	return res
 }
 
 // NFTablesChainsForMetrics returns the text of the evuproxy forward and input chains (inet).
@@ -124,6 +191,10 @@ func parseNFTCounterLines(family, table, listing string) []NFTCounterLine {
 	for _, line := range strings.Split(listing, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || !strings.Contains(line, "counter") {
+			continue
+		}
+		// Those are reported per route, and this list is for stats.drop_counters.
+		if _, _, accepted := gen.ParseRouteAcceptedComment(line); accepted {
 			continue
 		}
 		m := nftCounterRE.FindStringSubmatch(line)

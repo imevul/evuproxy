@@ -1164,6 +1164,7 @@ func assertDropCounters(t *testing.T, off, on *config.Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	offOut, onOut = withoutRouteAccepted(offOut), withoutRouteAccepted(onOut)
 	if strings.Contains(offOut, "counter") {
 		t.Fatalf("drop_counters off must not render counters:\n%s", offOut)
 	}
@@ -1177,6 +1178,17 @@ func assertDropCounters(t *testing.T, off, on *config.Config) {
 			t.Errorf("drop rule and counter must go together: %q", line)
 		}
 	}
+}
+
+// withoutRouteAccepted drops the count-only rules, which render whatever stats.drop_counters says.
+func withoutRouteAccepted(s string) string {
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		if !strings.Contains(line, routeAcceptedCommentPrefix) {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 func TestNFTables_dropCounters_placement(t *testing.T) {

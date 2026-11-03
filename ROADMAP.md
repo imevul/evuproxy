@@ -218,8 +218,8 @@ Documentation fixes:
 
 Accepted-traffic counters, which depend on the spike:
 
-- [ ] Spike: on a host with real traffic, confirm counters can be tied to accepted forwards per route without counting scan drops. Record go or no-go
-- [ ] If go: per-route accepted counters in `GET /stats`
+- [x] Spike: on a host with real traffic, confirm counters can be tied to accepted forwards per route without counting scan drops. Record go or no-go (go, with conditions)
+- [x] If go: per-route accepted counters in `GET /stats`
 - [ ] If go: an **Accepted** column on Routes, with its meaning documented
 - [ ] If go, *proposed:* per-route accepted counters in Prometheus
 

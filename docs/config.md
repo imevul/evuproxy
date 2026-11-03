@@ -250,7 +250,7 @@ Top-level key. Optional additions to the generated ruleset for the admin **Stats
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `drop_counters` | bool (optional) | Default `false`, which leaves generated rules unchanged. When `true`, every explicit `drop` rule gets an nft **`counter`**: global and per-route deny lists, geo, CrowdSec, rate limits (on **inet** input/forward and **ip** prerouting where they exist) and the forward catch-all. **Stats** and `GET /api/v1/stats` (`nftables_counters`) then list each rule with its packet and byte counts. |
+| `drop_counters` | bool (optional) | Default `false`, which adds no counters to drop rules. When `true`, every explicit `drop` rule gets an nft **`counter`**: global and per-route deny lists, geo, CrowdSec, rate limits (on **inet** input/forward and **ip** prerouting where they exist) and the forward catch-all. **Stats** and `GET /api/v1/stats` (`nftables_counters`) then list each rule with its packet and byte counts. |
 
 ```yaml
 stats:
@@ -263,6 +263,8 @@ How to read the counts:
 - **Packets, not log lines.** Geo and forward catch-all rules limit how often they log, but their counters include every packet they drop, so the counts will usually be higher than the matching lines in **Logs**.
 - **Chain policy drops are not counted.** Traffic that matches no rule and falls through to the **input** or **forward** chain `policy drop` has no rule to count on. Unsolicited traffic to closed ports on the host is the usual example. The forward catch-all does count most of what would otherwise reach the forward policy.
 - **Where a drop shows up depends on the path.** Deny lists and geo `block` mode drop forwarded ports in **ip** prerouting first, so those rows usually carry the counts and the matching **inet** rows stay near zero.
+
+This setting doesn't affect the per-route accepted counts, which are always on. See [Route accepted counters](http-api.md#route-accepted-counters).
 
 ---
 
