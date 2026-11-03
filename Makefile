@@ -1,7 +1,7 @@
 .PHONY: all up down dev dev-fresh playwright-deps playwright-visual a11y ui-behavior \
 	visual-check visual-baseline \
 	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
-	check fmt vet test test-race deadcode e2e e2e-stress
+	check fmt vet test test-race deadcode e2e e2e-stress e2e-stats-cost
 
 # Run from the repository root. Requires Go 1.25+, Docker, and `docker compose` (v2).
 
@@ -42,6 +42,10 @@ e2e:
 # The same harness under load, kept out of `make e2e` because it is slower and timing-sensitive.
 e2e-stress:
 	./devtools/e2e/run.sh stress
+
+# What GET /stats costs as the geo set grows. Reports numbers, with no thresholds.
+e2e-stats-cost:
+	./devtools/e2e/run.sh stats_cost
 
 CROWDSEC_DIR := contrib/crowdsec
 
