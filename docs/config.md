@@ -191,7 +191,9 @@ Auto-pause is optional and off by default. Only routes with `pause_when_peer_off
 | `interval` | string | `15s` | Time between probes, as a Go duration (`5s` to `1h`). |
 | `icmp_fallback` | bool | `false` | If `true`, ping the peer over the tunnel when its WireGuard handshake is stale. Turn on when peers can be quiet for long periods. |
 
-**Current effect:** a pause is recorded in the `serve` log and the event log (`route_auto_paused`, `route_auto_resumed`), and shown by the **Auto-paused** banner on Routes (from [`GET /auto-pause`](http-api.md#endpoints)). It does **not** remove forwarding rules yet, so traffic still reaches the route; omitting DNAT for paused routes is separate roadmap work.
+**Effect of a pause:** each of the route's DNAT rules becomes a drop with the same match, so new traffic the route would have forwarded is dropped rather than sent to the offline peer or to anything listening on those ports on this host. Sources the route doesn't accept, because of `source_allow_cidrs` or an allow-mode geo set, aren't affected and are handled as they are while the route runs, so an [`input_allows`](#input_allows) entry on the same port stays reachable for them. It takes effect on the probe that pauses the route, and a resume restores the DNAT the same way. Only the `prerouting` chain of `table ip evuproxy` changes, in one nft transaction: there is no full reload, WireGuard isn't touched, and geo sets, CrowdSec bans and rate-limit state are kept. The route's other rules stay in place. Connections already tracked aren't cut off. The pause is recorded in the `serve` log and the event log (`route_auto_paused`, `route_auto_resumed`), and shown by the **Auto-paused** banner on Routes (from [`GET /auto-pause`](http-api.md#endpoints)).
+
+**A full Apply while a route is paused** doesn't know about the pause. It renders every route from config, so the paused route's DNAT comes back, and the next probe removes it again if the peer is still offline. That leaves the DNAT in place for up to one `interval`, with no new event. This applies to every kind of Apply, including `evuproxy reload`, a revert and the reload at boot. Because a pause never reaches the generated ruleset, it doesn't show up as a pending change. If an Apply failed partway, the rules are left alone until a later Apply succeeds, and `serve` logs a warning.
 
 **Each probe** gives one result per peer:
 
@@ -204,7 +206,7 @@ Auto-pause is optional and off by default. Only routes with `pause_when_peer_off
 **Pause state is runtime-only:**
 
 - It is tracked per peer and never written to `config.yaml`. `disabled` stays your setting: a disabled route is never reported as paused and never re-enabled.
-- After `serve` restarts, every route starts as not paused, and the first probe runs one interval later.
+- After `serve` restarts, every route starts as not paused, and the first probe runs one interval later. That probe restores any DNAT the previous process removed. While `serve` is stopped, a paused route stays closed until `serve` is back or an Apply runs.
 - Turning `pause_when_peer_offline` off, or disabling the route, clears its pause.
 - Changes take effect after **Apply**, because the loop reads the last applied config (**`config.yaml.bak`**) rather than pending edits. With [confirm mode](#confirm-or-revert-apply) on, that means once the Apply is confirmed. With no usable **`config.yaml.bak`**, it reads **`config.yaml`**. Thresholds and `interval` are picked up without a restart.
 

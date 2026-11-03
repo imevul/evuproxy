@@ -224,6 +224,9 @@ func (s *Server) Run() error {
 		Prober: autopause.HostProber{},
 		Logger: s.Logger,
 		Emit:   s.emit,
+		SyncRules: func(ctx context.Context, paused func(*config.Config) []int) error {
+			return apply.SyncPausedRoutes(ctx, s.Config, paused)
+		},
 	}
 	go s.autoPause.Run(context.Background())
 	handler := http.Handler(s.Routes())

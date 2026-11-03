@@ -63,10 +63,12 @@ type PausedRoute struct {
 	Ports    []string `json:"ports"`
 	TargetIP string   `json:"target_ip"`
 	Peer     string   `json:"peer"`
+	// Index is the route's position in forwarding.routes.
+	Index int `json:"-"`
 }
 
-// key identifies the route across ticks. Names and port order are left out, so editing them
-// while paused isn't a change to the paused set.
+// key identifies the route across ticks. Names, port order and position are left out, so editing
+// them while paused isn't a change to the paused set.
 func (r PausedRoute) key() string {
 	ports := slices.Sorted(slices.Values(r.Ports))
 	return strings.ToLower(r.Proto) + "\x00" + strings.Join(ports, ",") + "\x00" + r.TargetIP
@@ -115,6 +117,10 @@ type Loop struct {
 	Emit func(eventlog.Record)
 	// OnChange is optionally called with the new paused set whenever it changes.
 	OnChange func([]PausedRoute)
+	// SyncRules optionally makes the firewall match the paused set. It is called on every tick
+	// that watches a peer, not only on a change, because an Apply or a restart can change the
+	// firewall under the loop. It calls paused with the config it acts on.
+	SyncRules func(ctx context.Context, paused func(*config.Config) []int) error
 	// Now and wait are replaced in tests.
 	Now  func() time.Time
 	wait func(context.Context, time.Duration) bool
@@ -182,7 +188,20 @@ func (l *Loop) Tick(ctx context.Context) time.Duration {
 		return 0
 	}
 	l.publish(l.derivePaused(c))
+	if len(watched) > 0 && l.SyncRules != nil {
+		if err := l.SyncRules(ctx, l.pausedIndexes); err != nil {
+			l.logger().Warn("auto-pause: update forwarding rules", "err", err)
+		}
+	}
 	return c.AutoPause.EffectiveInterval()
+}
+
+func (l *Loop) pausedIndexes(c *config.Config) []int {
+	var out []int
+	for _, r := range l.derivePaused(c) {
+		out = append(out, r.Index)
+	}
+	return out
 }
 
 // probe feeds one result per watched peer into its hysteresis. When handshakes can't be read
@@ -282,7 +301,7 @@ func peerForRoute(c *config.Config, r config.ForwardRoute) (config.Peer, bool) {
 // user's setting, and the loop neither pauses nor resumes them.
 func (l *Loop) derivePaused(c *config.Config) []PausedRoute {
 	var out []PausedRoute
-	for _, r := range c.Forwarding.Routes {
+	for i, r := range c.Forwarding.Routes {
 		if !r.PauseWhenPeerOffline || r.Disabled {
 			continue
 		}
@@ -297,6 +316,7 @@ func (l *Loop) derivePaused(c *config.Config) []PausedRoute {
 				Ports:    append([]string(nil), r.Ports...),
 				TargetIP: strings.TrimSpace(r.TargetIP),
 				Peer:     p.Name,
+				Index:    i,
 			})
 		}
 	}
