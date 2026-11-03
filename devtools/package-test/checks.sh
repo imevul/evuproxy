@@ -194,6 +194,8 @@ EOF
 systemctl daemon-reload
 systemctl enable -q --now evuproxy.service || die "start evuproxy.service"
 systemctl enable -q evuproxy-geo.timer || die "enable evuproxy-geo.timer"
+# If it was already running, the count below would mean nothing.
+check "evuproxy.service started once before the upgrade" test "$(wc -l </run/evuproxy-starts)" -eq 1
 sums_before=$(state_sums)
 rules_before=$(nft list ruleset)
 pid_before=$(api_pid)
