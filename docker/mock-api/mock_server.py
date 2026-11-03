@@ -883,6 +883,40 @@ def _mock_peer_rx_tx(public_key: str) -> tuple[int, int]:
     return half, cur - half
 
 
+def _mock_peer_online(plist: list[dict], i: int) -> bool:
+    """The mock's fixed picture: with two or more peers, the last one has no handshake."""
+    if plist[i].get("disabled"):
+        return False
+    return not (len(plist) >= 2 and i == len(plist) - 1)
+
+
+def _mock_auto_paused_routes() -> list[dict]:
+    """Fake GET /api/v1/auto-pause. Like the real loop it reads the applied config, so a
+    route pauses after Apply; unlike it there is no hysteresis, the peer is simply offline."""
+    cfg = MOCK_CONFIG_BASELINE
+    plist = list(cfg.get("peers") or [])
+    out: list[dict] = []
+    for r in (cfg.get("forwarding") or {}).get("routes") or []:
+        if not r.get("pause_when_peer_offline") or r.get("disabled"):
+            continue
+        target = (r.get("target_ip") or "").strip()
+        for i, p in enumerate(plist):
+            if p.get("disabled") or (p.get("tunnel_ip") or "").split("/")[0].strip() != target:
+                continue
+            if not _mock_peer_online(plist, i):
+                row = {
+                    "proto": r.get("proto") or "",
+                    "ports": list(r.get("ports") or []),
+                    "target_ip": target,
+                    "peer": p.get("name") or "",
+                }
+                if r.get("name"):
+                    row["name"] = r["name"]
+                out.append(row)
+            break
+    return out
+
+
 def _mock_wireguard_peers_payload() -> list[dict]:
     now = int(time.time())
     out: list[dict] = []
@@ -891,12 +925,7 @@ def _mock_wireguard_peers_payload() -> list[dict]:
         pk = (p.get("public_key") or "").strip()
         if not pk:
             continue
-        if p.get("disabled"):
-            hand = 0
-        elif len(plist) >= 2 and i == len(plist) - 1:
-            hand = 0
-        else:
-            hand = now - 45
+        hand = now - 45 if _mock_peer_online(plist, i) else 0
         rx, tx = _mock_peer_rx_tx(pk)
         tip = (p.get("tunnel_ip") or "").strip()
         out.append(
@@ -1258,6 +1287,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/v1/stats":
             return self._send_json(200, _mock_stats_response())
+        if path == "/api/v1/auto-pause":
+            return self._send_json(200, {"paused_routes": _mock_auto_paused_routes()})
         if path == "/api/v1/client-ip":
             return self._send_json(
                 200,

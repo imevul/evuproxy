@@ -86,6 +86,7 @@ export const state = {
   confirmModalCancelCallback: null,
 
   peersPingTimer: null,
+  routesAutoPauseTimer: null,
 
   onboardingUnlockPassStored: "",
   onboardingBundleRebuildSeq: 0,

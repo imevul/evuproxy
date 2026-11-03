@@ -58,13 +58,13 @@ func LoadConfig(cfgPath string) (*config.Config, error) {
 
 // PausedRoute is one route currently paused because its target peer is offline.
 type PausedRoute struct {
-	Name     string
-	Proto    string
-	Ports    []string
-	TargetIP string
-	Peer     string
+	Name     string   `json:"name,omitempty"`
+	Proto    string   `json:"proto"`
+	Ports    []string `json:"ports"`
+	TargetIP string   `json:"target_ip"`
+	Peer     string   `json:"peer"`
 	// Index is the route's position in forwarding.routes.
-	Index int
+	Index int `json:"-"`
 }
 
 // key identifies the route across ticks. Names, port order and position are left out, so editing

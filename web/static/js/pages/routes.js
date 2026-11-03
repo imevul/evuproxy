@@ -217,6 +217,91 @@ function routeName(r) {
   return String(r.name || "").trim();
 }
 
+/* ——— Auto-pause: runtime state from the API, never part of the config ——— */
+const AUTO_PAUSE_POLL_MS = 15000;
+
+/** What the API last reported, from the applied config, so it can differ from the rows. */
+let autoPausedRoutes = [];
+
+/** Same route whatever the order of its ports, as in internal/autopause. */
+function autoPauseKey(r) {
+  const ports = (r.ports || []).map(String).sort();
+  return routeProtoPlainText(r.proto) + "\0" + ports.join(",") + "\0" + String(r.target_ip || "").trim();
+}
+
+function autoPausedLabel(r) {
+  const ports = routeProtoPlainText(r.proto).toUpperCase().replace(", ", "+") + " " + (r.ports || []).join(", ");
+  const name = routeName(r);
+  return name ? name + " (" + ports + ")" : ports;
+}
+
+function renderAutoPausedBanner() {
+  const banner = $("routes-auto-paused");
+  banner.classList.toggle("is-hidden", !autoPausedRoutes.length);
+  const count = autoPausedRoutes.length;
+  $("routes-auto-paused-title").textContent = "Auto-paused: " + count + (count === 1 ? " route" : " routes");
+  const byPeer = new Map();
+  for (const r of autoPausedRoutes) {
+    const peer = String(r.peer || "").trim() || String(r.target_ip || "").trim();
+    if (!byPeer.has(peer)) byPeer.set(peer, []);
+    byPeer.get(peer).push(autoPausedLabel(r));
+  }
+  $("routes-auto-paused-list").innerHTML = [...byPeer]
+    .map(([peer, labels]) => `<li>Peer <strong>${escapeHtml(peer)}</strong> is offline: ${escapeHtml(labels.join("; "))}</li>`)
+    .join("");
+}
+
+/**
+ * In place rather than by re-rendering, so a poll can't take focus off a row's controls.
+ * A disabled row is left alone: that is the user's setting, not a pause.
+ */
+function syncAutoPausedRows(cfg) {
+  const routes = (cfg && cfg.forwarding && cfg.forwarding.routes) || [];
+  const paused = new Map(autoPausedRoutes.map((r) => [autoPauseKey(r), r]));
+  $("routes-table-wrap").querySelectorAll("tr[data-row]").forEach((tr) => {
+    const r = routes[+tr.getAttribute("data-row")];
+    const hit = r && !r.disabled ? paused.get(autoPauseKey(r)) : undefined;
+    const cell = tr.querySelector(".cell-disabled-toggle");
+    const badge = tr.querySelector(".route-auto-paused-badge");
+    if (!hit) {
+      if (badge) badge.remove();
+    } else if (cell && !badge) {
+      const b = document.createElement("span");
+      b.className = "evu-badge evu-badge--warning route-auto-paused-badge";
+      b.textContent = "Auto-paused";
+      cell.appendChild(b);
+    }
+  });
+}
+
+/** Never rejects: on failure what is on screen stays, and the connection state covers an outage. */
+async function refreshAutoPaused() {
+  let next;
+  try {
+    const res = await api("/v1/auto-pause");
+    next = res.paused_routes || [];
+  } catch {
+    return;
+  }
+  // The banner is a live region and this re-runs every few seconds: only a real change may touch it.
+  if (JSON.stringify(next) === JSON.stringify(autoPausedRoutes)) return;
+  autoPausedRoutes = next;
+  renderAutoPausedBanner();
+  syncAutoPausedRows(state.lastConfig);
+}
+
+export function stopAutoPausePolling() {
+  if (state.routesAutoPauseTimer) {
+    clearInterval(state.routesAutoPauseTimer);
+    state.routesAutoPauseTimer = null;
+  }
+}
+
+export function restartAutoPausePolling() {
+  stopAutoPausePolling();
+  state.routesAutoPauseTimer = setInterval(refreshAutoPaused, AUTO_PAUSE_POLL_MS);
+}
+
 function renderRoutesTable(cfg) {
   const wrap = $("routes-table-wrap");
   const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
@@ -293,6 +378,7 @@ function renderRoutesTable(cfg) {
       await patchRouteDisabled(idx, !inp.checked);
     });
   });
+  syncAutoPausedRows(cfg);
   applyTableFilter("routes-table-wrap");
 }
 
@@ -307,6 +393,7 @@ function openRouteEditor(index) {
   setEditorMsg("route-editor-msg", "");
   const dis = $("route-f-disabled");
   if (dis) dis.checked = true;
+  $("route-f-pause-offline").checked = index !== -1 && !!(cfg.forwarding.routes[index] || {}).pause_when_peer_offline;
   if (index === -1) {
     $("route-edit-index").value = "";
     $("route-editor-title").textContent = "Add route";
@@ -526,6 +613,7 @@ async function saveRouteEditor() {
   };
   const name = $("route-f-name").value.trim();
   if (name) entry.name = name;
+  if ($("route-f-pause-offline").checked) entry.pause_when_peer_offline = true;
   const denyList = parseSourceAllowListInput(($("route-f-source-deny") && $("route-f-source-deny").value) || "");
   if (denyList.length) entry.source_deny_cidrs = denyList;
   const gm = ($("route-f-geo-mode") && $("route-f-geo-mode").value) || "inherit";
@@ -544,8 +632,6 @@ async function saveRouteEditor() {
   const idxRaw = $("route-edit-index").value;
   setEditorMsg("route-editor-msg", "");
   const base = routeEditBase;
-  // Set in YAML for now: the form has no control for it, so carry it over or a save turns it off.
-  if (idxRaw !== "" && base && JSON.parse(base).pause_when_peer_offline) entry.pause_when_peer_offline = true;
   try {
     const cfg = await saveConfigEdit((c) => {
       if (!c.forwarding) c.forwarding = {};
@@ -639,7 +725,8 @@ export async function refreshRoutesPage() {
   setRoutesMsg("");
   const doneLoading = beginLoading("routes-table-wrap");
   try {
-    state.lastConfig = await api("/v1/config");
+    const [cfg] = await Promise.all([api("/v1/config"), refreshAutoPaused()]);
+    state.lastConfig = cfg;
     setApiStatus(true);
     renderRoutesTable(state.lastConfig);
     peerTunnelIPv4Options(state.lastConfig);
