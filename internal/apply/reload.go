@@ -2,6 +2,7 @@ package apply
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -33,7 +34,10 @@ var wgInterfaceExists = func(iface string) bool {
 // downloadGeoZones fetches zone files. Package variable so unit tests stay off the network.
 var downloadGeoZones = gen.DownloadZones
 
-// The stages of a reload, in order, as passed to ReloadWithProgress's callback.
+// ErrConfigHashMismatch means config.yaml is no longer the file the caller checked.
+var ErrConfigHashMismatch = errors.New("config.yaml changed after it was checked, so nothing was applied: check it again")
+
+// The stages of a reload, in order, as passed to ReloadIfMatch's callback.
 const (
 	ReloadStepFirewall  = "firewall"
 	ReloadStepWireGuard = "wireguard"
@@ -43,17 +47,40 @@ const (
 // A cross-process file lock serializes it against other mutating operations
 // (CLI vs API); privileged subprocesses run under per-command timeouts.
 func Reload(ctx context.Context, cfgPath string) error {
-	return ReloadWithProgress(ctx, cfgPath, func(string) {})
+	return ReloadIfMatch(ctx, cfgPath, "", func(string) {})
 }
 
-// ReloadWithProgress is Reload, calling progress as each stage starts.
-func ReloadWithProgress(ctx context.Context, cfgPath string, progress func(step string)) error {
+// checkConfigHash refuses an apply of anything but the file the caller checked. It runs
+// with the apply lock held, so a save through the CLI or the API can't land between this
+// and the reload reading the file. An empty hash means the caller asked for no such check.
+func checkConfigHash(cfgPath, configHash string) error {
+	if configHash == "" {
+		return nil
+	}
+	cur, err := state.ConfigFileSHA256(cfgPath)
+	if err != nil {
+		return err
+	}
+	if cur != configHash {
+		return ErrConfigHashMismatch
+	}
+	return nil
+}
+
+// ReloadIfMatch is Reload, calling progress as each stage starts. A non-empty configHash
+// must be the current state.ConfigFileSHA256 of config.yaml, or nothing is applied and it
+// fails with ErrConfigHashMismatch.
+func ReloadIfMatch(ctx context.Context, cfgPath, configHash string, progress func(step string)) error {
 	unlock, err := acquireApplyLock(ctx, cfgPath)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	if err := checkOneWayReload(ctx, cfgPath); err != nil {
+		return err
+	}
+	// After checkOneWayReload, which can revert an expired session and so replace the file.
+	if err := checkConfigHash(cfgPath, configHash); err != nil {
 		return err
 	}
 	err = reload(ctx, cfgPath, progress)

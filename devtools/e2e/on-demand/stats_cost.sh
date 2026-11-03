@@ -7,6 +7,7 @@ SIZES=(0 1000 10000 50000 150000)
 SAMPLES=7
 IDLE_SECONDS=15
 API=127.0.0.1:19848
+METRICS=127.0.0.1:19849
 ALL_CIDRS=/tmp/stats-cost-cidrs
 TICK_MS=$((1000 / $(getconf CLK_TCK)))
 
@@ -61,27 +62,30 @@ serve_ticks() {
 	echo $((stat[13] + stat[14] + stat[15] + stat[16]))
 }
 
-stats_request() {
-	printf 'GET /api/v1/stats HTTP/1.0\r\nAuthorization: Bearer e2e\r\n\r\n' |
-		in_ns proxy socat -t120 -T120 - "TCP:$API" >/tmp/stats-cost.out
+# $1 address, $2 path.
+cost_request() {
+	printf 'GET %s HTTP/1.0\r\nAuthorization: Bearer e2e\r\n\r\n' "$2" |
+		in_ns proxy socat -t120 -T120 - "TCP:$1" >/tmp/stats-cost.out
 }
-stats_ok() {
+# $1 what the body must have.
+request_ok() {
 	head -n1 /tmp/stats-cost.out | grep -F ' 200 ' >/dev/null &&
-		grep -F '"route_accepted":[{' /tmp/stats-cost.out >/dev/null
+		grep -F "$1" /tmp/stats-cost.out >/dev/null
 }
 
-# $1 size. The whole request, with CPU as the server's own account of it.
-measure_stats() {
-	local size=$1 i start before after walls=()
+# $1 size, $2 address, $3 path, $4 what the body must have. The whole request, with CPU as the
+# server's own account of it.
+measure_request() {
+	local size=$1 address=$2 path=$3 want=$4 i start before after walls=()
 	before=$(serve_ticks)
 	for ((i = 0; i < SAMPLES; i++)); do
 		start=$(now_ms)
-		stats_request
+		cost_request "$address" "$path"
 		walls+=($(($(now_ms) - start)))
 	done
 	after=$(serve_ticks)
-	log "RESULT | $size | GET /stats | $(printf '%s\n' "${walls[@]}" | median) ms | $(printf '%s\n' "${walls[@]}" | sort -n | tail -n1) ms | $(((after - before) * TICK_MS / SAMPLES)) ms cpu | - | $(wc -c </tmp/stats-cost.out) bytes |"
-	check "GET /stats answers with the route rows at $size elements" stats_ok
+	log "RESULT | $size | GET $path | $(printf '%s\n' "${walls[@]}" | median) ms | $(printf '%s\n' "${walls[@]}" | sort -n | tail -n1) ms | $(((after - before) * TICK_MS / SAMPLES)) ms cpu | - | $(wc -c </tmp/stats-cost.out) bytes |"
+	check "GET $path answers with the route rows at $size elements" request_ok "$want"
 }
 
 # $1 size, $2 label, the rest the command. CPU and memory come from GNU time, inside the namespace.
@@ -119,7 +123,7 @@ write_zone 0
 apply_cost_config || die "first apply"
 # Not in_ns: a backgrounded function is a subshell, and kill would miss serve inside it.
 ip netns exec proxy env EVUPROXY_API_TOKEN=e2e evuproxy --config /etc/evuproxy/config.yaml serve \
-	--listen "$API" --token-file "" </dev/null >/tmp/serve-cost.log 2>&1 &
+	--listen "$API" --metrics-listen "$METRICS" --token-file "" </dev/null >/tmp/serve-cost.log 2>&1 &
 serve_pid=$!
 wait_for_listener proxy -t "$API"
 
@@ -136,14 +140,15 @@ for size in "${SIZES[@]}"; do
 	sleep "$IDLE_SECONDS"
 	log "RESULT | $size | serve idle, ${IDLE_SECONDS}s | - | - | $((($(serve_ticks) - idle_before) * TICK_MS)) ms cpu | - | - |"
 
-	measure_stats "$size"
+	measure_request "$size" "$API" /api/v1/stats '"route_accepted":[{'
+	measure_request "$size" "$API" /api/v1/stats/route-accepted '"route_accepted":[{'
+	measure_request "$size" "$METRICS" /metrics 'evuproxy_route_accepted_packets_total{'
 	measure_command "$size" "wg show dump" wg show "$PROXY_IFACE" dump
 	measure_command "$size" "nft -a list table inet" nft -a list table inet evuproxy
 	measure_command "$size" "nft -a list table ip" nft -a list table ip evuproxy
 	measure_command "$size" "nft -a -t list table inet" nft -a -t list table inet evuproxy
 	measure_command "$size" "nft -a -t list table ip" nft -a -t list table ip evuproxy
-	measure_command "$size" "nft list chain route_accepted" nft list chain inet evuproxy route_accepted
-	measure_command "$size" "nft -t list chain route_accepted" nft -t list chain inet evuproxy route_accepted
+	measure_command "$size" "nft list chain route_accepted" nft list chain inet evuproxy_accepted route_accepted
 done
 
 kill "$serve_pid" 2>/dev/null

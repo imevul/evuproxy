@@ -66,6 +66,18 @@ var nftRawPortRE = regexp.MustCompile(`0x([0-9a-fA-F]+) \[invalid type\]`)
 
 // StatsFromHost collects wg + nft counter snippets. Commands may fail on a dev machine without wg/nft.
 func StatsFromHost(cfgPath string) (*Stats, error) {
+	st, err := StatsWithoutDropCounters(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+	st.NFTables = append(st.NFTables, nftCounterLines("inet", "evuproxy")...)
+	st.NFTables = append(st.NFTables, nftCounterLines("ip", "evuproxy")...)
+	return st, nil
+}
+
+// StatsWithoutDropCounters is StatsFromHost without NFTables, for callers that don't use it. Those
+// whole-table listings are the part that grows with the geo sets, on nft older than 1.1.
+func StatsWithoutDropCounters(cfgPath string) (*Stats, error) {
 	c, err := config.Load(cfgPath)
 	if err != nil {
 		return nil, err
@@ -77,20 +89,18 @@ func StatsFromHost(cfgPath string) (*Stats, error) {
 	} else {
 		st.WireGuardPeers = peers
 	}
-	st.NFTables = append(st.NFTables, nftCounterLines("inet", "evuproxy")...)
-	st.NFTables = append(st.NFTables, nftCounterLines("ip", "evuproxy")...)
-	st.RouteAccepted = routeAcceptedCounters(cfgPath)
+	st.RouteAccepted = RouteAcceptedCounters(cfgPath)
 	return st, nil
 }
 
-// routeAcceptedCounters reads the live counters. It describes them from the applied config,
+// RouteAcceptedCounters reads the live counters. It describes them from the applied config,
 // because the live rules were rendered from that, and the saved one may have moved routes since.
-func routeAcceptedCounters(cfgPath string) []RouteAcceptedCounter {
+func RouteAcceptedCounters(cfgPath string) []RouteAcceptedCounter {
 	c := LoadAppliedConfig(cfgPath)
 	if c == nil {
 		return []RouteAcceptedCounter{}
 	}
-	out, err := runCmdCombined(context.Background(), "nft", "list", "chain", "inet", "evuproxy", gen.RouteAcceptedChain)
+	out, err := runCmdCombined(context.Background(), "nft", "list", "chain", "inet", gen.RouteAcceptedTable, gen.RouteAcceptedChain)
 	if err != nil {
 		return []RouteAcceptedCounter{}
 	}

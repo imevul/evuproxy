@@ -114,6 +114,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	s.jsonOK(w, st)
 }
 
+// handleStatsRouteAccepted is route_accepted alone, for a page that polls it. GET /stats also lists
+// the whole tables, which grows with the geo sets on nft older than 1.1.
+func (s *Server) handleStatsRouteAccepted(w http.ResponseWriter, r *http.Request) {
+	s.jsonOK(w, map[string]any{"route_accepted": apply.RouteAcceptedCounters(s.Config)})
+}
+
 func (s *Server) handleAbout(w http.ResponseWriter, r *http.Request) {
 	v := strings.TrimSpace(s.Version)
 	if v == "" {

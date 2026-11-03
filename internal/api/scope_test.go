@@ -37,6 +37,7 @@ var wantRouteScopes = map[string]tokenScope{
 	"GET /api/v1/about":                 scopeWrite,
 	"GET /api/v1/reload/progress":       scopeWrite,
 	"GET /api/v1/apply/session":         scopeWrite,
+	"GET /api/v1/stats/route-accepted":  scopeWrite,
 
 	"POST /api/v1/reload":                          scopeWrite,
 	"POST /api/v1/apply/confirm":                   scopeWrite,

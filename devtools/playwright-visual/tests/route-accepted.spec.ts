@@ -1,5 +1,5 @@
 /**
- * The Accepted column on Routes. The counts come from GET /stats route_accepted, which
+ * The Accepted column on Routes. The counts come from GET /stats/route-accepted, which
  * describes the applied config, while the rows come from the saved one.
  */
 import AxeBuilder from "@axe-core/playwright";
@@ -8,6 +8,8 @@ import { expect, test, type Page } from "./fixtures";
 import { SCHEMES, gotoRoute, seed } from "./helpers";
 
 const origin = process.env.PW_BASE_URL?.trim() || "http://127.0.0.1:9080";
+
+const STATS = "**/api/v1/stats/route-accepted";
 
 const CONFIG = {
   wireguard: { interface: "wg0", listen_port: 51820, private_key_file: "/key", address: "10.100.0.1/24" },
@@ -56,7 +58,7 @@ test.describe("Accepted on Routes", () => {
   async function open(page: Page, scheme: (typeof SCHEMES)[number] = "light") {
     await seed(page, { scheme });
     await page.route("**/api/v1/config", (route) => route.fulfill({ json: config }));
-    await page.route("**/api/v1/stats", (route) => route.fulfill({ json: { route_accepted: accepted } }));
+    await page.route(STATS, (route) => route.fulfill({ json: { route_accepted: accepted } }));
     await gotoRoute(page, origin, "routes");
     await expect(row(page, 0)).toBeVisible();
     // The rows don't wait for GET /stats, and these tests start from its answer.
@@ -121,7 +123,7 @@ test.describe("Accepted on Routes", () => {
   test("the table still loads when GET /stats fails", async ({ page }) => {
     await seed(page, { scheme: "light" });
     await page.route("**/api/v1/config", (route) => route.fulfill({ json: CONFIG }));
-    await page.route("**/api/v1/stats", (route) => route.fulfill({ status: 500, json: { error: "no" } }));
+    await page.route(STATS, (route) => route.fulfill({ status: 500, json: { error: "no" } }));
     await gotoRoute(page, origin, "routes");
     await expect(row(page, 0)).toBeVisible();
     await expect(cell(page, 0)).toHaveText("—");
@@ -137,7 +139,7 @@ test.describe("Accepted on Routes", () => {
     const answer = new Promise<{ status: number; json: unknown }>((resolve) => (release = resolve));
     await seed(page, { scheme: "light" });
     await page.route("**/api/v1/config", (route) => route.fulfill({ json: CONFIG }));
-    await page.route("**/api/v1/stats", async (route) => route.fulfill(await answer));
+    await page.route(STATS, async (route) => route.fulfill(await answer));
     await page.goto(origin + "/#/routes");
     return release;
   }
@@ -290,7 +292,7 @@ test.describe("Accepted on Routes", () => {
     await page.evaluate(() => {
       (window as any).__acceptedUnit = document.querySelector('tr[data-row="0"] .route-accepted-cell span');
     });
-    const stats = page.waitForResponse("**/api/v1/stats");
+    const stats = page.waitForResponse(STATS);
     await page.clock.fastForward(15_000);
     await stats;
     expect(
@@ -303,8 +305,8 @@ test.describe("Accepted on Routes", () => {
   test("a failed poll leaves what's on screen, and leaving the page stops polling", async ({ page }) => {
     await page.clock.install();
     await open(page);
-    await page.route("**/api/v1/stats", (route) => route.fulfill({ status: 500, json: { error: "no" } }));
-    const failed = page.waitForResponse("**/api/v1/stats");
+    await page.route(STATS, (route) => route.fulfill({ status: 500, json: { error: "no" } }));
+    const failed = page.waitForResponse(STATS);
     await page.clock.fastForward(15_000);
     await failed;
     await expect(cell(page, 0)).toHaveText(`${fmt(1234567)} pkts · 6.8 MiB`);
@@ -313,7 +315,7 @@ test.describe("Accepted on Routes", () => {
     await page.locator("#page-inbound").waitFor({ state: "visible" });
     let requests = 0;
     page.on("request", (req) => {
-      if (req.url().endsWith("/api/v1/stats")) requests++;
+      if (req.url().endsWith("/api/v1/stats/route-accepted")) requests++;
     });
     await page.clock.fastForward(45_000);
     expect(requests).toBe(0);

@@ -23,6 +23,7 @@ const STEP_LABELS = {
 const PROGRESS_POLL_MS = 400;
 /** How long Done stays up. The toast says the same, so nothing is lost when it goes. */
 const DONE_VISIBLE_MS = 4000;
+const CONFIG_HASH_MISMATCH = "config_hash_mismatch";
 
 let busy = false;
 let doneTimer = 0;
@@ -202,9 +203,12 @@ export function noteConfigRevision(revision) {
 /**
  * Sends the Apply, following its stages for as long as the one request takes. With
  * `confirmSeconds` the host reverts unless it is confirmed in that time. Any risks stay
- * on screen for that decision.
+ * on screen for that decision. `configHash` names the file the check passed, and the host
+ * refuses the Apply if that is no longer the saved one. An API older than this UI sends
+ * no hash and ignores this; a current one refuses an Apply without it. Never `force`:
+ * that is for automation, and would take away the check this flow just ran.
  */
-async function runReload(confirmSeconds, keepWarnings) {
+async function runReload(configHash, confirmSeconds, keepWarnings) {
   let step = "firewall";
   showProgress(step);
   setApplyMsg("");
@@ -223,12 +227,28 @@ async function runReload(confirmSeconds, keepWarnings) {
   const timer = setInterval(() => void poll(), PROGRESS_POLL_MS);
   let session = null;
   try {
+    const fields = {
+      ...(configHash ? { config_hash: configHash } : {}),
+      ...(confirmSeconds ? { confirm_timeout_seconds: confirmSeconds } : {}),
+    };
     const res = await api("/v1/reload", {
       method: "POST",
-      ...(confirmSeconds ? { body: JSON.stringify({ confirm_timeout_seconds: confirmSeconds }) } : {}),
+      ...(Object.keys(fields).length ? { body: JSON.stringify(fields) } : {}),
     });
     session = (res && res.session) || null;
   } catch (e) {
+    if (e.errorCode === CONFIG_HASH_MISMATCH) {
+      // Nothing was applied. The tick and the verdict were for the config that's gone, and
+      // the screen is still showing it. Refreshed here, while `busy` stops the new revision
+      // clearing this message. A failed refresh has its own message and changes nothing.
+      polling = false;
+      clearInterval(timer);
+      invalidateCheck();
+      showProgress("validate", true);
+      setApplyMsg("The saved config changed after this check, so nothing was applied. Review it, then Apply again.", true);
+      await afterApply().catch(() => {});
+      return false;
+    }
     showProgress(step, true);
     setApplyMsg(applyErrorText(e), true);
     return false;
@@ -272,7 +292,7 @@ async function applyWithCheck() {
     return false;
   }
   const risks = lockoutRisks(res);
-  if (mode.confirm) return runReload(mode.timeoutSeconds, risks.length > 0);
+  if (mode.confirm) return runReload(res.config_hash, mode.timeoutSeconds, risks.length > 0);
   if (risks.length) {
     const ack = $("pending-lockout-ack");
     if (!ack.checked || state.pendingLockoutAckSig !== lockoutSignature(risks)) {
@@ -282,7 +302,7 @@ async function applyWithCheck() {
       return false;
     }
   }
-  return runReload(0, false);
+  return runReload(res.config_hash, 0, false);
 }
 
 function onApplyClick(button) {

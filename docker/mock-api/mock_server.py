@@ -1337,6 +1337,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/v1/stats":
             return self._send_json(200, _mock_stats_response())
+        if path == "/api/v1/stats/route-accepted":
+            return self._send_json(200, {"route_accepted": _mock_route_accepted()})
         if path == "/api/v1/auto-pause":
             return self._send_json(200, {"paused_routes": _mock_auto_paused_routes()})
         if path == "/api/v1/client-ip":
@@ -1592,16 +1594,17 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 )
             warnings.extend(_input_allow_warnings(cfg, MOCK_CONFIG_BASELINE))
-            return self._send_json(
-                200,
-                {
-                    "ok": True,
-                    "warnings": warnings,
-                    "detected_client_ip": "203.0.113.50",
-                    "ip_detection_source": "direct",
-                    "validated_from_draft": bool(isinstance(body, dict) and body),
-                },
-            )
+            from_draft = bool(isinstance(body, dict) and body)
+            result = {
+                "ok": True,
+                "warnings": warnings,
+                "detected_client_ip": "203.0.113.50",
+                "ip_detection_source": "direct",
+                "validated_from_draft": from_draft,
+            }
+            if not from_draft:
+                result["config_hash"] = _disk_config_sha()
+            return self._send_json(200, result)
         if path == "/api/v1/geo/check-ip":
             body = self._read_json_body(MAX_JSON_PUT) if _content_len(self) else {}
             if not isinstance(body, dict):
@@ -1800,14 +1803,34 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = json.loads(raw_body) if raw_body.lstrip().startswith(b"{") else {}
                 timeout = int(body.get("confirm_timeout_seconds") or 0)
+                config_hash = body.get("config_hash") or ""
+                force = body.get("force") or False
             except (ValueError, TypeError):
                 return self._send_json(400, {"error": "invalid reload body", "error_code": "invalid_reload_body"})
             if timeout and not 10 <= timeout <= 3600:
                 return self._send_json(400, {"error": "invalid reload body", "error_code": "invalid_reload_body"})
+            if not isinstance(config_hash, str) or not isinstance(force, bool) or (force and config_hash):
+                return self._send_json(400, {"error": "invalid reload body", "error_code": "invalid_reload_body"})
+            if not config_hash and not force:
+                return self._send_json(
+                    409,
+                    {
+                        "error": "send the config_hash from POST /validate, or force to apply without a check",
+                        "error_code": "config_hash_required",
+                    },
+                )
             if MOCK_SESSION is not None and not timeout:
                 return self._send_json(
                     409,
                     {"error": "an Apply is waiting for confirmation", "error_code": "apply_session_active"},
+                )
+            if config_hash and config_hash != _disk_config_sha():
+                return self._send_json(
+                    409,
+                    {
+                        "error": "config.yaml changed after it was checked, so nothing was applied: check it again",
+                        "error_code": "config_hash_mismatch",
+                    },
                 )
             if timeout:
                 if MOCK_SESSION is None:

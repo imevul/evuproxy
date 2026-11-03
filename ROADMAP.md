@@ -238,7 +238,7 @@ Drop visibility:
 
 **Goal:** reduce the damage a single leaked token or a script on the UI origin can do. Today one token grants full admin access.
 
-- [ ] Server-side apply gate: `/validate` returns the evaluated config hash, and `/reload` answers 409 without a matching acknowledgement, with an explicit `force` for automation. This closes the gap where another tab, operator or the CLI saves config between the check and the reload
+- [x] Server-side apply gate: `/validate` returns the evaluated config hash, and `/reload` answers 409 without a matching acknowledgement, with an explicit `force` for automation. This closes the gap where another tab, operator or the CLI saves config between the check and the reload
 - [ ] Strict Content-Security-Policy for the static UI
 - [x] CSRF hardening beyond bearer tokens: state-changing browser requests from origins not on `--cors-origins` are refused
 - [x] Separate read and write API tokens: an optional read token limited to status, overview, stats, logs, events and metrics

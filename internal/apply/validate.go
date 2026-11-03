@@ -28,6 +28,7 @@ type ValidateResult struct {
 	IPDetectionSource  string           `json:"ip_detection_source"`
 	IPDetectionNote    string           `json:"ip_detection_note,omitempty"`
 	ValidatedFromDraft bool             `json:"validated_from_draft,omitempty"`
+	ConfigHash         string           `json:"config_hash,omitempty"`
 }
 
 // ValidateConfig runs schema validation, artifact generation, and nft -c without applying.

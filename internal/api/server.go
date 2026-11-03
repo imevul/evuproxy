@@ -34,9 +34,9 @@ type Server struct {
 	// ReadToken is an optional second token, limited to the read routes in apiRoutes.
 	ReadToken string
 	Config    string
-	MetricsDB             string
-	Logger                *slog.Logger
-	Version               string
+	MetricsDB string
+	Logger    *slog.Logger
+	Version   string
 	// GeoIP is an optional MaxMind GeoLite2 / GeoIP2 Country MMDB reader. When set, GET /api/v1/logs
 	// includes a line_geo array (same order as lines) with src_cc and dst_cc (lowercase ISO 3166-1 alpha-2).
 	// The caller should Close the reader when the process exits.
@@ -189,6 +189,7 @@ func (s *Server) apiRoutes() []apiRoute {
 		{pattern: "PUT /api/v1/config/notes", handler: s.handleConfigNotesPut},
 		{pattern: "GET /api/v1/metrics/peers", scope: scopeRead, handler: s.handleMetricsPeers},
 		{pattern: "GET /api/v1/stats", scope: scopeRead, handler: s.handleStats},
+		{pattern: "GET /api/v1/stats/route-accepted", handler: s.handleStatsRouteAccepted},
 		{pattern: "GET /api/v1/about", handler: s.handleAbout},
 		{pattern: "GET /api/v1/logs", scope: scopeRead, handler: s.handleLogs},
 		{pattern: "GET /api/v1/diagnostics.md", handler: s.handleDiagnosticsMD},
