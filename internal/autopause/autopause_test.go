@@ -521,3 +521,61 @@ func TestRouteIndexShift_keepsPauseWithoutEvents(t *testing.T) {
 		t.Fatalf("paused = %v", got)
 	}
 }
+
+func TestRenameWhilePaused_updatesNamesWithoutEvents(t *testing.T) {
+	c := testConfig()
+	c.Forwarding.Routes[0].Name = "old"
+	p := newFakeProber()
+	p.offline(keyA)
+	l := newLoop(c, p)
+	var details []string
+	l.Emit = func(r eventlog.Record) { details = append(details, r.Detail) }
+	changes := 0
+	l.OnChange = func([]PausedRoute) { changes++ }
+	tickN(l, 3)
+
+	c.Forwarding.Routes[0].Name = "new"
+	c.Peers[0].Name = "renamed"
+	tickN(l, 1)
+	got := l.PausedRoutes()
+	if len(got) != 1 || got[0].Name != "new" || got[0].Peer != "renamed" {
+		t.Fatalf("paused = %+v, want the new names", got)
+	}
+	if len(details) != 1 || changes != 1 {
+		t.Fatalf("rename reported as a change: details = %v, OnChange calls = %d", details, changes)
+	}
+
+	p.online(keyA)
+	tickN(l, 2)
+	want := "new: tcp 25565 -> 10.100.0.2 (peer renamed)"
+	if len(details) != 2 || details[1] != want {
+		t.Fatalf("details = %v, want resume %q", details, want)
+	}
+}
+
+func TestPortReorderWhilePaused_noEvents(t *testing.T) {
+	c := testConfig()
+	c.Forwarding.Routes[0].Ports = []string{"80", "443"}
+	p := newFakeProber()
+	p.offline(keyA)
+	l := newLoop(c, p)
+	var events []string
+	l.Emit = func(r eventlog.Record) { events = append(events, r.Event) }
+	changes := 0
+	l.OnChange = func([]PausedRoute) { changes++ }
+	tickN(l, 3)
+
+	c.Forwarding.Routes[0].Ports = []string{"443", "80"}
+	tickN(l, 1)
+	if len(events) != 1 || changes != 1 {
+		t.Fatalf("reorder reported as a change: events = %v, OnChange calls = %d", events, changes)
+	}
+	// The key sorts a copy, so the ports keep their config order.
+	got := l.PausedRoutes()
+	if len(got) != 1 || got[0].Ports[0] != "443" || got[0].Ports[1] != "80" {
+		t.Fatalf("paused = %+v, want ports in config order", got)
+	}
+	if ports := c.Forwarding.Routes[0].Ports; ports[0] != "443" || ports[1] != "80" {
+		t.Fatalf("config ports changed: %v", ports)
+	}
+}

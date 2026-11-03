@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -64,8 +65,11 @@ type PausedRoute struct {
 	Peer     string
 }
 
+// key identifies the route across ticks. Names and port order are left out, so editing them
+// while paused isn't a change to the paused set.
 func (r PausedRoute) key() string {
-	return strings.ToLower(r.Proto) + "\x00" + strings.Join(r.Ports, ",") + "\x00" + r.TargetIP
+	ports := slices.Sorted(slices.Values(r.Ports))
+	return strings.ToLower(r.Proto) + "\x00" + strings.Join(ports, ",") + "\x00" + r.TargetIP
 }
 
 func (r PausedRoute) String() string {
@@ -326,13 +330,11 @@ func (l *Loop) publish(next []PausedRoute) {
 			l.emit(eventlog.Record{Event: "route_auto_resumed", Detail: fmt.Sprintf("%s (peer %s)", r, r.Peer)})
 		}
 	}
-	if !changed {
-		return
-	}
+	// Stored even when the set is the same, so PausedRoutes has current names and port order.
 	l.mu.Lock()
 	l.paused = next
 	l.mu.Unlock()
-	if l.OnChange != nil {
+	if changed && l.OnChange != nil {
 		l.OnChange(append([]PausedRoute(nil), next...))
 	}
 }
