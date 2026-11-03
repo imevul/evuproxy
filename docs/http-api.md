@@ -222,9 +222,29 @@ Host metrics are exposed on a **separate HTTP listener** from the JSON API. **Di
 
 - Enable: `evuproxy serve --metrics-listen 127.0.0.1:9848` or environment variable **`EVUPROXY_METRICS_LISTEN`**.
 - Endpoint: **`GET /metrics`** (Prometheus text exposition). **No authentication** — must bind to loopback (`127.0.0.1`, `::1`, or `localhost`). Non-loopback addresses are **rejected** unless you also pass **`--metrics-listen-insecure`** (not recommended).
-- Metrics include: `evuproxy_apply_success_total`, `evuproxy_apply_failure_total`, `evuproxy_geo_last_success_timestamp_seconds`, `evuproxy_peers_online`, `evuproxy_maintenance_mode`.
+- Metrics include: `evuproxy_apply_success_total`, `evuproxy_apply_failure_total`, `evuproxy_geo_last_success_timestamp_seconds`, `evuproxy_peers_online`, `evuproxy_maintenance_mode`, and the [route accepted metrics](#route-accepted-metrics).
 
-Example scrape config:
+### Route accepted metrics
+
+`evuproxy_route_accepted_packets_total` and `evuproxy_route_accepted_bytes_total` are counters with the same numbers as [`route_accepted` in `GET /stats`](#route-accepted-counters), and they mean the same thing. **This is accepted traffic. It does not mean players or legitimate clients.**
+
+```
+evuproxy_route_accepted_packets_total{route_index="0",name="Minecraft",proto="tcp"} 8516
+evuproxy_route_accepted_bytes_total{route_index="0",name="Minecraft",proto="tcp"} 7082475
+```
+
+| Label | Meaning |
+|-------|---------|
+| `route_index` | The route's position in `forwarding.routes` of the **applied** config. Names are optional and needn't be unique, so this is what tells routes apart. |
+| `name` | The route's name, empty if it has none. |
+| `proto` | `tcp` or `udp`. A route with both protocols has a series for each. |
+
+- **Resets:** the counters go back to zero on each Apply, revert or reboot. `rate()` and `increase()` handle a reset, but traffic since the last scrape before it is lost.
+- **Changed routes:** moving a route changes its `route_index`, and renaming it changes `name`. Either starts a new series, and the old one goes stale.
+- **No samples:** the metrics have no samples when `route_accepted` is empty, such as in maintenance mode or when `nft` is unavailable.
+- **Cardinality:** at most 4 series per route: packets and bytes, for each protocol. The count follows `forwarding.routes` and not the traffic, because there are no labels for sources, ports or targets, and a port range is still one series. Disabled routes have none. EvuProxy has no cap or switch for these metrics, so on a host with many routes, use `metric_relabel_configs` to drop what you don't need.
+
+### Example scrape config
 
 ```yaml
 scrape_configs:
