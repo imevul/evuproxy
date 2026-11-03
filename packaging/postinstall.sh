@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs after a .deb or RPM install or upgrade. Sets up /etc/evuproxy the way scripts/install.sh
 # does, except for what would change the host's networking: no enabling or starting
-# evuproxy.service, no nftables.service, no IP forwarding. The README has those steps.
+# evuproxy.service, no nftables.service, no IP forwarding. The README has the steps it needs.
 set -e
 
 # dpkg: configure [old version]. rpm: 1 on install, 2 on upgrade.

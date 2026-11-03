@@ -12,7 +12,10 @@
 | Reinstall, purge | A reinstall keeps the config, and a dpkg purge deletes `/etc/evuproxy`. |
 | Existing config | A `config.yaml` that was there before the first install is kept. |
 | README steps | `evuproxy reload`, the units and the API work on real nftables and WireGuard. |
+| Boot | Starting the boot target applies the rules through `evuproxy.service`, with `nftables.service` off. |
+| Default removal | A plain `dnf remove`, or `apt remove` and `apt autoremove`, takes `nftables` along and leaves the rules and tunnel up. |
+| `nftables.service` running | Removal that keeps `nftables` leaves the rules. Removal that takes it along flushes them on RPM distros and leaves them on Debian and Ubuntu, as the README says. Disabling the service leaves them, and stopping it flushes them. |
 
 The containers are privileged because systemd needs a writable cgroup tree, but each keeps its own network namespace, so rules and forwarding changes stay inside it. A container exits by itself when its checks finish, and `run.sh` kills it at the deadline if they don't. Unlike [`make e2e`](../e2e/README.md), this doesn't test traffic.
 
-Containers don't cover everything a host has: SELinux stays in the host's hands, and a real boot doesn't happen, so `evuproxy.service` is started by hand here.
+Containers don't cover everything a host has: SELinux stays in the host's hands, and a real boot doesn't happen, so the boot stage clears the rules and tunnel and starts `multi-user.target` again.

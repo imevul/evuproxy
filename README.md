@@ -50,11 +50,11 @@ sudo nano /etc/evuproxy/config.yaml
 echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-evuproxy-forwarding.conf
 sudo sysctl -w net.ipv4.ip_forward=1
 sudo evuproxy reload --config /etc/evuproxy/config.yaml
-sudo systemctl enable nftables.service evuproxy.service evuproxy-geo.timer
+sudo systemctl enable evuproxy.service evuproxy-geo.timer
 sudo systemctl enable --now evuproxy-api.service   # optional, the HTTP API
 ```
 
-`evuproxy-metrics.service` is packaged too, and also off until you enable it.
+`evuproxy-metrics.service` is packaged too, and also off until you enable it. `nftables.service` isn't needed, because `evuproxy.service` loads the rules itself at boot.
 
 **Upgrade** by installing the newer package the same way. Your config, keys and tokens stay as they are. A running API or metrics collector restarts, which leaves a [confirm window](docs/config.md#confirm-or-revert-apply) running. `evuproxy.service` does not restart, since that would reload the firewall, so the current rules stay until you run `evuproxy reload` or the host reboots. `scripts/update.sh` is for git installs and doesn't update packages.
 
@@ -62,9 +62,9 @@ sudo systemctl enable --now evuproxy-api.service   # optional, the HTTP API
 
 - `/etc/evuproxy` stays. Only `sudo apt purge evuproxy` deletes it, with your WireGuard private key, tokens and logs. On RPM distros, delete it yourself.
 - The **firewall rules and WireGuard interface stay up** until a reboot, or until you remove them with `nft delete table` and `ip link delete`. Generated configs stay under `/etc/wireguard`.
-- `dnf remove` also removes `nftables` and `wireguard-tools` if nothing else needs them. Rules already loaded aren't affected.
+- `dnf remove` also removes `nftables` and `wireguard-tools` if nothing else needs them. Rules already loaded aren't affected, unless `nftables.service` is running. **Removing `nftables` then stops that service, which flushes every rule on the host, not only EvuProxy's.** If you enabled that service yourself, use `sudo dnf remove --setopt=clean_requirements_on_remove=False evuproxy`, which keeps `nftables`. Stopping the service by hand flushes the rules too. `apt remove` and `apt autoremove` left the rules in place on Debian 12 and Ubuntu 24.04, with the service running or not.
 
-**Moving from `install.sh`:** run `./scripts/uninstall.sh` first, without `PURGE`. It keeps `/etc/evuproxy`. Otherwise the old units in `/etc/systemd/system` keep overriding the packaged ones and keep running `/usr/local/bin/evuproxy`. Then install the package and repeat the `systemctl enable` and sysctl steps above; `uninstall.sh` leaves your rules loaded.
+**Moving from `install.sh`:** run `./scripts/uninstall.sh` first, without `PURGE`. It keeps `/etc/evuproxy`. Otherwise the old units in `/etc/systemd/system` keep overriding the packaged ones and keep running `/usr/local/bin/evuproxy`. Then install the package and repeat the `systemctl enable` and sysctl steps above; `uninstall.sh` leaves your rules loaded. `install.sh` enables `nftables.service` and `uninstall.sh` leaves it enabled, so it runs after a reboot and the warning under **Remove** can apply. Unless you use it for rules of your own, turn it off with `sudo systemctl disable nftables.service`, without `--now`, which leaves loaded rules alone.
 
 ### Peer onboarding script URLs (optional)
 

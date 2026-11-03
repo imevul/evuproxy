@@ -34,14 +34,26 @@ if command -v dpkg >/dev/null; then
 	pm() { timeout 300 apt-get "$@" -y; }
 	# Dependencies were never installed, so the first install needs the package lists.
 	timeout 300 apt-get update -qq || die "apt-get update"
-	package_absent() { [ "$(dpkg-query -W -f '${db:Status-Status}' evuproxy 2>/dev/null)" != installed ]; }
+	package_absent() { [ "$(dpkg-query -W -f '${db:Status-Status}' "$1" 2>/dev/null)" != installed ]; }
 	state_is_clean() { [ -z "$(dpkg --audit)" ]; }
+	# apt keeps dependencies until an autoremove.
+	remove_with_dependencies() { pm_clean remove evuproxy && pm_clean autoremove; }
 else
 	new_package() { echo "/pkg/evuproxy-$1-1."*.rpm; }
-	# Without the setopt, dnf remove takes nftables along, and the checks after it need nft.
-	pm() { timeout 300 dnf "$@" -y --setopt=clean_requirements_on_remove=False; }
-	package_absent() { ! rpm -q evuproxy >/dev/null; }
+	# Without the setopt, dnf remove takes nftables along, and most checks after it need nft.
+	dnf_options=(--setopt=clean_requirements_on_remove=False)
+	pm() { timeout 300 dnf "$@" -y "${dnf_options[@]}"; }
+	package_absent() { ! rpm -q "$1" >/dev/null; }
 	state_is_clean() { rpm -q evuproxy >/dev/null && rpm -V evuproxy; }
+	# What a plain dnf remove does.
+	remove_with_dependencies() {
+		local saved=("${dnf_options[@]}") status
+		dnf_options=()
+		pm_clean remove evuproxy
+		status=$?
+		dnf_options=("${saved[@]}")
+		return "$status"
+	}
 fi
 
 # Runs the package manager and rejects maintainer script trouble it would only warn about.
@@ -141,6 +153,15 @@ rules_loaded() {
 	nft list table inet evuproxy >/dev/null
 }
 
+unit_becomes_active() {
+	local i
+	for i in $(seq 1 150); do
+		[ "$(systemctl is-active "$1" 2>&1)" = active ] && return 0
+		sleep 0.2
+	done
+	return 1
+}
+
 # A host can confine /usr/bin/wg-quick by path, and that reaches into a privileged container. Seen
 # on Ubuntu 26.04, where it runs /usr/bin/ip but not AlmaLinux's /usr/sbin/ip. wg-quick looks in
 # its own directory first, so a copy there gets past a limit that belongs to the host, not the
@@ -222,7 +243,7 @@ rm -rf /etc/systemd/system/evuproxy.service.d
 systemctl daemon-reload
 check "removes" pm_clean remove evuproxy
 systemctl daemon-reload
-check "package is gone" package_absent
+check "package is gone" package_absent evuproxy
 check "binary, units and seed gone" packaged_files_gone
 check "API stopped" test "$(systemctl is-active evuproxy-api.service 2>&1)" != active
 check "config and secrets kept" test "$(state_sums)" = "$sums_before"
@@ -265,13 +286,62 @@ echo 1 >/proc/sys/net/ipv4/ip_forward || die "turn on forwarding"
 check "evuproxy reload applies the seed config" evuproxy reload --config "$config"
 check "rules are loaded" rules_loaded
 check "tunnel is up" test -e /sys/class/net/evuproxy0
-check "units enable" systemctl enable -q nftables.service evuproxy.service evuproxy-geo.timer
+check "units enable" systemctl enable -q evuproxy.service evuproxy-geo.timer
 check "evuproxy.service applies from the packaged unit" systemctl start evuproxy.service
 check "API enables and starts" systemctl enable -q --now evuproxy-api.service
 check "API answers" api_answers
+
+echo "--- a boot applies the rules without nftables.service"
+# A container can't reboot, so this clears what a reboot would and asks for the boot target again.
+# --no-block because that target also waits for this script.
+systemctl stop evuproxy.service || die "stop evuproxy.service"
+nft flush ruleset || die "flush rules"
+ip link delete evuproxy0 || die "delete tunnel"
+systemctl start --no-block multi-user.target || die "start multi-user.target"
+check "evuproxy.service started from the boot target" unit_becomes_active evuproxy.service
+check "rules are loaded" rules_loaded
+check "tunnel is up" test -e /sys/class/net/evuproxy0
+check "nftables.service not running" test "$(systemctl is-active nftables.service 2>&1)" != active
+
+echo "--- default removal, following the README"
 rules_before=$(nft list ruleset)
-check "removes" pm_clean remove evuproxy
+check "removes, with dependencies" remove_with_dependencies
+check "nftables went too" package_absent nftables
+check "tunnel stays up" test -e /sys/class/net/evuproxy0
+# Reading the rules takes nft. Installed by hand it would no longer count as a dependency, so it
+# goes again afterwards.
+pm_clean install nftables || die "reinstall nftables"
 check "removal leaves the rules" test "$(nft list ruleset)" = "$rules_before"
+pm_clean remove nftables || die "remove nftables"
+
+echo "--- removal with nftables.service running"
+check "installs" install_version 0.0.2
+nft flush ruleset || die "flush rules"
+# Started first, as at boot: its config can flush what is already there.
+check "nftables.service starts" systemctl enable -q --now nftables.service
+check "evuproxy reload applies the config" evuproxy reload --config "$config"
+rules_before=$(nft list ruleset)
+check "removes, keeping nftables" pm_clean remove evuproxy
+check "nftables.service still running" test "$(systemctl is-active nftables.service 2>&1)" = active
+check "keeping nftables leaves the rules" test "$(nft list ruleset)" = "$rules_before"
+check "nftables.service disables" systemctl disable -q nftables.service
+check "disabling it leaves the rules" test "$(nft list ruleset)" = "$rules_before"
+check "nftables.service enables again" systemctl enable -q nftables.service
+check "installs again" install_version 0.0.2
+check "rules are there to lose" rules_loaded
+check "removes, with dependencies" remove_with_dependencies
+check "nftables went too" package_absent nftables
+pm_clean install nftables || die "reinstall nftables"
+# Both are what the README says. dnf stops the service, and stopping it flushes everything.
+if command -v dpkg >/dev/null; then
+	check "autoremove left the rules" test "$(nft list ruleset)" = "$rules_before"
+else
+	check "dnf flushed every rule" test -z "$(nft list ruleset)"
+fi
+systemctl start nftables.service || die "start nftables.service"
+nft add table inet marker || die "add marker table"
+check "nftables.service stops" systemctl stop nftables.service
+check "stopping it flushed every rule" test -z "$(nft list ruleset)"
 
 if [ "$failures" -gt 0 ]; then
 	echo "package-test: $failures check(s) failed"
