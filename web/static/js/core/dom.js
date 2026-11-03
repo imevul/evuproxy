@@ -27,6 +27,38 @@ export function downloadTextFile(filename, text, mime) {
   URL.revokeObjectURL(a.href);
 }
 
+/*
+ * Motion is skipped for anything driven by the keyboard: at that speed it only
+ * delays the next key press.
+ */
+let keyboardDriven = false;
+document.addEventListener("keydown", () => { keyboardDriven = true; }, true);
+document.addEventListener("pointerdown", () => { keyboardDriven = false; }, true);
+
+export function lastInputWasKeyboard() {
+  return keyboardDriven;
+}
+
+/**
+ * Fades a removed row before the table re-renders without it. Rows below then
+ * move up at once: height is deliberately not animated.
+ */
+export async function fadeOutRow(tr) {
+  if (!tr || !tr.isConnected || keyboardDriven) return;
+  tr.classList.add("is-row-leaving");
+  // A re-render cancels the transition, which rejects `finished`; the row is gone either way.
+  await Promise.allSettled(tr.getAnimations().map((a) => a.finished));
+}
+
+/** Before a token exists nothing has failed, so this reads neutral rather than as an error. */
+export function setApiNotConnected() {
+  const el = $("api-status");
+  if (!el) return;
+  if (el.textContent !== "Not connected") el.textContent = "Not connected";
+  el.classList.remove("evu-pill--ok", "evu-pill--err");
+  el.title = "No API token in this browser";
+}
+
 export function setApiStatus(ok, detail) {
   const el = $("api-status");
   if (!el) return;
@@ -86,16 +118,92 @@ export function markFieldInvalid(msgEl, field) {
   field.focus();
 }
 
-export function applyPeersRoutesTableFilter() {
-  const q = ($("global-table-search") && $("global-table-search").value.trim().toLowerCase()) || "";
-  document.querySelectorAll("#peers-table-wrap tbody tr[data-filter]").forEach((tr) => {
+/** Applies the toolbar filter tied to the table in `wrapId`. */
+export function applyTableFilter(wrapId) {
+  const input = document.querySelector(`.table-filter[data-filter-table="${wrapId}"]`);
+  const q = (input && input.value.trim().toLowerCase()) || "";
+  document.querySelectorAll(`#${wrapId} tbody tr[data-filter]`).forEach((tr) => {
     const h = tr.getAttribute("data-filter") || "";
     tr.classList.toggle("is-filter-hidden", !!q && !h.includes(q));
   });
-  document.querySelectorAll("#routes-table-wrap tbody tr[data-filter]").forEach((tr) => {
-    const h = tr.getAttribute("data-filter") || "";
-    tr.classList.toggle("is-filter-hidden", !!q && !h.includes(q));
-  });
+}
+
+/** Message inside an editor dialog; the page's own message sits behind the backdrop. */
+export function setEditorMsg(id, text, field) {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("err", !!text);
+  if (field) markFieldInvalid(el, field);
+  else clearFieldInvalid(el);
+}
+
+/*
+ * A failed row switch reports under its own row. The tables re-render from config
+ * (the peers table on every ping poll), so the error lives here rather than in the
+ * DOM, or the next render would dismiss it.
+ */
+const rowErrors = new Map();
+
+export function setRowError(dataAttr, index, message) {
+  rowErrors.set(dataAttr, { index, message });
+}
+
+export function clearRowError(dataAttr) {
+  rowErrors.delete(dataAttr);
+}
+
+export function rowErrorHtml(dataAttr, index, colspan) {
+  const err = rowErrors.get(dataAttr);
+  if (!err || err.index !== index) return "";
+  return `<tr class="row-error"><td colspan="${colspan}"><div class="msg err" role="alert">${escapeHtml(err.message)}</div></td></tr>`;
+}
+
+/**
+ * Re-rendering a table destroys the switch that was just used, dropping keyboard
+ * users to the top of the document. Skipped if focus has since moved somewhere real.
+ * If that row is gone (it was last, and removed elsewhere), the new last row takes focus.
+ * `force` is for Undo, where focus sits wherever the closing toast handed it.
+ */
+export function restoreRowSwitchFocus(wrap, dataAttr, index, { force = false } = {}) {
+  if (!force && document.activeElement && document.activeElement !== document.body) return;
+  if (!wrap) return;
+  const inp = wrap.querySelector(`input[${dataAttr}="${index}"]`) || [...wrap.querySelectorAll(`input[${dataAttr}]`)].pop();
+  if (inp) inp.focus();
+}
+
+/**
+ * Focus for a row that just changed: row `index`, else the nearest visible row after it,
+ * then before it, else `fallback` (the Add button on an empty or fully filtered list).
+ * The row itself takes focus, not its Remove button, so a held Enter cannot walk down
+ * the list removing every row. `force` as in restoreRowSwitchFocus.
+ */
+export function focusTableRow(wrap, index, fallback, { force = false } = {}) {
+  if (!force && document.activeElement && document.activeElement !== document.body) return;
+  if (!wrap) return;
+  const rows = [...wrap.querySelectorAll("tbody tr[data-row]")].filter((tr) => tr.getClientRects().length > 0);
+  const target =
+    // Exact first: in a sorted table the rows are not drawn in index order.
+    rows.find((tr) => +tr.getAttribute("data-row") === index) ||
+    rows.find((tr) => +tr.getAttribute("data-row") >= index) ||
+    rows.pop() ||
+    wrap.querySelector(".evu-empty button") ||
+    fallback;
+  if (target) target.focus();
+}
+
+/**
+ * The index focusTableRow needs to land beside a removed row: the next row as drawn, else
+ * the previous one, as an index once `removedAt` is gone. Read before the table re-renders.
+ * In a sorted table that row can be anywhere in config, so `removedAt` alone would jump.
+ */
+export function rowIndexAfterRemoval(wrap, row, removedAt) {
+  const rows = [...wrap.querySelectorAll("tbody tr[data-row]")].filter((tr) => tr.getClientRects().length > 0);
+  const at = rows.indexOf(row);
+  const neighbour = at >= 0 ? rows[at + 1] || rows[at - 1] : null;
+  if (!neighbour) return removedAt;
+  const i = +neighbour.getAttribute("data-row");
+  return i > removedAt ? i - 1 : i;
 }
 
 export function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {
@@ -108,13 +216,23 @@ export function tableDisabledToggleCell(dataAttr, index, disabled, ariaLabel) {
   );
 }
 
+function copyButtonHtml(value, ariaLabel, title) {
+  return `<button type="button" class="evu-btn evu-btn--outline btn-tunnel-ip-copy" data-tunnel-ip-copy="${escapeHtml(value)}" aria-label="${escapeHtml(ariaLabel)}" title="${escapeHtml(title)}"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg></button>`;
+}
+
+/** A public key on one line, shortened; the copy button and the hover both give the whole key. */
+export function publicKeyCellHtml(value, peerName) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return '<td class="mono">—</td>';
+  const label = "Copy public key" + (peerName ? " of " + peerName : "");
+  return `<td class="mono public-key-cell"><span class="tunnel-ip-inner"><span class="public-key-text" title="${escapeHtml(raw)}">${escapeHtml(trunc(raw, 20))}</span>${copyButtonHtml(raw, label, "Copy public key")}</span></td>`;
+}
+
 export function monoIpCopyCellHtml(value, displayName) {
   const raw = String(value ?? "").trim();
   const display = escapeHtml(raw);
   const copyVal = tunnelIpWithoutSuffix(raw);
-  const copyBtn = copyVal
-    ? `<button type="button" class="evu-btn evu-btn--outline btn-tunnel-ip-copy" data-tunnel-ip-copy="${escapeHtml(copyVal)}" aria-label="Copy IP address" title="Copy IP (without subnet mask)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg></button>`
-    : "";
+  const copyBtn = copyVal ? copyButtonHtml(copyVal, "Copy IP address", "Copy IP (without subnet mask)") : "";
   const label = String(displayName ?? "").trim();
   const labelHtml = label ? `<span class="route-target-name">${escapeHtml(label)}</span>` : "";
   const cellClass = label ? "mono tunnel-ip-cell route-target-cell" : "mono tunnel-ip-cell";

@@ -1,5 +1,6 @@
-import { navigate, onHash } from "./core/router.js";
-import { $, applyPeersRoutesTableFilter } from "./core/dom.js";
+import { hasUnsavedEdits, navigate, onHash, reloadCurrentPage } from "./core/router.js";
+import { $, applyTableFilter } from "./core/dom.js";
+import { initConnection } from "./core/connection.js";
 import {
   initModals,
   openModal,
@@ -10,13 +11,14 @@ import {
 import { initTablists } from "./core/tabs.js";
 import { initTokenPage } from "./pages/token.js";
 import { initSettingsPage } from "./pages/settings.js";
-import { initOverviewPage } from "./pages/overview.js";
+import { initApplyBar } from "./core/apply_bar.js";
+import { initOverviewPage, refreshOverviewPage } from "./pages/overview.js";
 import { initPeersPage, closePeerEditor } from "./pages/peers.js";
 import { initRoutesPage, closeRouteEditor, closeRouteProbeModal } from "./pages/routes.js";
 import { initTopologyPage } from "./pages/topology.js";
 import { initInboundPage, closeInboundEditor } from "./pages/inbound.js";
 import { initGeoblockingPage, closeGeoCountryModal } from "./pages/geoblocking.js";
-import { initPendingPage } from "./pages/pending.js";
+import { initPendingPage, refreshPendingBadge, refreshPendingPage } from "./pages/pending.js";
 import { initStatsPage } from "./pages/stats.js";
 import { initLogsPage } from "./pages/logs.js";
 
@@ -113,6 +115,11 @@ document.querySelectorAll(".nav-link").forEach((a) => {
   });
 });
 window.addEventListener("hashchange", () => void onHash());
+window.addEventListener("beforeunload", (ev) => {
+  if (!hasUnsavedEdits()) return;
+  ev.preventDefault();
+  ev.returnValue = "";
+});
 
 const shellMenuBtn = $("shell-menu-toggle");
 if (shellMenuBtn) {
@@ -158,16 +165,18 @@ if (ctxHelpClose) ctxHelpClose.addEventListener("click", closeContextHelpModal);
 const ctxHelpBd = $("context-help-backdrop");
 if (ctxHelpBd) ctxHelpBd.addEventListener("click", closeContextHelpModal);
 
-const gSearch = $("global-table-search");
-if (gSearch) {
-  gSearch.addEventListener("input", () => applyPeersRoutesTableFilter());
-}
+document.querySelectorAll(".table-filter[data-filter-table]").forEach((input) => {
+  input.addEventListener("input", () => applyTableFilter(input.dataset.filterTable));
+});
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "/" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
     const tag = (ev.target && ev.target.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || ev.target?.isContentEditable) return;
+    // Only Peers, Routes and a large Topology have a filter; elsewhere the key does nothing.
+    const filter = document.querySelector(".page:not([hidden]) .table-filter");
+    if (!filter) return;
     ev.preventDefault();
-    if (gSearch) gSearch.focus();
+    filter.focus();
     return;
   }
   const helpKey = ev.key === "?" || (ev.shiftKey && ev.key === "/");
@@ -223,5 +232,15 @@ document.addEventListener("keydown", (ev) => {
 initStatsPage();
 initLogsPage();
 initPendingPage();
+// Before the apply bar: its first poll goes out as it starts, and this has to hear how it went.
+initConnection({ onRecovered: reloadCurrentPage });
+initApplyBar({
+  // Only these two pages show what the host is running against what is saved.
+  afterApply: async () => {
+    await refreshPendingBadge();
+    if (!$("page-pending").hidden) await refreshPendingPage();
+    if (!$("page-overview").hidden) await refreshOverviewPage();
+  },
+});
 
 void onHash();

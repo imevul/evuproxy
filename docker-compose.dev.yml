@@ -7,18 +7,29 @@
 #
 # UI and mock script are bind-mounted: edit web/* or mock_server.py, reload browser
 # or `docker compose -f docker-compose.dev.yml restart mock-api` — no rebuild.
+#
+# mock-api runs as the invoking user so docker/mock-api/state stays removable without root.
+# `make` sets UID/GID for you. Shells don't export them, so if your ids aren't 1000 and you
+# call compose directly, run `export UID GID=$(id -g)` first.
 
 services:
   mock-api:
     build:
       context: ./docker/mock-api
       dockerfile: Dockerfile
+    user: "${UID:-1000}:${GID:-1000}"
     environment:
       MOCK_API_TOKEN: ${MOCK_API_TOKEN:-dev}
+      MOCK_API_READ_TOKEN: ${MOCK_API_READ_TOKEN:-dev-read}
       MOCK_STATE_FILE: /data/mock-config.json
     volumes:
       - ./docker/mock-api/mock_server.py:/app/mock_server.py:ro
-      - ./docker/mock-api/state:/data
+      # state/ is tracked (.gitkeep): if Docker created a missing source it would be root-owned.
+      - type: bind
+        source: ./docker/mock-api/state
+        target: /data
+        bind:
+          create_host_path: false
 
   evuproxy-ui:
     build:

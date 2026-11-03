@@ -1,6 +1,12 @@
 import { state } from "../core/state.js";
-import { $, escapeHtml, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
-import { api, token, applyNavRestriction } from "../core/api.js";
+import { $, escapeHtml, setApiNotConnected, setApiStatus, downloadTextFile, eventsToCsv } from "../core/dom.js";
+import { eventDetail, eventLabel, geoSourceLabel, geoUpdatedMessage, timeHtml } from "../core/format.js";
+import { beginLoading } from "../core/loading.js";
+import { api, token, applyNavRestriction, requestConnectionCheck } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
+import { showToast } from "../core/toast.js";
+import { saveConfigEdit } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
 import { fetchUIPrefsFromServer } from "../core/prefs.js";
 import {
   wgPeerPubKeyMap,
@@ -9,13 +15,6 @@ import {
 } from "../core/peers_data.js";
 import { tunnelToHost } from "../core/net.js";
 import { refreshPendingBadge } from "./pending.js";
-import { openConfirmModal } from "../core/modal.js";
-import {
-  fetchValidateResult,
-  lockoutRiskLines,
-  lockoutRisks,
-  lockoutSignature,
-} from "../core/lockout.js";
 
 /** 1 min aligns with collector buckets; avoids doubling load with full overview refetch. */
 const OVERVIEW_LATENCY_POLL_MS = 60 * 1000;
@@ -67,6 +66,7 @@ async function refreshOverviewLatencyCardOnly() {
     parent.replaceChild(overviewLatencyOverviewCard(met), cur);
   } catch (_) {
     /* retain last rendered chart while API is flaky */
+    if (seq === state.overviewLatencyPollSeq && card.isConnected) setOldDataNote(card, true);
   }
 }
 
@@ -83,6 +83,25 @@ export function restartOverviewEventsPolling() {
   state.overviewEventsTimer = setInterval(refreshOverviewEventsList, 30000);
 }
 
+/** Says in `el` that what it shows is old, since one broken endpoint raises no banner to say so. */
+function setOldDataNote(el, on) {
+  const note = el.querySelector(":scope > .overview-old-data");
+  if (!on) {
+    if (note) note.remove();
+  } else if (!note) {
+    const p = document.createElement("p");
+    p.className = "meta overview-old-data";
+    p.textContent = "This could not be refreshed, so it's from an earlier load.";
+    el.appendChild(p);
+  }
+}
+
+/* Once these have loaded, a failed refresh leaves them on screen. */
+let overviewEventsLoaded = false;
+let overviewCardsLoaded = false;
+/** The optional parts of the last pass, for a pass where one of them fails. */
+let lastOverviewParts = { met: null, cfg: null, st: null, evPack: null, pending: null };
+
 export async function refreshOverviewEventsList() {
   const ul = $("overview-events-list");
   const empty = $("overview-events-empty");
@@ -94,10 +113,14 @@ export async function refreshOverviewEventsList() {
     if (card) card.hidden = true;
     return;
   }
-  if (card) card.hidden = false;
   try {
     const data = await api("/v1/events?limit=25");
     const evs = data.events || [];
+    overviewEventsLoaded = true;
+    if (card) {
+      card.hidden = false;
+      setOldDataNote(card, false);
+    }
     if (!evs.length) {
       ul.innerHTML = "";
       empty.classList.remove("is-hidden");
@@ -109,18 +132,20 @@ export async function refreshOverviewEventsList() {
     ul.innerHTML = evs
       .map(
         (e) =>
-          "<li><span class=\"overview-ev-ts\">" +
-          escapeHtml(e.ts || "") +
-          "</span> <strong>" +
-          escapeHtml(e.event || "") +
-          "</strong>" +
-          (e.detail ? " — " + escapeHtml(e.detail) : "") +
+          "<li><strong>" +
+          escapeHtml(eventLabel(e.event)) +
+          "</strong> · <span class=\"overview-ev-ts\">" +
+          timeHtml(e.ts) +
+          "</span>" +
+          (eventDetail(e) ? " — " + escapeHtml(eventDetail(e)) : "") +
           (e.error_code ? " <code class=\"inline\">" + escapeHtml(e.error_code) + "</code>" : "") +
           "</li>"
       )
       .join("");
   } catch {
-    /* non-fatal */
+    // An empty list here would claim there are no events, when all we know is the request failed.
+    if (card && !overviewEventsLoaded) card.hidden = true;
+    else if (card) setOldDataNote(card, true);
   }
 }
 
@@ -131,15 +156,17 @@ function overviewApiIssueCard(opts) {
   const p = document.createElement("p");
   p.textContent = opts.message;
   wrap.appendChild(p);
-  const linkP = document.createElement("p");
-  linkP.className = "hint";
-  linkP.style.marginTop = "0.75rem";
-  const a = document.createElement("a");
-  a.href = "#/token";
-  a.textContent = "Open API token";
-  linkP.appendChild(a);
-  linkP.appendChild(document.createTextNode(" to set the token and optional API base URL."));
-  wrap.appendChild(linkP);
+  if (opts.tokenHint !== false) {
+    const linkP = document.createElement("p");
+    linkP.className = "hint";
+    linkP.style.marginTop = "0.75rem";
+    const a = document.createElement("a");
+    a.href = "#/token";
+    a.textContent = "Open API token";
+    linkP.appendChild(a);
+    linkP.appendChild(document.createTextNode(" to set the token and optional API base URL."));
+    wrap.appendChild(linkP);
+  }
   if (opts.detail) {
     const d = document.createElement("p");
     d.className = "hint meta";
@@ -148,29 +175,6 @@ function overviewApiIssueCard(opts) {
     wrap.appendChild(d);
   }
   return wrap;
-}
-
-function formatGeoAge(isoUtc) {
-  const d = Date.parse(isoUtc);
-  if (isNaN(d)) return "";
-  const days = Math.floor((Date.now() - d) / (24 * 60 * 60 * 1000));
-  if (days <= 0) return "today";
-  if (days === 1) return "1 day ago";
-  return days + " days ago";
-}
-
-/** Split RFC3339 / ISO UTC instant for stacked overview labels (avoids wrapping mid-clock). */
-function geoSuccessUtcParts(iso) {
-  const d = Date.parse(iso);
-  if (isNaN(d)) return null;
-  const t = new Date(d);
-  function pad(x) {
-    return String(x).padStart(2, "0");
-  }
-  return {
-    date: t.getUTCFullYear() + "-" + pad(t.getUTCMonth() + 1) + "-" + pad(t.getUTCDate()),
-    clock: pad(t.getUTCHours()) + ":" + pad(t.getUTCMinutes()) + ":" + pad(t.getUTCSeconds()) + " UTC",
-  };
 }
 
 function pingSeriesFromDashboard(met) {
@@ -490,6 +494,13 @@ function domPingSparkChart(model) {
 }
 
 function appendPingSparkInto(containerEl, met) {
+  if (!met) {
+    const p = document.createElement("p");
+    p.className = "meta overview-ping-spark-empty";
+    p.textContent = "Latency history could not be loaded.";
+    containerEl.appendChild(p);
+    return;
+  }
   const model = pingSparkChartModel(met);
   if (model.ys.length < 2) {
     const p = document.createElement("p");
@@ -620,7 +631,6 @@ function overviewHostGeoCard(o) {
 
     const d = Date.parse(iso);
     const stale = !isNaN(d) && Date.now() - d > GEO_STALE_MS;
-    const age = formatGeoAge(iso);
     const src = String((geo && geo.geo_last_success_source) || "").trim();
 
     const tag = document.createElement("span");
@@ -631,7 +641,7 @@ function overviewHostGeoCard(o) {
 
     const ageLine = document.createElement("span");
     ageLine.className = "overview-geo-fresh-age";
-    ageLine.textContent = age ? "Loaded " + age : "Loaded";
+    ageLine.innerHTML = "Loaded " + timeHtml(iso);
 
     const head = document.createElement("div");
     head.className = "overview-geo-fresh-head";
@@ -643,27 +653,9 @@ function overviewHostGeoCard(o) {
 
     if (src) {
       const srcSpan = document.createElement("span");
-      srcSpan.textContent = "Source: " + src;
+      srcSpan.textContent = "Source: " + geoSourceLabel(src);
       meta.appendChild(srcSpan);
     }
-
-    const tsWrap = document.createElement("div");
-    tsWrap.className = "overview-geo-fresh-ts";
-    tsWrap.setAttribute("title", iso);
-    const utcParts = geoSuccessUtcParts(iso);
-    if (utcParts) {
-      const ds = document.createElement("span");
-      ds.className = "overview-geo-fresh-ts-date";
-      ds.textContent = utcParts.date;
-      const cs = document.createElement("span");
-      cs.className = "overview-geo-fresh-ts-clock";
-      cs.textContent = utcParts.clock;
-      tsWrap.appendChild(ds);
-      tsWrap.appendChild(cs);
-    } else {
-      tsWrap.textContent = iso;
-    }
-    meta.appendChild(tsWrap);
 
     root.appendChild(head);
     root.appendChild(meta);
@@ -718,8 +710,12 @@ function overviewHostGeoCard(o) {
   return wrap;
 }
 
-function overviewApplySummaryLine(evs) {
-  let line = "No recent reload or geo events in the last fetch.";
+/** The newest apply-related event as "Applied config · 2h ago", with any detail below it. */
+function appendApplySummary(root, evs) {
+  const line = document.createElement("p");
+  line.className = "meta";
+  line.textContent = evs ? "No recent apply or geo events in the last fetch." : "Recent apply and geo events could not be loaded.";
+  root.appendChild(line);
   const list = evs || [];
   for (const e of list) {
     const ev = (e && e.event) || "";
@@ -731,11 +727,16 @@ function overviewApplySummaryLine(evs) {
       ev === "backup_ok" ||
       ev === "restore_ok"
     ) {
-      line = (e.ts || "") + " — " + ev + (e.detail ? " — " + e.detail : "");
+      line.innerHTML = escapeHtml(eventLabel(ev)) + " · " + timeHtml(e.ts);
+      if (eventDetail(e)) {
+        const detail = document.createElement("p");
+        detail.className = "meta";
+        detail.textContent = eventDetail(e);
+        root.appendChild(detail);
+      }
       break;
     }
   }
-  return line;
 }
 
 /** Theme panel used for the two groups nested inside the activity card. */
@@ -755,7 +756,18 @@ function activityPane(title) {
   return { root, body };
 }
 
-function overviewActivityAttentionCard(evs, items) {
+const CHECK_PARTS = { cfg: "the config", st: "WireGuard stats", met: "peer metrics" };
+
+/** What this pass could check: failed parts either have an earlier value to go on, or nothing. */
+function checksState(missed, values) {
+  const failed = Object.keys(CHECK_PARTS).filter((part) => missed.has(part));
+  return {
+    old: failed.filter((part) => values[part]).map((part) => CHECK_PARTS[part]),
+    notRun: failed.some((part) => !values[part]),
+  };
+}
+
+function overviewActivityAttentionCard(evs, oldEvents, checks) {
   const wrap = document.createElement("div");
   wrap.className = "evu-card card overview-dash-card overview-dash-activity";
 
@@ -763,31 +775,93 @@ function overviewActivityAttentionCard(evs, items) {
   inner.className = "overview-activity-merge-inner";
 
   const left = activityPane("Last apply activity");
-  const p1 = document.createElement("p");
-  p1.className = "meta";
-  p1.textContent = overviewApplySummaryLine(evs);
-  left.body.appendChild(p1);
+  appendApplySummary(left.body, evs);
+  setOldDataNote(left.body, oldEvents);
 
-  const right = activityPane(items.length ? "Needs attention" : "Status");
-  if (!items.length) {
-    const ok = document.createElement("p");
-    ok.className = "meta";
-    ok.textContent = "No warnings from this pass.";
-    right.body.appendChild(ok);
-  } else {
+  const right = activityPane(checks.items.length ? "Needs attention" : "Status");
+  if (checks.items.length) {
     const ul = document.createElement("ul");
     ul.className = "attention-list";
-    for (const txt of items) {
+    for (const txt of checks.items) {
       const li = document.createElement("li");
       li.textContent = txt;
       ul.appendChild(li);
     }
     right.body.appendChild(ul);
+  } else if (!checks.old.length && !checks.notRun) {
+    const ok = document.createElement("p");
+    ok.className = "meta";
+    ok.textContent = "No warnings from this pass.";
+    right.body.appendChild(ok);
+  }
+  if (checks.old.length) {
+    const note = document.createElement("p");
+    note.className = "meta overview-old-data";
+    note.textContent = "Based on an earlier load, because they could not be refreshed: " + checks.old.join(", ") + ".";
+    right.body.appendChild(note);
+  }
+  if (checks.notRun) {
+    const note = document.createElement("p");
+    note.className = "meta";
+    note.textContent = "Some checks could not run, because their data could not be loaded.";
+    right.body.appendChild(note);
   }
 
   inner.appendChild(left.root);
   inner.appendChild(right.root);
   wrap.appendChild(inner);
+  return wrap;
+}
+
+const FIRST_RUN_KEY = "evuproxy_first_run";
+
+/**
+ * Setup checklist. It appears while there are no peers and stays through the
+ * route and apply steps, until a peer exists and nothing is left to apply. An
+ * established host that later gains a pending edit never sees it.
+ */
+function firstRunChecklistCard(cfg, pending) {
+  const peers = (cfg.peers || []).length;
+  const routes = ((cfg.forwarding && cfg.forwarding.routes) || []).length;
+  if (!peers) localStorage.setItem(FIRST_RUN_KEY, "1");
+  else if (pending && !pending.pending) localStorage.removeItem(FIRST_RUN_KEY);
+  if (!localStorage.getItem(FIRST_RUN_KEY)) return null;
+
+  const endpoint = String((state.lastUIPrefs && state.lastUIPrefs.wireguard_server_endpoint) || "").trim();
+  const steps = [
+    { title: "Set the server endpoint", hint: "The public host:port that clients connect to.", href: "#/settings", done: !!endpoint },
+    { title: "Add a peer", hint: "A machine on the tunnel that will receive traffic.", href: "#/peers", done: peers > 0 },
+    { title: "Add a route", hint: "Forward a public port to that peer.", href: "#/routes", done: routes > 0 },
+    { title: "Apply", hint: "Saved changes reach the host only when you apply them.", href: "#/pending", done: false },
+  ];
+
+  const wrap = document.createElement("div");
+  wrap.className = "evu-card card overview-dash-card overview-first-run";
+  const h = document.createElement("h3");
+  h.textContent = "Get started";
+  wrap.appendChild(h);
+  const ol = document.createElement("ol");
+  ol.className = "first-run-steps";
+  for (const step of steps) {
+    const li = document.createElement("li");
+    li.className = step.done ? "first-run-step is-done" : "first-run-step";
+    const a = document.createElement("a");
+    a.href = step.href;
+    a.textContent = step.title;
+    li.appendChild(a);
+    if (step.done) {
+      const sr = document.createElement("span");
+      sr.className = "evu-sr-only";
+      sr.textContent = " (done)";
+      li.appendChild(sr);
+    }
+    const hint = document.createElement("p");
+    hint.className = "meta";
+    hint.textContent = step.hint;
+    li.appendChild(hint);
+    ol.appendChild(li);
+  }
+  wrap.appendChild(ol);
   return wrap;
 }
 
@@ -802,7 +876,8 @@ function buildOverviewAttentionItems(cfg, o, st, met) {
   const items = [];
   const peers = (cfg && cfg.peers) || [];
   const pubMap = wgPeerPubKeyMap(st);
-  for (const p of peers) {
+  // No stats says nothing about handshakes, so it must not read as every peer lacking one.
+  for (const p of st ? peers : []) {
     if (p.disabled) continue;
     const row = pubMap.get((p.public_key || "").trim());
     const h = row && row.latest_handshake_unix;
@@ -849,7 +924,7 @@ function buildOverviewAttentionItems(cfg, o, st, met) {
     items.push("Geoblocking is on but geo zone files have never loaded successfully on this host.");
   }
   if (cfg && cfg.forwarding && cfg.forwarding.maintenance_mode) {
-    items.push("Maintenance mode is on — public forwards are disabled until you turn it off and reload.");
+    items.push("Maintenance mode is on — public forwards are disabled until you turn it off and Apply.");
   }
   for (const r of routes) {
     if (r.source_allow_cidrs && r.source_allow_cidrs.length) {
@@ -871,16 +946,17 @@ export async function refreshOverviewPage() {
   const msg = $("overview-action-msg");
   const actionsCard = $("overview-actions-card");
   if (!grid) return;
-  grid.innerHTML = "";
   msg.textContent = "";
   if (!token().trim()) {
     if (seq !== state.overviewRefreshSeq) return;
     state.apiConnectionOk = false;
     applyNavRestriction();
-    setApiStatus(false, "No API token");
+    setApiNotConnected();
+    overviewCardsLoaded = false;
+    grid.innerHTML = "";
     grid.appendChild(
       overviewApiIssueCard({
-        message: "There is a problem with the API: no token is configured in this browser.",
+        message: "Not connected: this browser has no API token yet.",
       })
     );
     if (actionsCard) actionsCard.hidden = true;
@@ -888,20 +964,29 @@ export async function refreshOverviewPage() {
     if (evCard0) evCard0.hidden = true;
     return;
   }
+  const doneLoading = beginLoading("overview-cards");
   try {
     try {
       await fetchUIPrefsFromServer();
     } catch (e) {
       /* keep state.lastUIPrefs; overview still useful */
     }
-    const [o, met, cfg, st, evPack] = await Promise.all([
+    const last = lastOverviewParts;
+    const missed = new Set();
+    const orLast = (part, path) =>
+      api(path).catch(() => {
+        missed.add(part);
+        return last[part];
+      });
+    const [o, met, cfg, st, evPack, pending] = await Promise.all([
       api("/v1/overview"),
-      api("/v1/metrics/peers").catch(() => null),
-      api("/v1/config").catch(() => null),
-      api("/v1/stats").catch(() => null),
-      api("/v1/events?limit=40").catch(() => ({ events: [] })),
+      orLast("met", "/v1/metrics/peers"),
+      orLast("cfg", "/v1/config"),
+      orLast("st", "/v1/stats"),
+      orLast("evPack", "/v1/events?limit=40"),
+      orLast("pending", "/v1/pending"),
     ]);
-    const evs = (evPack && evPack.events) || [];
+    const evs = evPack ? evPack.events || [] : null;
     if (seq !== state.overviewRefreshSeq) return;
     state.lastOverview = o;
     state.lastConfig = cfg || state.lastConfig;
@@ -910,31 +995,57 @@ export async function refreshOverviewPage() {
     state.apiConnectionOk = true;
     applyNavRestriction();
     setApiStatus(true);
+    // Built before the grid is touched, so that a throw leaves the last cards in place.
+    const cards = [];
+    // An old pending state must not end the setup checklist.
+    const checklist = cfg && firstRunChecklistCard(cfg, missed.has("pending") ? null : pending);
+    if (checklist) cards.push(checklist);
+    const oldEvents = !!evs && missed.has("evPack");
+    const checks = { items: buildOverviewAttentionItems(cfg, o, st, met), ...checksState(missed, { met, cfg, st }) };
+    cards.push(overviewActivityAttentionCard(evs, oldEvents, checks));
+    cards.push(overviewHostGeoCard(o));
+    const latencyCard = overviewLatencyOverviewCard(met);
+    setOldDataNote(latencyCard, !!met && missed.has("met"));
+    cards.push(latencyCard);
+    grid.replaceChildren(...cards);
+    lastOverviewParts = { met, cfg, st, evPack, pending };
+    overviewCardsLoaded = true;
+    markPageLoaded("overview");
     if (actionsCard) actionsCard.hidden = false;
-    grid.appendChild(overviewActivityAttentionCard(evs, buildOverviewAttentionItems(cfg, o, st, met)));
-    grid.appendChild(overviewHostGeoCard(o));
-    grid.appendChild(overviewLatencyOverviewCard(met));
     void refreshOverviewEventsList();
   } catch (e) {
     if (seq !== state.overviewRefreshSeq) return;
     const errText = String(e.message || e);
-    state.apiConnectionOk = false;
-    applyNavRestriction();
-    setApiStatus(false, errText);
+    // Without a status or a kind the API answered and this page failed: a bug, or an answer
+    // this version can't read. The API is up, so a probe would pass and reload into this again.
+    const fromRequest = e.status !== undefined || !!e.connectionKind;
+    if (fromRequest) {
+      state.apiConnectionOk = false;
+      applyNavRestriction();
+      setApiStatus(false, errText);
+      requestConnectionCheck();
+    }
+    if (overviewCardsLoaded) {
+      // For an outage the banner says what's wrong. What this page last loaded stays until there's something newer.
+      if (!fromRequest) setOverviewMsg("This page could not be updated, so what's shown is from an earlier load: " + errText, true);
+      return;
+    }
     if (actionsCard) actionsCard.hidden = true;
+    grid.innerHTML = "";
     grid.appendChild(
-      overviewApiIssueCard({
-        message:
-          "There is a problem with the API: the EvuProxy API could not be reached or rejected this browser’s request.",
-        detail: errText,
-      })
+      overviewApiIssueCard(
+        fromRequest
+          ? {
+              message: "Nothing has loaded yet. This page fills in as soon as the API answers.",
+              detail: e.connectionKind ? "" : errText,
+            }
+          : { message: "This page could not be displayed.", detail: errText, tokenHint: false }
+      )
     );
-    const evUl = $("overview-events-list");
-    const evEmpty = $("overview-events-empty");
     const evCard = $("overview-events-card");
-    if (evUl) evUl.innerHTML = "";
-    if (evEmpty) evEmpty.classList.remove("is-hidden");
-    if (evCard) evCard.hidden = true;
+    if (evCard && !overviewEventsLoaded) evCard.hidden = true;
+  } finally {
+    doneLoading();
   }
 }
 
@@ -951,116 +1062,44 @@ export function initOverviewPage() {
   if (overviewMaint) {
     overviewMaint.addEventListener("change", async () => {
       if (!state.lastConfig) return;
-      if (
-        overviewMaint.checked &&
-        !window.confirm("Enable maintenance mode? Public port forwards will stop until you disable this and reload.")
-      ) {
-        overviewMaint.checked = false;
-        return;
-      }
-      const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-      if (!cfg.forwarding) cfg.forwarding = {};
-      cfg.forwarding.maintenance_mode = overviewMaint.checked;
+      const on = overviewMaint.checked;
+      const saveMaintenance = (value) => (cfg) => {
+        if (!cfg.forwarding) cfg.forwarding = {};
+        cfg.forwarding.maintenance_mode = value;
+      };
+      const confirmation = (value) =>
+        value
+          ? "Maintenance mode saved. Public port forwards stop when you Apply."
+          : "Maintenance mode off. Apply to restore forwards.";
       setOverviewMsg("…");
       try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-        state.lastConfig = cfg;
-        setOverviewMsg(
-          overviewMaint.checked
-            ? "Maintenance mode saved. Reload to apply."
-            : "Maintenance mode off. Reload to restore forwards."
-        );
+        await saveConfigEdit(saveMaintenance(on));
+        setOverviewMsg("");
         refreshPendingBadge();
+        showUndoToast(confirmation(on), {
+          page: "overview",
+          edit: saveMaintenance(!on),
+          afterSave: (cfg, focus) => {
+            setOverviewMsg("");
+            refreshPendingBadge();
+            overviewMaint.checked = !!(cfg.forwarding && cfg.forwarding.maintenance_mode);
+            if (focus) overviewMaint.focus();
+          },
+          message: () => confirmation(!on),
+        });
       } catch (e) {
-        overviewMaint.checked = !!state.lastConfig.forwarding.maintenance_mode;
+        overviewMaint.checked = !!(state.lastConfig.forwarding && state.lastConfig.forwarding.maintenance_mode);
         setOverviewMsg(String(e.message || e), true);
       }
     });
   }
 
-  const reloadBtn = $("btn-reload");
-  // Same host-mutating endpoint as Apply on Pending changes, so it gets the same
-  // lockout gate. Leaving this one ungated would make the gate decorative —
-  // maintenance mode is itself a lockout risk, and the copy next to this button
-  // tells the operator to press it.
-  async function reloadWithLockoutCheck() {
-    setOverviewMsg("Checking config…");
-    const { res, error } = await fetchValidateResult();
-    if (!res) {
-      setOverviewMsg(error, true);
-      return;
-    }
-    if (!res.ok) {
-      setOverviewMsg("Config check failed; see Pending changes → Check config.", true);
-      return;
-    }
-    const risks = lockoutRisks(res);
-    if (risks.length) {
-      const ip = res.detected_client_ip || "unknown";
-      setOverviewMsg("Reload needs confirmation: this config may lock you out.", true);
-      openConfirmModal({
-        title: "This reload may lock you out",
-        message:
-          "Your connection appears as " +
-          ip +
-          ".\n\n" +
-          lockoutRiskLines(risks).join("\n") +
-          "\n\nOnly continue if you have another way back into this host.",
-        confirmLabel: "Reload anyway",
-        // Re-check on confirm: the dialog can sit open while another tab, the CLI
-        // or another operator saves something else. The confirmation covers the
-        // risks that were on screen, so a different set has to be read first.
-        onConfirm: () => confirmedReload(lockoutSignature(risks)),
-      });
-      return;
-    }
-    await doReload();
-  }
-
-  async function confirmedReload(acknowledged) {
-    setOverviewMsg("Checking config…");
-    const { res, error } = await fetchValidateResult();
-    if (!res) {
-      setOverviewMsg(error, true);
-      return;
-    }
-    if (!res.ok) {
-      setOverviewMsg("Config check failed; see Pending changes → Check config.", true);
-      return;
-    }
-    if (lockoutSignature(lockoutRisks(res)) !== acknowledged) {
-      setOverviewMsg("The config changed since you confirmed. Press Reload config to review again.", true);
-      return;
-    }
-    await doReload();
-  }
-
-  async function doReload() {
-    setOverviewMsg("…");
-    try {
-      await api("/v1/reload", { method: "POST" });
-      setOverviewMsg("Reload OK.");
-      await refreshOverviewPage();
-      refreshPendingBadge();
-    } catch (e) {
-      setOverviewMsg(String(e.message || e), true);
-    }
-  }
-
-  reloadBtn.addEventListener("click", async () => {
-    if (reloadBtn.disabled) return;
-    reloadBtn.disabled = true;
-    try {
-      await reloadWithLockoutCheck();
-    } finally {
-      reloadBtn.disabled = false;
-    }
-  });
   $("btn-geo").addEventListener("click", async () => {
     setOverviewMsg("…");
     try {
-      await api("/v1/update-geo", { method: "POST" });
-      setOverviewMsg("Geo update OK.");
+      const res = await api("/v1/update-geo", { method: "POST" });
+      setOverviewMsg("");
+      showToast(geoUpdatedMessage(res));
     } catch (e) {
       setOverviewMsg(String(e.message || e), true);
     }

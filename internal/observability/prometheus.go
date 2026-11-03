@@ -20,7 +20,7 @@ func PrometheusText(cfgPath string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, _ := apply.StatsFromHost(cfgPath)
+	st, _ := apply.StatsWithoutDropCounters(cfgPath)
 	geo := state.ReadGeoLastSuccess(cfgPath)
 
 	var b strings.Builder
@@ -44,6 +44,10 @@ func PrometheusText(cfgPath string) ([]byte, error) {
 	online := countPeersOnline(st, time.Now().Unix())
 	writeGauge(&b, "evuproxy_peers_online", "Peers with WireGuard handshake within 180 seconds", float64(online))
 
+	if st != nil {
+		writeRouteAccepted(&b, st.RouteAccepted)
+	}
+
 	return []byte(b.String()), nil
 }
 
@@ -63,7 +67,31 @@ func countPeersOnline(st *apply.Stats, nowUnix int64) int {
 	return n
 }
 
-func writeCounter(b *strings.Builder, name, help string, v uint64) {
+// writeRouteAccepted writes each route's accepted traffic, with two series per route and protocol.
+// The labels stop at the route's identity so the series count depends on the config alone: ports
+// can be long lists, and source addresses would grow with the traffic. name follows route_index,
+// which is there because names are optional and needn't be unique.
+func writeRouteAccepted(b *strings.Builder, rows []apply.RouteAcceptedCounter) {
+	const packets, bytes = "evuproxy_route_accepted_packets_total", "evuproxy_route_accepted_bytes_total"
+	writeCounterHeader(b, packets, "Inbound packets the firewall accepted for a route since the last Apply (accepted traffic, not players or legitimate clients)")
+	for _, r := range rows {
+		writeRouteAcceptedSample(b, packets, r, r.Packets)
+	}
+	writeCounterHeader(b, bytes, "Inbound bytes the firewall accepted for a route since the last Apply (accepted traffic, not players or legitimate clients)")
+	for _, r := range rows {
+		writeRouteAcceptedSample(b, bytes, r, r.Bytes)
+	}
+}
+
+func writeRouteAcceptedSample(b *strings.Builder, metric string, r apply.RouteAcceptedCounter, v uint64) {
+	fmt.Fprintf(b, "%s{route_index=\"%d\",name=\"%s\",proto=\"%s\"} %d\n", metric, r.RouteIndex, labelValueEscaper.Replace(r.Name), r.Proto, v)
+}
+
+// labelValueEscaper applies the exposition format's escapes. Route names are free text, and one
+// bad label value would fail the whole scrape.
+var labelValueEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+
+func writeCounterHeader(b *strings.Builder, name, help string) {
 	b.WriteString("# HELP ")
 	b.WriteString(name)
 	b.WriteString(" ")
@@ -71,6 +99,10 @@ func writeCounter(b *strings.Builder, name, help string, v uint64) {
 	b.WriteString("\n# TYPE ")
 	b.WriteString(name)
 	b.WriteString(" counter\n")
+}
+
+func writeCounter(b *strings.Builder, name, help string, v uint64) {
+	writeCounterHeader(b, name, help)
 	b.WriteString(name)
 	b.WriteString(" ")
 	b.WriteString(strconv.FormatUint(v, 10))

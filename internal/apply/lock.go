@@ -66,3 +66,20 @@ func acquireApplyLock(ctx context.Context, cfgPath string) (func(), error) {
 		_ = f.Close()
 	}, nil
 }
+
+// tryApplyLock takes the lock only if it is free right now. ok is false if it isn't, or
+// if the lock file can't be opened, as for a caller that isn't root.
+func tryApplyLock(cfgPath string) (unlock func(), ok bool) {
+	f, err := os.OpenFile(filepath.Join(filepath.Dir(cfgPath), applyLockName), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, false
+	}
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		f.Close()
+		return nil, false
+	}
+	return func() {
+		_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
+		_ = f.Close()
+	}, true
+}

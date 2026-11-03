@@ -198,11 +198,11 @@ Last:
 Automation:
 
 - [x] `nft -c` syntax tests in CI
-- [ ] Run the Playwright behavior and axe-core suites in CI against the mock stack
+- [x] Run the Playwright behavior and axe-core suites in CI against the mock stack
 - [ ] Decide whether to add a visual regression baseline, weighing test flakiness against value
-- [ ] Automated smoke test: tunnel up, TCP and UDP forward, geo on and off, narrow peer `AllowedIPs` still reaching the LAN
-- [ ] Automated forwarding policy tests: port maps, deny and allow lists, break-glass, route geo, maintenance mode
-- [ ] Automated stress tests: rate limits and CrowdSec drops under load, with legitimate traffic still getting through
+- [x] Automated smoke test: tunnel up, TCP and UDP forward, geo on and off, narrow peer `AllowedIPs` still reaching the LAN
+- [x] Automated forwarding policy tests: port maps, deny and allow lists, break-glass, route geo, maintenance mode
+- [x] Automated stress tests: rate limits and CrowdSec drops under load, with legitimate traffic still getting through
 - [ ] *Proposed:* add tests for `internal/geoip`, `internal/logging` and `cmd/evuproxy`, which have none
 
 Documentation fixes:
@@ -218,31 +218,31 @@ Documentation fixes:
 
 Accepted-traffic counters, which depend on the spike:
 
-- [ ] Spike: on a host with real traffic, confirm counters can be tied to accepted forwards per route without counting scan drops. Record go or no-go
-- [ ] If go: per-route accepted counters in `GET /stats`
-- [ ] If go: an **Accepted** column on Routes, with its meaning documented
-- [ ] If go, *proposed:* per-route accepted counters in Prometheus
+- [x] Spike: on a host with real traffic, confirm counters can be tied to accepted forwards per route without counting scan drops. Record go or no-go (go, with conditions)
+- [x] If go: per-route accepted counters in `GET /stats`
+- [x] If go: an **Accepted** column on Routes, with its meaning documented
+- [x] If go, *proposed:* per-route accepted counters in Prometheus
 
 Auto-pause:
 
-- [ ] Decide between a runtime-only pause and changing `disabled` in YAML, and set the hysteresis (for example, 3 failures to pause and 2 successes to resume)
-- [ ] Pause loop and a per-route `pause_when_peer_offline` setting
-- [ ] Omit DNAT for paused routes, without a full reload if possible
-- [ ] Routes checkbox and an **Auto-paused** banner
+- [x] Decide between a runtime-only pause and changing `disabled` in YAML, and set the hysteresis (runtime-only; 3 failures to pause and 2 successes to resume, every 15 seconds)
+- [x] Pause loop and a per-route `pause_when_peer_offline` setting
+- [x] Omit DNAT for paused routes, without a full reload if possible
+- [x] Routes checkbox and an **Auto-paused** banner
 
 Drop visibility:
 
-- [ ] Optional `counter` on selected drop rules. Generated rules have none today, so the Stats nftables table is empty on a standard install and drop counts only appear in Logs
+- [x] Optional `counter` on drop rules (`stats.drop_counters`), so drop counts can appear in the Stats nftables table as well as in Logs
 
 ### Phase 10 — API security
 
 **Goal:** reduce the damage a single leaked token or a script on the UI origin can do. Today one token grants full admin access.
 
-- [ ] Server-side apply gate: `/validate` returns the evaluated config hash, and `/reload` answers 409 without a matching acknowledgement, with an explicit `force` for automation. This closes the gap where another tab, operator or the CLI saves config between the check and the reload
+- [x] Server-side apply gate: `/validate` returns the evaluated config hash, and `/reload` answers 409 without a matching acknowledgement, with an explicit `force` for automation. This closes the gap where another tab, operator or the CLI saves config between the check and the reload
 - [ ] Strict Content-Security-Policy for the static UI
-- [ ] CSRF hardening beyond bearer tokens
-- [ ] Separate read and write API tokens (earlier planning deferred this indefinitely, so it needs a decision)
-- [ ] Optional mTLS or stronger API auth
+- [x] CSRF hardening beyond bearer tokens: state-changing browser requests from origins not on `--cors-origins` are refused
+- [x] Separate read and write API tokens: an optional read token limited to status, overview, stats, logs, events and metrics
+- [x] Optional mTLS or stronger API auth
 
 ### Phase 11 — Packaging and upgrades
 

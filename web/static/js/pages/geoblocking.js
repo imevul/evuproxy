@@ -7,10 +7,17 @@ import {
   writeRateLimitFields,
   readRateLimitFromForm,
 } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
+import { geoUpdatedMessage } from "../core/format.js";
+import { showToast, reportBesideControl } from "../core/toast.js";
+import { saveConfigEdit, ConfigMergeError } from "../core/config_save.js";
 import { parseSourceAllowListInput } from "../core/net.js";
 import { setGeoEditorTab, syncAdvancedTabsGating } from "../core/advanced.js";
-import { openModal, closeModal } from "../core/modal.js";
+import { openModal, closeModal, confirmDiscard, dismissModal, registerModalForm } from "../core/modal.js";
+import { createSaveBar } from "../core/save_bar.js";
+import { prepareTableCards } from "../core/table_sort.js";
 import { refreshPendingBadge } from "./pending.js";
 
 async function refreshGeoZonesTable() {
@@ -19,6 +26,7 @@ async function refreshGeoZonesTable() {
   if (!wrap || !msg) return;
   msg.textContent = "";
   msg.classList.remove("err");
+  const doneLoading = beginLoading("geo-zones-table-wrap");
   try {
     const s = await api("/v1/geo/summary");
     if (!s.enabled) {
@@ -65,16 +73,99 @@ async function refreshGeoZonesTable() {
       rows +
       "</tbody></table>" +
       foot;
+    prepareTableCards(wrap);
   } catch (e) {
     msg.textContent = String(e.message || e);
     msg.classList.add("err");
-    wrap.innerHTML = "";
+  } finally {
+    doneLoading();
+  }
+}
+
+/*
+ * The switches on this page are not part of the form: each saves its own field as it
+ * flips, so they are missing from the snapshots, geoFormOwnedJson and applyGeoFormTo.
+ */
+const GEO_SWITCHES = [
+  {
+    id: "geo-f-enabled",
+    name: "Geoblocking",
+    read: (cfg) => !!(cfg.geo || {}).enabled,
+    write(cfg, on) {
+      if (!cfg.geo) cfg.geo = {};
+      cfg.geo.enabled = on;
+    },
+  },
+  {
+    id: "geo-f-apply-input-allows",
+    name: "Geoblocking on inbound allow rules",
+    read: (cfg) => !!(cfg.geo || {}).apply_to_input_allows,
+    write(cfg, on) {
+      if (!cfg.geo) cfg.geo = {};
+      cfg.geo.apply_to_input_allows = on;
+    },
+  },
+  {
+    id: "geo-f-crowdsec-enabled",
+    name: "CrowdSec integration",
+    read: (cfg) => !!(cfg.crowdsec || {}).enabled,
+    write(cfg, on) {
+      if (on) cfg.crowdsec = { enabled: true };
+      else delete cfg.crowdsec;
+    },
+  },
+];
+
+/** Switches with a write in flight: a second flip would race its own save. */
+const geoSwitchesBusy = new Set();
+
+function setGeoSwitchError(sw, text) {
+  const el = $(sw.id + "-msg");
+  if (!el) return;
+  if (text) reportBesideControl(el, text);
+  else el.textContent = "";
+}
+
+function syncGeoSwitches(cfg) {
+  for (const sw of GEO_SWITCHES) {
+    const input = $(sw.id);
+    if (input && !geoSwitchesBusy.has(sw)) input.checked = sw.read(cfg || {});
+  }
+}
+
+/**
+ * Writes one switch's own field and nothing from the unsaved form. saveConfigEdit
+ * reapplies it to fresh config if the base has moved on, and Undo is the same edit the
+ * other way round, so neither can wipe a change saved since. A rejected value snaps back.
+ */
+async function setGeoSwitch(sw, on) {
+  if (geoSwitchesBusy.has(sw)) return;
+  const input = $(sw.id);
+  if (!input) return;
+  geoSwitchesBusy.add(sw);
+  input.checked = on;
+  setGeoSwitchError(sw, "");
+  try {
+    await saveConfigEdit((cfg) => sw.write(cfg, on));
+    geoSwitchesBusy.delete(sw);
+    setApiStatus(true);
+    refreshPendingBadge();
+    if (sw.id === "geo-f-enabled") void refreshGeoZonesTable();
+    // A clean form may be behind whatever else that save picked up; a dirty one keeps its edits.
+    if (isGeoFormDirty()) syncGeoSwitches(state.lastConfig);
+    else geoFormFromConfig(state.lastConfig);
+    showToast(sw.name + (on ? " enabled" : " disabled"), {
+      action: { label: "Undo", onClick: () => void setGeoSwitch(sw, !on) },
+    });
+  } catch (e) {
+    geoSwitchesBusy.delete(sw);
+    input.checked = state.lastConfig ? sw.read(state.lastConfig) : !on;
+    setGeoSwitchError(sw, "Not saved: " + String(e.message || e));
   }
 }
 
 function geoblockingFormSnapshotForCompare() {
   return {
-    enabled: !!($("geo-f-enabled") && $("geo-f-enabled").checked),
     mode: getGeoListMode(),
     countries: state.geoSelectedCodes
       .slice()
@@ -83,22 +174,25 @@ function geoblockingFormSnapshotForCompare() {
       .sort(),
     set_name: (($("geo-f-set-name") && $("geo-f-set-name").value) || "").trim(),
     zone_dir: (($("geo-f-zone-dir") && $("geo-f-zone-dir").value) || "").trim(),
-    apply_to_input_allows: !!($("geo-f-apply-input-allows") && $("geo-f-apply-input-allows").checked),
     break_glass: parseSourceAllowListInput(($("geo-f-break-glass") && $("geo-f-break-glass").value) || "")
       .map((c) => c.toLowerCase())
       .sort(),
     global_deny: parseSourceAllowListInput(($("geo-f-global-deny") && $("geo-f-global-deny").value) || "")
       .map((c) => c.toLowerCase())
       .sort(),
+    rate_limit: rateLimitForCompare(readRateLimitFromForm("geo")),
   };
 }
 
-function geoblockingServerSnapshotForCompare() {
-  if (!state.lastConfig) return null;
-  const g = state.lastConfig.geo || {};
-  const fwd = state.lastConfig.forwarding || {};
+function rateLimitForCompare(rl) {
+  const r = rl || {};
+  return [r.tcp_syn_per_second || 0, r.max_conn_per_ip || 0, r.udp_per_second || 0];
+}
+
+function geoblockingConfigSnapshotForCompare(cfg) {
+  const g = (cfg && cfg.geo) || {};
+  const fwd = (cfg && cfg.forwarding) || {};
   return {
-    enabled: !!g.enabled,
     mode: String(g.mode || "allow").toLowerCase() === "block" ? "block" : "allow",
     countries: (Array.isArray(g.countries) ? g.countries : [])
       .map((c) => String(c).trim().toLowerCase())
@@ -106,7 +200,6 @@ function geoblockingServerSnapshotForCompare() {
       .sort(),
     set_name: String(g.set_name || "").trim(),
     zone_dir: String(g.zone_dir || "").trim(),
-    apply_to_input_allows: !!g.apply_to_input_allows,
     break_glass: (Array.isArray(g.break_glass_cidrs) ? g.break_glass_cidrs : [])
       .map((c) => String(c).trim().toLowerCase())
       .filter(Boolean)
@@ -115,27 +208,27 @@ function geoblockingServerSnapshotForCompare() {
       .map((c) => String(c).trim().toLowerCase())
       .filter(Boolean)
       .sort(),
+    rate_limit: rateLimitForCompare(fwd.rate_limit),
   };
 }
 
-function syncGeoUnsavedIndicator() {
-  const el = $("geo-unsaved-msg");
-  if (!el) return;
-  const srv = geoblockingServerSnapshotForCompare();
-  if (!srv) {
-    el.hidden = true;
-    el.textContent = "";
-    return;
-  }
-  const cur = geoblockingFormSnapshotForCompare();
-  const dirty = JSON.stringify(cur) !== JSON.stringify(srv);
-  if (dirty) {
-    el.hidden = false;
-    el.textContent = "You have unsaved changes — click Save to write them to the server config.";
-  } else {
-    el.hidden = true;
-    el.textContent = "";
-  }
+/** JSON snapshot of the config the form was filled from. */
+let geoFormLoadedJson = null;
+
+/**
+ * The one dirty state for this form: the save bar and the leave guard both read it.
+ * It compares against what the form was filled from, not state.lastConfig, so a change
+ * another tab saved does not read as an edit made here.
+ */
+function isGeoFormDirty() {
+  if (!state.geoFormLoaded) return false;
+  return JSON.stringify(geoblockingFormSnapshotForCompare()) !== geoFormLoadedJson;
+}
+
+let geoSaveBar = null;
+
+function syncGeoSaveBar() {
+  if (geoSaveBar) geoSaveBar.sync();
 }
 
 async function geoAddDetectedIP() {
@@ -158,6 +251,7 @@ async function geoAddDetectedIP() {
     const parts = parseSourceAllowListInput(bg.value);
     if (!parts.includes(cidr)) parts.push(cidr);
     bg.value = parts.join(", ");
+    syncGeoSaveBar();
     setGeoMsg("Added " + cidr + " to break-glass.");
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
@@ -276,19 +370,26 @@ function renderGeoTags() {
     box.appendChild(tag);
   }
   updateGeoTagsEditCount();
-  syncGeoUnsavedIndicator();
+  syncGeoSaveBar();
+}
+
+/** geoFormOwnedJson of the config the form was filled from. */
+let geoFormBase = null;
+
+/** Makes cfg what the form is compared and merged against, leaving the fields alone. */
+function setGeoFormBaseline(cfg) {
+  geoFormBase = geoFormOwnedJson(cfg);
+  geoFormLoadedJson = JSON.stringify(geoblockingConfigSnapshotForCompare(cfg));
+  syncGeoSwitches(cfg);
 }
 
 function geoFormFromConfig(cfg) {
+  setGeoFormBaseline(cfg);
   const g = (cfg && cfg.geo) || {};
-  const en = $("geo-f-enabled");
   const sn = $("geo-f-set-name");
   const zd = $("geo-f-zone-dir");
-  const ap = $("geo-f-apply-input-allows");
-  if (en) en.checked = !!g.enabled;
   if (sn) sn.value = g.set_name || "";
   if (zd) zd.value = g.zone_dir || "";
-  if (ap) ap.checked = !!g.apply_to_input_allows;
   const bg = $("geo-f-break-glass");
   const gd = $("geo-f-global-deny");
   if (bg) bg.value = (g.break_glass_cidrs || []).join(", ");
@@ -297,15 +398,13 @@ function geoFormFromConfig(cfg) {
     gd.value = (fwd.source_deny_cidrs || []).join(", ");
     writeRateLimitFields("geo", fwd.rate_limit || {});
   }
-  const cs = $("geo-f-crowdsec-enabled");
-  if (cs) cs.checked = !!((cfg && cfg.crowdsec) || {}).enabled;
   const mode = String(g.mode || "allow").toLowerCase() === "block" ? "block" : "allow";
   setGeoListMode(mode);
   state.geoSelectedCodes = Array.isArray(g.countries)
     ? g.countries.map((c) => String(c).trim().toLowerCase()).filter(Boolean)
     : [];
+  state.geoFormLoaded = true;
   renderGeoTags();
-  syncGeoUnsavedIndicator();
 }
 
 function openGeoCountryModal() {
@@ -352,8 +451,8 @@ function renderGeoModalList(filterRaw) {
     const checked = state.geoModalDraft.has(row.code);
     const fl = countryFlagEmoji(row.code);
     rows.push(
-      '<label class="geo-modal-row">' +
-        '<input type="checkbox" data-geo-code="' +
+      '<label class="evu-check geo-modal-row">' +
+        '<input type="checkbox" class="evu-checkbox" data-geo-code="' +
         escapeHtml(row.code) +
         '" ' +
         (checked ? "checked " : "") +
@@ -378,43 +477,59 @@ function renderGeoModalList(filterRaw) {
   });
 }
 
+/** The parts of the config this form overwrites; everything else merges on a conflict. */
+function geoFormOwnedJson(cfg) {
+  const fwd = (cfg && cfg.forwarding) || {};
+  const { enabled, apply_to_input_allows, ...geo } = (cfg && cfg.geo) || {};
+  return JSON.stringify([geo, fwd.source_deny_cidrs || [], fwd.rate_limit || {}]);
+}
+
 /** Config that Save would write — used by Save and by the IP check preview. */
 function geoDraftFromForm() {
   if (!state.lastConfig) return null;
   const cfg = JSON.parse(JSON.stringify(state.lastConfig));
+  applyGeoFormTo(cfg);
+  return cfg;
+}
+
+function applyGeoFormTo(cfg) {
   if (!cfg.geo) cfg.geo = {};
   const g = cfg.geo;
-  g.enabled = $("geo-f-enabled") && $("geo-f-enabled").checked;
   g.mode = getGeoListMode();
   g.countries = state.geoSelectedCodes.slice().map((c) => c.toLowerCase());
   g.set_name = ($("geo-f-set-name") && $("geo-f-set-name").value.trim()) || "";
   g.zone_dir = ($("geo-f-zone-dir") && $("geo-f-zone-dir").value.trim()) || "";
-  g.apply_to_input_allows = !!($("geo-f-apply-input-allows") && $("geo-f-apply-input-allows").checked);
   g.break_glass_cidrs = parseSourceAllowListInput(($("geo-f-break-glass") && $("geo-f-break-glass").value) || "");
   if (!cfg.forwarding) cfg.forwarding = {};
   cfg.forwarding.source_deny_cidrs = parseSourceAllowListInput(($("geo-f-global-deny") && $("geo-f-global-deny").value) || "");
   const globalRL = readRateLimitFromForm("geo");
   if (globalRL) cfg.forwarding.rate_limit = globalRL;
   else delete cfg.forwarding.rate_limit;
-  const csOn = $("geo-f-crowdsec-enabled") && $("geo-f-crowdsec-enabled").checked;
-  if (csOn) cfg.crowdsec = { enabled: true };
-  else delete cfg.crowdsec;
-  return cfg;
 }
 
+/** Save bar action: a throw keeps the bar up with the message. */
 async function saveGeoblocking() {
-  const cfg = geoDraftFromForm();
-  if (!cfg) return;
-  try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
-    setGeoMsg("Saved. Review Pending changes, then Apply to host.");
-    setApiStatus(true);
-    refreshPendingBadge();
-    syncGeoUnsavedIndicator();
-  } catch (e) {
-    setGeoMsg(String(e.message || e), true);
-  }
+  const sentJson = JSON.stringify(geoblockingFormSnapshotForCompare());
+  const cfg = await saveConfigEdit((c) => {
+    if (geoFormOwnedJson(c) !== geoFormBase) {
+      // Accept what is there now as the new base, so a second Save is a deliberate overwrite.
+      geoFormBase = geoFormOwnedJson(c);
+      throw new ConfigMergeError(
+        "Geoblocking settings were changed elsewhere, so your changes were not saved. " +
+          "Your values are still in the form: Save again to overwrite the other change, or Refresh to load it."
+      );
+    }
+    applyGeoFormTo(c);
+  });
+  // The form stays editable during the save. An edit made since is still unsaved, so it
+  // stays in the fields and reads as dirty against what the server now holds.
+  if (JSON.stringify(geoblockingFormSnapshotForCompare()) === sentJson) geoFormFromConfig(cfg);
+  else setGeoFormBaseline(cfg);
+  setGeoMsg("");
+  setApiStatus(true);
+  refreshPendingBadge();
+  void refreshGeoZonesTable();
+  showToast("Geoblocking saved.");
 }
 
 function clearGeoIPCheckResult() {
@@ -515,14 +630,10 @@ async function geoIPCheckUseMine() {
   }
 }
 
-/**
- * @param {{ resetTab?: boolean }} [opts] `resetTab` on route entry only — the
- *   Refresh button is in the shared footer, so resetting there would throw the
- *   operator off the tab whose data they just reloaded.
- */
-export async function refreshGeoblockingPage(opts) {
+export async function refreshGeoblockingPage() {
   setGeoMsg("");
   clearGeoIPCheckResult();
+  const doneLoading = beginLoading("geo-tab-default-panel", "geo-tab-advanced-panel");
   // The catalog is a static asset used only to show country names. Loading it
   // first inside the same try meant a missing file failed the whole page and
   // reported the API as down; names then fall back to ISO codes instead.
@@ -535,11 +646,13 @@ export async function refreshGeoblockingPage(opts) {
     state.lastConfig = await api("/v1/config");
     setApiStatus(true);
     geoFormFromConfig(state.lastConfig);
+    markPageLoaded("geoblocking");
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setGeoMsg(String(e.message || e), true);
+  } finally {
+    doneLoading();
   }
-  if (opts && opts.resetTab) setGeoEditorTab("default");
   syncAdvancedTabsGating();
   void refreshGeoZonesTable();
 }
@@ -547,11 +660,12 @@ export async function refreshGeoblockingPage(opts) {
 async function geoUpdateLists() {
   setGeoMsg("…");
   try {
-    await api("/v1/update-geo", { method: "POST" });
-    setGeoMsg("Geo lists updated on host.");
+    const res = await api("/v1/update-geo", { method: "POST" });
+    setGeoMsg("");
     setApiStatus(true);
     // The Zone files tab is where an operator confirms the update landed.
     void refreshGeoZonesTable();
+    showToast(geoUpdatedMessage(res));
   } catch (e) {
     setGeoMsg(String(e.message || e), true);
   }
@@ -559,6 +673,27 @@ async function geoUpdateLists() {
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initGeoblockingPage() {
+  geoSaveBar = createSaveBar("geoblocking", {
+    isDirty: isGeoFormDirty,
+    clear() {
+      state.geoFormLoaded = false;
+    },
+    save: saveGeoblocking,
+    discard() {
+      setGeoMsg("");
+      geoFormFromConfig(state.lastConfig);
+    },
+    // Zone files is read-only. The edits are kept, and the bar is back on the other tabs.
+    isSuppressed: () => $("geo-tab-zones-btn").getAttribute("aria-selected") === "true",
+  });
+  for (const sw of GEO_SWITCHES) {
+    const input = $(sw.id);
+    if (!input) continue;
+    input.addEventListener("change", () => {
+      if (geoSwitchesBusy.has(sw)) input.checked = !input.checked;
+      else void setGeoSwitch(sw, input.checked);
+    });
+  }
   const geoAddIP = $("geo-add-detected-ip");
   if (geoAddIP) geoAddIP.addEventListener("click", () => void geoAddDetectedIP());
 
@@ -566,44 +701,33 @@ export function initGeoblockingPage() {
     const btn = $(`geo-tab-${name}-btn`);
     if (btn) btn.addEventListener("click", () => setGeoEditorTab(name));
   }
-  $("geo-save").addEventListener("click", saveGeoblocking);
-  $("geo-refresh").addEventListener("click", () => void refreshGeoblockingPage());
+  $("geo-refresh").addEventListener("click", () => {
+    if (isGeoFormDirty()) confirmDiscard(() => refreshGeoblockingPage());
+    else void refreshGeoblockingPage();
+  });
   $("geo-update-lists").addEventListener("click", geoUpdateLists);
-  const geoEn = $("geo-f-enabled");
-  if (geoEn) geoEn.addEventListener("change", syncGeoUnsavedIndicator);
-  const geoSn = $("geo-f-set-name");
-  if (geoSn) geoSn.addEventListener("input", syncGeoUnsavedIndicator);
-  const geoZd = $("geo-f-zone-dir");
-  if (geoZd) geoZd.addEventListener("input", syncGeoUnsavedIndicator);
-  const geoApplyInputAllows = $("geo-f-apply-input-allows");
-  if (geoApplyInputAllows) geoApplyInputAllows.addEventListener("change", syncGeoUnsavedIndicator);
-  const geoBreakGlass = $("geo-f-break-glass");
-  if (geoBreakGlass) geoBreakGlass.addEventListener("input", syncGeoUnsavedIndicator);
-  const geoGlobalDeny = $("geo-f-global-deny");
-  if (geoGlobalDeny) geoGlobalDeny.addEventListener("input", syncGeoUnsavedIndicator);
   const geoModeBlock = $("geo-mode-block");
   const geoModeAllow = $("geo-mode-allow");
-  if (geoModeBlock) {
-    geoModeBlock.addEventListener("click", () => {
-      setGeoListMode("block");
-      syncGeoUnsavedIndicator();
-    });
-  }
-  if (geoModeAllow) {
-    geoModeAllow.addEventListener("click", () => {
-      setGeoListMode("allow");
-      syncGeoUnsavedIndicator();
-    });
-  }
+  if (geoModeBlock) geoModeBlock.addEventListener("click", () => setGeoListMode("block"));
+  if (geoModeAllow) geoModeAllow.addEventListener("click", () => setGeoListMode("allow"));
   const geoTagsEdit = $("geo-tags-edit");
   if (geoTagsEdit) geoTagsEdit.addEventListener("click", openGeoCountryModal);
   const geoModalBackdrop = $("geo-modal-backdrop");
-  if (geoModalBackdrop) geoModalBackdrop.addEventListener("click", closeGeoCountryModal);
+  const geoCountryModal = $("geo-country-modal");
+  // The picker's draft lives in state, because search re-renders its checkboxes.
+  registerModalForm(geoCountryModal, () => {
+    const selected = new Set(state.geoSelectedCodes);
+    return (
+      selected.size !== state.geoModalDraft.size ||
+      Array.from(state.geoModalDraft).some((c) => !selected.has(c))
+    );
+  });
+  if (geoModalBackdrop) geoModalBackdrop.addEventListener("click", () => dismissModal(geoCountryModal));
   const geoModalCancel = $("geo-modal-cancel");
-  if (geoModalCancel) geoModalCancel.addEventListener("click", closeGeoCountryModal);
-  const geoModalSave = $("geo-modal-save");
-  if (geoModalSave) {
-    geoModalSave.addEventListener("click", () => {
+  if (geoModalCancel) geoModalCancel.addEventListener("click", () => dismissModal(geoCountryModal));
+  const geoModalDone = $("geo-modal-done");
+  if (geoModalDone) {
+    geoModalDone.addEventListener("click", () => {
       state.geoSelectedCodes = Array.from(state.geoModalDraft);
       renderGeoTags();
       closeGeoCountryModal();

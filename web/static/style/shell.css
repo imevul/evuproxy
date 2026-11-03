@@ -3,11 +3,12 @@
  */
 
 /* Beat input[type=search] { min-width:0; width:100% } and .evu-input */
-body.app input.header-search[type="search"] {
+body.app input.table-filter[type="search"] {
   width: 19rem;
-  min-width: 19rem;
+  min-width: 10rem;
   max-width: 24rem;
-  flex: 0 0 19rem;
+  flex: 0 1 19rem;
+  margin-left: auto;
   height: 2.25rem;
   padding: 0 0.75rem;
   border-radius: calc(var(--evu-radius) - 2px);
@@ -19,7 +20,7 @@ body.app input.header-search[type="search"] {
   font-size: 0.85rem;
 }
 
-body.app input.header-search[type="search"]::placeholder {
+body.app input.table-filter[type="search"]::placeholder {
   color: var(--evu-muted-foreground);
 }
 
@@ -105,20 +106,32 @@ body.app .nav-link.nav-disabled:hover {
   filter: none;
 }
 
-body.app .nav-pending-dot {
+/* The page on screen during an outage: not a way to go anywhere, but it still says where you are. */
+body.app .nav-link.is-active.nav-disabled,
+body.app .nav-link.is-active.nav-disabled:hover {
+  color: var(--evu-primary-foreground);
+  background: var(--evu-primary);
+  opacity: 1;
+}
+
+body.app .nav-pending-count {
   margin-left: auto;
 }
 
-/* Main column + content width preference */
+/*
+ * Main column + content width preference. The document is what scrolls. These clip
+ * rather than hide: a scroll container here, even one that never scrolls, would hold
+ * the sticky apply bar and let it leave the screen with the page.
+ */
 body.app .evu-main {
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
 }
 
 body.app .evu-main__inner.content {
   padding: 1rem 1.25rem 2rem;
-  overflow: auto;
+  overflow: clip;
   max-width: var(--evuproxy-content-max-width, 1200px);
   width: 100%;
   min-width: 0;
@@ -128,13 +141,8 @@ body.app .evu-main__inner.content {
   flex: 1;
 }
 
-/*
- * Scroll lock while a dialog is open. The main column is its own scroll
- * container, so locking <body> alone still lets the page behind a modal scroll
- * under the wheel.
- */
-body.app.is-modal-open,
-body.app.is-modal-open .evu-main__inner.content {
+/* Scroll lock while a dialog is open. */
+body.app.is-modal-open {
   overflow: hidden;
 }
 
@@ -282,19 +290,214 @@ body.app .evu-sidebar__footer .sidebar-footer-meta {
   letter-spacing: -0.015em;
 }
 
-.nav-pending-dot {
+/* Neutral on purpose: changes waiting to be applied are normal work, not an error. */
+.nav-pending-count {
   display: inline-block;
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 50%;
-  background: var(--evu-destructive);
+  min-width: 1.25rem;
   margin-left: 0.35rem;
-  vertical-align: 0.12em;
-  box-shadow: 0 0 0 1px var(--evu-background);
+  padding: 0 0.35rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  /* Inherited, so it stays readable on the active link's fill. */
+  color: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25rem;
+  text-align: center;
 }
 
-.nav-pending-dot.is-hidden {
+.nav-pending-count[hidden] {
   display: none;
+}
+
+/*
+ * Above every page, and sticking to the top of the window as the page scrolls. The
+ * negative margin reaches the column's edges; ::after gives its padding back, whether
+ * or not anything is showing here.
+ */
+.apply-region {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  flex: none;
+  margin: -1rem -1.25rem 0;
+}
+
+.apply-region::after {
+  content: "";
+  display: block;
+  height: 1rem;
+  pointer-events: none;
+}
+
+.apply-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 1.25rem;
+  border-bottom: 1px solid var(--evu-border);
+  background: var(--evu-card);
+  color: var(--evu-card-foreground);
+}
+
+.apply-bar[hidden],
+.apply-result[hidden],
+.apply-progress[hidden] {
+  display: none;
+}
+
+.apply-bar__text {
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.apply-bar__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Review would lead back to the page it is on. */
+body:has(#page-pending:not([hidden])) #apply-bar-review {
+  display: none;
+}
+
+/* Pending keeps an Apply for re-applying with nothing waiting; while the bar is up, the bar's is the one. */
+body:has(#apply-bar:not([hidden])) #pending-apply {
+  display: none;
+}
+
+.apply-session,
+.connection-banner,
+.read-only-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin: 0;
+  padding: 0.5rem 1.25rem;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.apply-session[hidden],
+.apply-session [hidden],
+.connection-banner[hidden],
+.connection-banner [hidden],
+.read-only-notice[hidden] {
+  display: none;
+}
+
+.apply-session__detail,
+.connection-banner__detail {
+  margin: 0;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.connection-banner__detail:empty {
+  display: none;
+}
+
+.connection-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.stale-tag,
+.not-loaded-tag {
+  flex: none;
+}
+
+.apply-session__note {
+  margin: 0.25rem 0 0;
+}
+
+.apply-session__note:empty {
+  display: none;
+}
+
+.apply-session__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* A long list of findings must not push the whole page out of view. */
+.apply-result {
+  max-height: 40vh;
+  overflow: auto;
+  padding: 0.5rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--evu-border);
+  background: var(--evu-card);
+}
+
+.apply-result__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.apply-result__dismiss {
+  flex: none;
+  margin-left: auto;
+}
+
+.apply-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--evu-muted-foreground);
+  font-size: 0.875rem;
+}
+
+.apply-progress li:not(:last-child)::after {
+  content: "→" / "";
+  margin-left: 0.5rem;
+}
+
+/* Each state differs by more than its colour. */
+.apply-progress .is-active {
+  color: var(--evu-foreground);
+  font-weight: 600;
+}
+
+.apply-progress .is-done {
+  color: var(--evu-foreground);
+}
+
+.apply-progress .is-done::before {
+  content: "✓ " / "";
+}
+
+.apply-progress .is-failed {
+  color: var(--evuproxy-danger-text);
+  font-weight: 600;
+}
+
+.apply-progress .is-failed::before {
+  content: "✕ " / "";
+}
+
+.apply-result #apply-msg {
+  margin: 0.35rem 0 0;
+}
+
+.apply-result #apply-msg:empty {
+  display: none;
+}
+
+.apply-result .pending-validate-panel {
+  margin: 0.5rem 0 0;
 }
 
 /* Page title row + contextual help ("?") triggers */

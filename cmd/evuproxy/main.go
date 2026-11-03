@@ -1,11 +1,15 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/oschwald/geoip2-golang"
 	"github.com/spf13/cobra"
@@ -25,6 +29,12 @@ var (
 )
 
 func main() {
+	if err := newRootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "evuproxy",
 		Short: "EvuProxy — WireGuard + nftables forwarding control",
@@ -35,6 +45,9 @@ func main() {
 		cmdMetrics(),
 		cmdVersion(),
 		cmdReload(),
+		cmdReloadConfirm(),
+		cmdReloadRevert(),
+		cmdReloadStatus(),
 		cmdUpdateGeo(),
 		cmdStatus(),
 		cmdEnsureWgNetworkd(),
@@ -49,9 +62,7 @@ func main() {
 		cmdPeerSet(),
 		cmdValidate(),
 	)
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return root
 }
 
 func cmdVersion() *cobra.Command {
@@ -65,11 +76,78 @@ func cmdVersion() *cobra.Command {
 }
 
 func cmdReload() *cobra.Command {
-	return &cobra.Command{
+	var confirmWithin time.Duration
+	var boot bool
+	c := &cobra.Command{
 		Use:   "reload",
 		Short: "Regenerate and apply WireGuard + nftables from config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return apply.Reload(cmd.Context(), cfgPath)
+			if boot {
+				return apply.ReloadAtBoot(cmd.Context(), cfgPath)
+			}
+			if confirmWithin == 0 {
+				return apply.Reload(cmd.Context(), cfgPath)
+			}
+			if confirmWithin%time.Second != 0 {
+				return fmt.Errorf("--confirm-within must be whole seconds")
+			}
+			session, err := apply.ReloadWithConfirm(cmd.Context(), cfgPath, int(confirmWithin/time.Second), func(string) {})
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Applied. `evuproxy reload-confirm` keeps it from this shell, which can outlive a cut and proves nothing, so open a new connection first; reverting at %s.\n", session.Deadline.Local().Format(time.RFC3339))
+			return err
+		},
+	}
+	c.Flags().DurationVar(&confirmWithin, "confirm-within", 0, "revert automatically unless `evuproxy reload-confirm` runs within this time (e.g. 60s)")
+	c.Flags().BoolVar(&boot, "boot", false, "what evuproxy.service runs: with apply.confirm on in the last applied config, apply that config and leave edits in config.yaml unapplied")
+	c.MarkFlagsMutuallyExclusive("boot", "confirm-within")
+	return c
+}
+
+func cmdReloadConfirm() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reload-confirm",
+		Short: "Keep an Apply that is waiting for confirmation",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apply.ConfirmApply(cmd.Context(), cfgPath)
+		},
+	}
+}
+
+func cmdReloadRevert() *cobra.Command {
+	var reason, token string
+	c := &cobra.Command{
+		Use:   "reload-revert",
+		Short: "Revert an Apply that is waiting for confirmation, or retry a revert that failed",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			err := apply.RevertApply(cmd.Context(), cfgPath, reason, token)
+			// A timer that lost its session has nothing to do; a confirm got there first.
+			if token != "" && errors.Is(err, apply.ErrNoConfirmSession) {
+				return nil
+			}
+			return err
+		},
+	}
+	c.Flags().StringVar(&reason, "reason", apply.RevertReasonManual, "why this is being reverted")
+	c.Flags().StringVar(&token, "token", "", "do nothing unless this is the current session's timer")
+	_ = c.Flags().MarkHidden("reason")
+	_ = c.Flags().MarkHidden("token")
+	return c
+}
+
+func cmdReloadStatus() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reload-status",
+		Short: "Print any Apply waiting for confirmation and the last revert, as JSON",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := apply.ReadConfirmStatus(cmd.Context(), cfgPath)
+			if err != nil {
+				return err
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(st)
 		},
 	}
 }
@@ -79,7 +157,8 @@ func cmdUpdateGeo() *cobra.Command {
 		Use:   "update-geo",
 		Short: "Download country zones and refresh nftables geo sets",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return apply.UpdateGeo(cmd.Context(), cfgPath)
+			_, err := apply.UpdateGeo(cmd.Context(), cfgPath)
+			return err
 		},
 	}
 }
@@ -138,7 +217,8 @@ func cmdDiagnostics() *cobra.Command {
 }
 
 func cmdServe() *cobra.Command {
-	var listen, tokenFile, corsOrigins, metricsDB, metricsListen string
+	var listen, tokenFile, readTokenFile, corsOrigins, metricsDB, metricsListen string
+	var mtlsListen, mtlsCert, mtlsKey, mtlsClientCA string
 	var metricsListenInsecure bool
 	c := &cobra.Command{
 		Use:   "serve",
@@ -159,6 +239,20 @@ func cmdServe() *cobra.Command {
 				}
 				tok = strings.TrimSpace(string(b))
 			}
+			readTok := strings.TrimSpace(os.Getenv("EVUPROXY_API_READ_TOKEN"))
+			if readTokenFile != "" {
+				b, err := os.ReadFile(readTokenFile)
+				switch {
+				case err == nil:
+					readTok = strings.TrimSpace(string(b))
+				case cmd.Flags().Changed("read-token-file"):
+					return err
+				case !errors.Is(err, fs.ErrNotExist):
+					// The read token is optional, and a file this process can't read (an
+					// unprivileged service user, say) must not stop an upgraded API from starting.
+					slog.Warn("read token file ignored", "err", err)
+				}
+			}
 			ml := strings.TrimSpace(metricsListen)
 			if ml == "" {
 				ml = strings.TrimSpace(os.Getenv("EVUPROXY_METRICS_LISTEN"))
@@ -176,11 +270,16 @@ func cmdServe() *cobra.Command {
 				MetricsListen:         ml,
 				MetricsListenInsecure: metricsListenInsecure,
 				Token:                 tok,
+				ReadToken:             readTok,
 				Config:                cfgPath,
 				MetricsDB:             strings.TrimSpace(metricsDB),
 				Logger:                slog.Default(),
 				Version:               version,
 				CORSOrigins:           corsOrigins,
+				MTLSListen:            mtlsListen,
+				MTLSCertFile:          mtlsCert,
+				MTLSKeyFile:           mtlsKey,
+				MTLSClientCAFile:      mtlsClientCA,
 			}
 			geopath := strings.TrimSpace(os.Getenv("EVUPROXY_GEOLITE_MMDB"))
 			if geopath != "" {
@@ -199,8 +298,13 @@ func cmdServe() *cobra.Command {
 			return s.Run()
 		},
 	}
-	c.Flags().StringVar(&listen, "listen", "127.0.0.1:9847", "listen address")
-	c.Flags().StringVar(&tokenFile, "token-file", "/etc/evuproxy/api.token", "file containing API bearer token")
+	c.Flags().StringVar(&listen, "listen", "127.0.0.1:9847", "listen address (token only); empty disables it when --mtls-listen is set")
+	c.Flags().StringVar(&mtlsListen, "mtls-listen", "", "optional extra listen address requiring a client certificate and the token; needs --mtls-cert, --mtls-key and --mtls-client-ca")
+	c.Flags().StringVar(&mtlsCert, "mtls-cert", "", "PEM server certificate for --mtls-listen")
+	c.Flags().StringVar(&mtlsKey, "mtls-key", "", "PEM server private key for --mtls-listen")
+	c.Flags().StringVar(&mtlsClientCA, "mtls-client-ca", "", "PEM private CA that signs client certificates for --mtls-listen")
+	c.Flags().StringVar(&tokenFile, "token-file", "/etc/evuproxy/api.token", "file containing API bearer token (full access)")
+	c.Flags().StringVar(&readTokenFile, "read-token-file", "/etc/evuproxy/api-read.token", "file containing an optional read-only API token; also EVUPROXY_API_READ_TOKEN (the default path may be absent)")
 	c.Flags().StringVar(&corsOrigins, "cors-origins", "", "comma-separated allowed Origin values for cross-origin browser UIs; avoid * except local dev (token auth still required)")
 	c.Flags().StringVar(&metricsDB, "metrics-db", "", "peer metrics SQLite path (default: metrics.sqlite beside --config)")
 	c.Flags().StringVar(&metricsListen, "metrics-listen", "", "optional loopback Prometheus scrape address (e.g. 127.0.0.1:9848); also EVUPROXY_METRICS_LISTEN")

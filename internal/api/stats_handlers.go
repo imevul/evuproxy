@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/imevul/evuproxy/internal/apply"
+	"github.com/imevul/evuproxy/internal/autopause"
 	"github.com/imevul/evuproxy/internal/geoip"
 	"github.com/imevul/evuproxy/internal/metrics"
 	"github.com/imevul/evuproxy/internal/state"
@@ -48,6 +49,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.jsonOK(w, map[string]string{"report": out})
 }
 
+// handleAutoPause reports the routes the auto-pause loop has paused. The state is runtime-only,
+// so it comes from the loop rather than from config.
+func (s *Server) handleAutoPause(w http.ResponseWriter, r *http.Request) {
+	paused := []autopause.PausedRoute{}
+	if s.autoPause != nil {
+		paused = append(paused, s.autoPause.PausedRoutes()...)
+	}
+	s.jsonOK(w, map[string]any{"paused_routes": paused})
+}
+
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	o, err := apply.OverviewFromConfig(s.Config)
 	if err != nil {
@@ -55,7 +66,11 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		s.jsonErr(w, http.StatusInternalServerError, "could not load overview")
 		return
 	}
-	s.jsonOK(w, o)
+	granted, _ := s.scopeOf(bearerTokenFromRequest(r))
+	s.jsonOK(w, struct {
+		*apply.Overview
+		Scope string `json:"scope"`
+	}{o, granted.String()})
 }
 
 func (s *Server) metricsDBPath() string {
@@ -97,6 +112,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jsonOK(w, st)
+}
+
+// handleStatsRouteAccepted is route_accepted alone, for a page that polls it. GET /stats also lists
+// the whole tables, which grows with the geo sets on nft older than 1.1.
+func (s *Server) handleStatsRouteAccepted(w http.ResponseWriter, r *http.Request) {
+	s.jsonOK(w, map[string]any{"route_accepted": apply.RouteAcceptedCounters(s.Config)})
 }
 
 func (s *Server) handleAbout(w http.ResponseWriter, r *http.Request) {

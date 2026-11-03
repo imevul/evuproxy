@@ -1,0 +1,89 @@
+name: UI tests
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  playwright:
+    name: playwright (${{ matrix.target }})
+    # Pinned, not ubuntu-latest: `playwright install --with-deps` only supports
+    # the Ubuntu releases the locked Playwright version knows about.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      # Report both suites even if one fails.
+      fail-fast: false
+      matrix:
+        # Separate runners, so each suite gets its own mock state and its own
+        # playwright-report/ and test-results/, which a later run would wipe.
+        target: [a11y, ui-behavior]
+    env:
+      PWTRACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: devtools/playwright-visual/package-lock.json
+      - name: Install Playwright
+        # As `make playwright-deps`, plus the system libraries Chromium needs on a clean runner.
+        working-directory: devtools/playwright-visual
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Start mock stack
+        # docker/mock-api/state/ is empty after checkout and goes away with the runner.
+        run: make up
+      - name: Wait for mock stack
+        # Goes through the UI's nginx to the mock API, so it covers both containers.
+        run: |
+          curl -sSf -o /dev/null --retry 30 --retry-delay 2 --retry-all-errors \
+            -H "Authorization: Bearer dev" http://127.0.0.1:9080/api/v1/status
+      - name: Run suite
+        run: make ${{ matrix.target }}
+      - name: Show mock stack logs
+        if: failure()
+        run: docker compose -f docker-compose.dev.yml logs --no-color
+      - name: Upload report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.target }}
+          path: |
+            devtools/playwright-visual/playwright-report/
+            devtools/playwright-visual/test-results/
+          retention-days: 14
+
+  visual-baseline:
+    # Not a required check for its first cycle, decided on ENG-148. Don't add it to the
+    # required checks before the follow-up issue to ENG-188 says so.
+    name: visual baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PWTRACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare screenshots with the baseline
+        # Everything runs in the Playwright image. Native runners render differently.
+        run: make visual-check
+      - name: Show mock stack logs
+        if: failure()
+        run: docker compose -p evuproxy-visual -f docker-compose.dev.yml -f devtools/playwright-visual/docker-compose.visual.yml logs --no-color mock-api evuproxy-ui
+      - name: Upload diff images, report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-baseline
+          path: |
+            devtools/playwright-visual/screenshots/visual-diff/
+            devtools/playwright-visual/playwright-report/
+            devtools/playwright-visual/test-results/
+          retention-days: 14

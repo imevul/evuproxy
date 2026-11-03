@@ -15,10 +15,38 @@ type Config struct {
 	WireGuard   WireGuard   `yaml:"wireguard" json:"wireguard"`
 	Network     Network     `yaml:"network" json:"network"`
 	Forwarding  Forwarding  `yaml:"forwarding" json:"forwarding"`
+	AutoPause   AutoPause   `yaml:"auto_pause,omitempty" json:"auto_pause,omitzero"`
 	Geo         Geo         `yaml:"geo" json:"geo"`
 	CrowdSec    CrowdSec    `yaml:"crowdsec,omitempty" json:"crowdsec,omitempty"`
+	Stats       StatsConfig `yaml:"stats,omitempty" json:"stats,omitempty"`
 	InputAllows []AllowRule `yaml:"input_allows" json:"input_allows"`
 	Peers       []Peer      `yaml:"peers" json:"peers"`
+	// Apply is left out of existing configs, which keeps Apply one-way until it is turned on.
+	Apply ApplySettings `yaml:"apply,omitempty" json:"apply,omitempty"`
+}
+
+// Limits on how long an Apply can wait for confirmation before reverting.
+const (
+	DefaultConfirmTimeoutSeconds = 60
+	MinConfirmTimeoutSeconds     = 10
+	MaxConfirmTimeoutSeconds     = 3600
+)
+
+// ApplySettings controls how the web UI applies config. POST /reload and `evuproxy
+// reload` don't read it: they choose per call, so scripts keep their behavior.
+type ApplySettings struct {
+	// Confirm makes the web UI's Apply revert by itself unless it is confirmed in time.
+	Confirm bool `yaml:"confirm,omitempty" json:"confirm,omitempty"`
+	// ConfirmTimeoutSeconds is how long to wait for confirmation (0 = DefaultConfirmTimeoutSeconds).
+	ConfirmTimeoutSeconds int `yaml:"confirm_timeout_seconds,omitempty" json:"confirm_timeout_seconds,omitempty"`
+}
+
+// EffectiveConfirmTimeoutSeconds returns the configured wait, or the default when unset.
+func (a ApplySettings) EffectiveConfirmTimeoutSeconds() int {
+	if a.ConfirmTimeoutSeconds == 0 {
+		return DefaultConfirmTimeoutSeconds
+	}
+	return a.ConfirmTimeoutSeconds
 }
 
 type WireGuard struct {
@@ -54,6 +82,8 @@ type Forwarding struct {
 
 // ForwardRoute maps public TCP or UDP ports to a peer tunnel IPv4 (must match a peer's tunnel_ip).
 type ForwardRoute struct {
+	// Name is an optional label for operators; not used by the rules engine.
+	Name     string   `yaml:"name,omitempty" json:"name,omitempty"`
 	Proto    string   `yaml:"proto" json:"proto"`                           // tcp, udp, both, or comma/plus-separated e.g. tcp,udp
 	Ports    []string `yaml:"ports" json:"ports"`                           // port/range/brace-list strings (nft dport set syntax)
 	TargetIP string   `yaml:"target_ip" json:"target_ip"`                   // IPv4, no CIDR
@@ -70,6 +100,8 @@ type ForwardRoute struct {
 	GeoCountries []string `yaml:"geo_countries,omitempty" json:"geo_countries,omitempty"`
 	// RateLimit optional per-route overrides (Advanced); merges with forwarding.rate_limit.
 	RateLimit RateLimit `yaml:"rate_limit,omitempty" json:"rate_limit,omitempty"`
+	// PauseWhenPeerOffline lets the auto-pause loop pause this route while its target peer is offline.
+	PauseWhenPeerOffline bool `yaml:"pause_when_peer_offline,omitempty" json:"pause_when_peer_offline,omitempty"`
 }
 
 type Geo struct {
@@ -97,6 +129,12 @@ func (g Geo) EffectiveSetName() string {
 	return DefaultGeoSetName
 }
 
+// StatsConfig controls optional observability additions to the generated ruleset.
+type StatsConfig struct {
+	// DropCounters adds an nft counter to generated drop rules so GET /stats reports them (off by default).
+	DropCounters bool `yaml:"drop_counters,omitempty" json:"drop_counters,omitempty"`
+}
+
 type AllowRule struct {
 	Proto    string `yaml:"proto" json:"proto"`
 	DPort    string `yaml:"dport" json:"dport"` // single port, range, or brace list e.g. "{80,443}"
@@ -116,6 +154,11 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Parse(b)
+}
+
+// Parse is Load for a file already read.
+func Parse(b []byte) (*Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, err
@@ -203,6 +246,9 @@ func ParseRouteProtocols(s string) ([]string, error) {
 }
 
 func (c *Config) Validate() error {
+	if t := c.Apply.ConfirmTimeoutSeconds; t != 0 && (t < MinConfirmTimeoutSeconds || t > MaxConfirmTimeoutSeconds) {
+		return fmt.Errorf("apply.confirm_timeout_seconds must be between %d and %d", MinConfirmTimeoutSeconds, MaxConfirmTimeoutSeconds)
+	}
 	if c.WireGuard.Interface == "" {
 		return fmt.Errorf("wireguard.interface is required")
 	}
@@ -259,6 +305,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.validateForwardingRoutes(); err != nil {
+		return err
+	}
+	if err := ValidateAutoPause(c.AutoPause); err != nil {
 		return err
 	}
 	if err := ValidateBreakGlassCIDRs(c.Geo.BreakGlassCIDRs); err != nil {
@@ -319,6 +368,10 @@ func (c *Config) validateForwardingRoutes() error {
 		}
 	}
 	for i, r := range c.Forwarding.Routes {
+		// Before the Disabled check: the name is shown whether or not the route is on.
+		if err := validRouteName(r.Name); err != nil {
+			return fmt.Errorf("forwarding.routes[%d]: %w", i, err)
+		}
 		if r.Disabled {
 			continue
 		}

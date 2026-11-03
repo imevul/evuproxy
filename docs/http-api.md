@@ -9,7 +9,7 @@
 ### Default / installer behavior
 
 - **Bind:** the packaged unit runs `evuproxy serve` on **`127.0.0.1:9847`** (see [`templates/evuproxy-api.service`](../templates/evuproxy-api.service)). Override by editing the unit or a drop-in.
-- **Token file:** `/etc/evuproxy/api.token` is created by the installer if missing (mode `0600`). The API uses **`--token-file`** pointing at that path.
+- **Token files:** `/etc/evuproxy/api.token` (full access) and `/etc/evuproxy/api-read.token` ([read-only](#read-and-write-tokens)) are created by the installer if missing (mode `0600`). The API uses **`--token-file`** pointing at the first, and reads the second from its default **`--read-token-file`** path.
 - **Interactive install (TTY):** the script asks whether to **enable** the HTTP API at boot. The **`evuproxy-api.service`** unit file is always installed; only **`systemctl enable`** is optional. Default is **yes** (same as previous behavior if you press Enter). Answers **`y`**, **`yes`**, or Enter mean enable; **`n`** or **`no`** mean do not enable.
 - **`EVUPROXY_INSTALL_API`:** if this variable is **set** in the environment (including when stdin **is** a TTY), it **overrides** the prompt. Use **`0`**, **`false`**, **`no`**, or **`off`** (case-insensitive) to skip enabling; any other value enables. If **unset** and stdin is **not** a TTY, the default is **do not enable** — set **`EVUPROXY_INSTALL_API=1`** (or any non-off value) in automation when you want the API at boot.
 - **Enable later:** if the unit was not enabled, after `systemctl daemon-reload` run:
@@ -50,16 +50,125 @@ The installer runs the API as **root** when enabled (full functionality). If you
 
 ## Binding, CORS, and authentication
 
-- **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment variable **`EVUPROXY_API_TOKEN`** or **`evuproxy serve --token-file`** (default `/etc/evuproxy/api.token`).
+- **Default bind:** `127.0.0.1:9847` — override with `evuproxy serve --listen`. Token: environment variable **`EVUPROXY_API_TOKEN`** or **`evuproxy serve --token-file`** (default `/etc/evuproxy/api.token`). To require a client certificate as well, see [Optional mTLS listener](#optional-mtls-listener).
 - **GeoLite2 (log flags):** Optional **`EVUPROXY_GEOLITE_MMDB`** path to a Country **`.mmdb`** file. If the file cannot be opened, **`evuproxy serve`** writes an explanation to **stderr** (see **`journalctl -u evuproxy-api`**) and starts without **`line_geo`** on **`GET /api/v1/logs`**. Details: [Third-party data](third-party-data.md).
-- **Cross-origin UI:** If the admin UI is opened from another origin (different scheme/host/port than the API), the browser needs CORS. Enable with **`evuproxy serve --cors-origins`**: a comma-separated list of exact `Origin` values (for example `https://myui.example.com,http://10.0.0.2:9080`), or `*` to allow any origin. The API remains protected by the bearer token; prefer an explicit list over `*` when the API is reachable from untrusted networks. With `*`, any website the operator opens could send credentialed requests if the token is stored in the UI — keep the API on localhost or use an explicit origin list when the browser can load untrusted pages. **`evuproxy serve` logs a warning** when the API bind is not loopback and CORS is `*`.
+- **Cross-origin UI:** If the admin UI is opened from another origin (different scheme/host/port than the API), the browser needs CORS. Enable with **`evuproxy serve --cors-origins`**: a comma-separated list of exact `Origin` values (for example `https://myui.example.com,http://10.0.0.2:9080`), or `*` to allow any origin. The API remains protected by the bearer token; prefer an explicit list over `*` when the API is reachable from untrusted networks. With `*`, any website the operator opens can read API responses and send state-changing requests through the browser if it has the token or a proxy adds it, and the cross-origin check below is off — keep the API on localhost or use an explicit origin list when the browser can load untrusted pages. **`evuproxy serve` logs a warning** when CORS is `*`, and another when the API bind is also not loopback. The UI's [Content-Security-Policy](security-and-privacy.md#content-security-policy) must allow the API too: set **`EVUPROXY_UI_CONNECT_SRC`** to the API's origin on the UI container, or the browser blocks the calls before CORS comes into it.
+- **Cross-origin refusal:** State-changing requests (any method except `GET`, `HEAD` and `OPTIONS`) from a browser on another origin get **HTTP 403** with **`error_code: cross_origin_refused`**, unless that origin is in **`--cors-origins`**. Clients that send neither **`Origin`** nor **`Sec-Fetch-Site`**, such as curl and CI, are not affected. A reverse proxy serving the UI on plain HTTP must forward the original **`Host`** including the port. Details: [Security and privacy](security-and-privacy.md#cross-site-request-forgery-csrf).
 - **No DNS name required:** The API often runs on **`127.0.0.1:9847`** without a hostname. For cross-origin UI, list the **exact browser Origin** (scheme + host + port), e.g. `http://127.0.0.1:9080` or `http://192.168.1.10:9080`. Same-origin setups (UI and API behind one reverse proxy, or UI opened via SSH tunnel to the API host) do not need CORS.
 - **QR codes and CORS:** **`POST /api/v1/peers/{index}/qr.png`** sends the WireGuard config in the POST body (not the query string). The global CORS middleware answers **OPTIONS** preflight for allowed origins, so cross-origin QR works when `--cors-origins` includes your UI origin.
 - **Auth:** `Authorization: Bearer …` or `X-API-Token` on `/api/v1/*` routes. **`GET /healthz`** is unauthenticated (for probes). **Reverse proxies** should not log `Authorization` or `X-API-Token` values (redact or omit these headers in access logs).
 
+## Read and write tokens
+
+**`api.token`** is the write token and can do everything, as it always has. A second, optional **read token** is for monitoring and dashboards: if it leaks, it can't change the firewall, push a config or restore a backup.
+
+- **Setting it:** **`evuproxy serve --read-token-file`** (default **`/etc/evuproxy/api-read.token`**) or **`EVUPROXY_API_READ_TOKEN`**. As with the write token, a file that can be read wins over the variable. New installs get the file, mode `0600`, from the installer.
+- **Upgrading:** nothing changes until you add a read token. To add one, create the file and restart the API:
+  ```bash
+  (umask 077; head -c 32 /dev/urandom | base64 | tr -d '\n' >/etc/evuproxy/api-read.token)
+  systemctl restart evuproxy-api.service
+  ```
+- **A missing file:** the default path can be absent, which means no read token. A path you named with the flag has to exist, or **`evuproxy serve`** refuses to start. A default-path file the API can't read logs a warning, and the API starts without a read token.
+- **Answers:** **401** for a missing or wrong token. **403** with **`error_code`:** `insufficient_scope` for the read token on a route that needs the write token. **`scope`** on **`GET /overview`** says which token was sent.
+- **New routes** need the write token unless they are marked otherwise, and a test fails until each one has been classified.
+
+This limits a leaked monitoring token. It doesn't make script access to the UI origin safe, because an admin's browser still holds the write token. Per-token scopes, expiry and rotation aren't part of this.
+
+### What the read token can see
+
+It can't reach any private key, but **it does see the network's layout**, so treat it as confidential:
+
+| Route | What it shows |
+|-------|---------------|
+| `/overview` | Routes with their targets and source allow and deny lists, peer names, tunnel subnet, interface names, server public key. The private key is read only to derive the public key. |
+| `/status` | `wg show`, which prints `(hidden)` for the private key and preshared keys, and the full `inet evuproxy` ruleset. |
+| `/stats` | Peer public keys, endpoints (the peers' public IPs), allowed IPs and traffic. `wg show … dump` does print the private key and preshared keys, but the private key's line and the preshared key field are dropped before the answer is built. |
+| `/logs` | Source and destination addresses of dropped packets. |
+| `/events` | Audit events, including backup paths and short error details. |
+| `/metrics`, `/metrics/peers` | Rule counters and peer latency. |
+
+### Routes that need the write token only to read
+
+Checked against the code, these are the routes that could be expected to expose secrets:
+
+| Route | WireGuard private keys | Network layout |
+|-------|------------------------|----------------|
+| `GET /config` | No. The config has only **`private_key_file`**, a path, and peers have only public keys. | Yes: everything in the config, including break-glass and allow lists. |
+| `GET /config.yaml` | No, unless someone has pasted one into the file, because this returns it as is, comments included. | Yes, as above. |
+| `GET /diagnostics.md` | No. Lines that look like a private key are redacted, and the WireGuard section comes from `wg show`, which hides them. | Yes: interfaces, routes, sockets, the ruleset, a sanitized config and unit logs. |
+| `POST /backup` | **In the archive, not the answer.** The answer is only the path, but the archive on the host holds all of `/etc/evuproxy`, including **`wg-private.key`** and both token files. Restoring an archive also restores its tokens. | Same archive. |
+| `POST /peers/onboard-bundle` | Only what the caller sent. It encrypts the request body and reads nothing from the host. | No. |
+
+**`GET /pending`** (the ruleset and last applied config), **`GET /preferences`** (the WireGuard endpoint), **`GET /config/notes`** (free text), **`GET /auto-pause`**, **`GET /geo/summary`**, **`GET /client-ip`**, **`GET /backup/info`**, **`GET /about`**, **`GET /apply/session`**, **`GET /reload/progress`** and **`GET /stats/route-accepted`** hold no private keys either. They need the write token because a monitoring token has no use for them, and the read list is kept short on purpose.
+
+## Optional mTLS listener
+
+Off by default. Without the flags below, **`evuproxy serve`** behaves exactly as described above. Turning it on adds a second listener that serves the same API over TLS 1.3 and requires **both** a client certificate and the API token:
+
+| Client presents | Result on the mTLS listener |
+| --- | --- |
+| Valid client certificate and token | Accepted |
+| Valid client certificate, missing or wrong token | **401** |
+| Token only, or a client certificate that is expired, signed by another CA, or has an extended key usage list without **`clientAuth`** | Refused during the TLS handshake (no HTTP response) |
+
+A certificate from the CA with no extended key usage at all is accepted, because X.509 treats that as valid for any purpose. The commands below always set one.
+
+### Setup
+
+1. **Create a private CA for this API.** Do not use a public or shared CA: every certificate it has issued would be accepted.
+   ```bash
+   cd /etc/evuproxy && mkdir -p mtls && chmod 700 mtls && cd mtls
+   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+     -keyout ca.key -out ca.pem -subj "/CN=EvuProxy API CA"
+   ```
+   `serve` only needs **`ca.pem`**, so move **`ca.key`** off the server once the certificates are issued. Backups of **`/etc/evuproxy`** include everything under **`mtls/`**, including keys.
+2. **Issue the server certificate.** Clients connect to this name or IP, so it must be in the SAN (the example uses a WireGuard or LAN address).
+   ```bash
+   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+     -keyout server.key -out server.csr -subj "/CN=evuproxy-api"
+   openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 365 -out server.pem \
+     -extfile <(printf "subjectAltName=IP:10.100.0.1\nextendedKeyUsage=serverAuth\n")
+   ```
+3. **Issue a client certificate** for each client, ideally on the client so its key never leaves it. Short lifetimes limit the damage from a lost key (see [revocation](security-and-privacy.md#optional-mtls-for-the-api)).
+   ```bash
+   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+     -keyout client.key -out client.csr -subj "/CN=automation"
+   openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 30 -out client.pem \
+     -extfile <(printf "extendedKeyUsage=clientAuth\n")
+   ```
+4. **Enable the listener** with **`systemctl edit evuproxy-api.service`**:
+   ```ini
+   [Unit]
+   After=evuproxy.service
+   StartLimitIntervalSec=0
+
+   [Service]
+   ExecStart=
+   ExecStart=/usr/local/bin/evuproxy serve --config /etc/evuproxy/config.yaml --listen 127.0.0.1:9847 --token-file /etc/evuproxy/api.token --mtls-listen 10.100.0.1:9848 --mtls-cert /etc/evuproxy/mtls/server.pem --mtls-key /etc/evuproxy/mtls/server.key --mtls-client-ca /etc/evuproxy/mtls/ca.pem
+   RestartSec=5
+   ```
+   **`serve`** exits if it cannot bind **`--mtls-listen`**, and that stops the plain listener and the admin UI too. A WireGuard address does not exist until **`evuproxy.service`** has brought the interface up, so **`After=`** makes the API wait for it at boot. **`RestartSec`** and **`StartLimitIntervalSec=0`** keep systemd retrying if the address appears later, for example after a failed **`reload`** at boot, instead of giving up after five quick failures.
+
+   Then restart the service and add an **`input_allows`** rule for TCP 9848 (see [config](config.md)). These rules have no source filter, so this one opens the port to every source on every interface. The bind address is what limits who can reach the listener, and the certificate and token decide who gets in. It is not a strict boundary: Linux also accepts packets for that address on other interfaces, so a host on a directly connected network can reach a WireGuard address by routing it through this host.
+5. **Call the API** with the certificate and the token:
+   ```bash
+   curl --cacert ca.pem --cert client.pem --key client.key \
+     -H "Authorization: Bearer $(cat api.token)" https://10.100.0.1:9848/api/v1/status
+   ```
+
+### Behavior
+
+- **Flags:** **`--mtls-listen`**, **`--mtls-cert`**, **`--mtls-key`**, and **`--mtls-client-ca`** must be set together. A partial setup, or an unreadable or invalid file, stops **`serve`** at startup; it never falls back to serving without the check. If the mTLS listener cannot bind or fails later, the whole process exits, including the plain listener, so systemd can restart it.
+- **Plain listener:** **`--listen`** keeps accepting the token alone. Keep it on loopback, where the admin UI's nginx reaches it. **`serve` logs a warning** if it is not loopback while mTLS is on. If you do not use the UI, **`--listen ""`** turns it off.
+- **Admin UI:** the UI proxies plain HTTP to **`--listen`** and does not use the mTLS listener. Browsers are not a supported mTLS client here. Do not give the UI's proxy a client certificate: anyone who can reach the proxy would then pass the check with its certificate.
+- **`GET /healthz`:** needs no token, but on the mTLS listener it still needs a client certificate. Point unauthenticated probes at the plain listener.
+- **Rotation:** certificates and the CA are read at startup, so restart **`serve`** after replacing them.
+- **Prometheus:** **`--metrics-listen`** is separate and does not use mTLS.
+- **Read token:** works here too, with the same [limits](#read-and-write-tokens). The certificate decides who may connect, and the token decides what they may do.
+
 ## Mutating operations (serialization)
 
-These endpoints change on-disk config, backups, or live nftables / WireGuard: **`PUT /config`**, **`POST /config/discard`**, **`POST /config/restore-previous-applied`**, **`POST /reload`**, **`POST /update-geo`**, **`POST /backup`**, **`POST /restore`**. Only one runs at a time; a second concurrent request gets **HTTP 503** with a stable error message (no queue). Use retries with backoff on the client.
+These endpoints change on-disk config, backups, or live nftables / WireGuard: **`PUT /config`**, **`POST /config/discard`**, **`POST /config/restore-previous-applied`**, **`POST /reload`**, **`POST /apply/confirm`**, **`POST /apply/revert`**, **`POST /apply/reverted/restore`**, **`POST /apply/reverted/dismiss`**, **`POST /update-geo`**, **`POST /backup`**, **`POST /restore`**. Only one runs at a time; a second concurrent request gets **HTTP 503** with a stable error message (no queue). Use retries with backoff on the client.
 
 ## Backup and restore paths
 
@@ -70,38 +179,186 @@ These endpoints change on-disk config, backups, or live nftables / WireGuard: **
 All paths below are under **`/api/v1`** unless noted.
 
 
-| Method        | Path                                                            | Purpose                                                                                                                                                   |
-| ------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET` / `PUT` | `/config`                                                       | Read or replace full config. **`PUT`** accepts JSON, validates, writes **YAML** to disk; **does not** reload WireGuard/nftables until **`POST /reload`**. Does not modify **`config.yaml.bak`** or **`config.yaml.bak.N`**. |
-| `POST`        | `/config/discard`                                               | Replace **`config.yaml`** with **`config.yaml.bak`** when they differ (validates `.bak`). **400** if no `.bak`, already in sync, or invalid backup. Does not reload the host. |
-| `POST`        | `/config/restore-previous-applied`                              | Replace **`config.yaml`** with the first **`config.yaml.bak.N`** (`N` = 1…5) whose contents differ from **`config.yaml.bak`**. Does not rotate or modify any **`.bak*`** files. **400** if no such history entry or invalid YAML. Does not reload the host. |
-| `GET`         | `/pending`                                                      | Compare on-disk config to last successful apply. **`nftables`** is the **generated ruleset text** from the current on-disk config. **`nftables_baseline`** is the contents of **`generated/nftables.nft`** when **`os.ReadFile`** succeeds (typically the ruleset last written by **`POST /reload`**); if the file is missing or unreadable (permissions, I/O), it is an empty string. **`discard_available`**: **`config.yaml.bak`** exists and its raw bytes differ from **`config.yaml`**. **`restore_previous_applied_available`**: **`.bak`** exists and some **`.bak.N`** differs from **`.bak`**. |
-| `GET` / `PUT` | `/preferences`                                                   | UI helper fields in **`ui-preferences.json`**: tunnel subnet CIDR, WireGuard endpoint, **`metrics_collection_enabled`** (default false; **`PUT`** is partial merge; legacy **`show_peer_latency`** in JSON is migrated on read). |
-| `GET` / `PUT` | `/config/notes`                                                  | Operator scratchpad stored as **`config-notes.txt`** beside **`config.yaml`** (plain text, size-capped). **`PUT`** body: **`{"text":"…"}`**. Emits **`config_notes_saved`** in audit events. Does not reload WireGuard/nftables. |
-| `GET`         | `/metrics/peers`                                                | Stored peer ICMP metrics (**SQLite**, maintained by **`evuproxy metrics`**). JSON: **`peers`**, **`collection_disabled`**, **`collected_at_utc`**, **`dashboard`** (`last_ping` / `last_10m` min/avg/max ms). Read-only from API; **`serve --metrics-db`** overrides DB path (default **`metrics.sqlite`** beside `--config`). See **[Metrics peers semantics](#metrics-peers-semantics)**. |
-| `POST`        | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config. Also updates **`config.yaml.bak`** / rotation (see [Applying changes](config.md#applying-changes)). |
-| `POST`        | `/update-geo`                                                   | Download zones and refresh geo sets in nftables.                                                                                                          |
-| `GET`         | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`, `/about` | Diagnostics, config summary, **`/metrics`** text for both **inet evuproxy** forward and input chains (either `nft list` failure → 5xx), host stats, recent firewall-related journal lines, version info. **`/logs`** accepts **`?limit=N`** (default **200**) and is rate-limited to **20 requests/minute per token** (excess → **429** with `error_code: rate_limit`). |
-| `GET`         | `/diagnostics.md`                                               | Markdown **host support bundle** (`Content-Disposition: attachment`). Collects WireGuard, routes, sockets, networkd drop-ins, unit/kernel logs, nftables snapshot, sanitized config, version + best-effort UI Docker OCI labels. Secrets redacted (no API token / private keys); public IPs and peer public keys may still appear. Rate-limited (**10**/minute per token → **429** `rate_limit`). CLI: **`evuproxy diagnostics`**. |
-| `POST`        | `/backup?path=…`, `/restore?path=…`                             | Archive or restore under `/etc/evuproxy`. Paths must resolve under **`EVUPROXY_BACKUP_DIR`** (default `/var/backups`). **`backup`** defaults `path` to `/var/backups/evuproxy-config.tgz` if omitted; **`restore`** requires `path`.   |
-| `GET`         | `/healthz`                                                      | Plain `ok` (no `/api/v1` prefix, no token).                                                                                                               |
-| `GET`         | `/config.yaml`                                                  | Raw **`config.yaml` bytes** from disk (`Content-Disposition: attachment`). Same auth as **`GET /config`**.                                               |
-| `GET`         | `/events?limit=`                                                | Recent mutating-operation audit events (JSONL-backed, newest first; default **50**, max **200**). Omit **`limit`** or use **`1`–`200`**; other values return **400** with **`error_code`:** `invalid_limit`. |
-| `GET`         | `/geo/summary`                                                  | Per-country zone file stats (CIDR line counts, approximate IPv4 totals) and optional merged **`nft`** set size; short-lived server cache.                  |
-| `POST`        | `/geo/check-ip`                                                 | Dry-run: would this source IPv4 be allowed or blocked by geoblocking / global denylist / break-glass? Body: **`{"ip":"…"}`** plus optional **`config`** draft (same shape as **`PUT /config`**; not persisted). Uses on-disk zone files and optional GeoLite2 — does **not** probe live nftables. Rate-limited (**30**/minute per token → **429** `rate_limit`). Response: **`{ok, ip, verdict, summary, …}`** with **`verdict`** one of **`allowed`**, **`blocked`**, **`geo_off`**, **`uncertain`** (not enough zone/GeoLite2 evidence), **`invalid`**. |
-| `POST`        | `/routes/test`                                                  | On-demand **TCP/UDP** connect/probe from the host to a route’s **`target_ip`** and port (body: `{"route_index":0,"port":optional}`). Rate-limited.        |
-| `POST`        | `/validate`                                                     | Dry-run: validate config, generate nftables + WireGuard artifacts, run **`nft -c`**; **no** apply and **no** `.bak` changes. Optional JSON body = draft config (not persisted). Response: `{ok, errors?, warnings?, detected_client_ip, ip_detection_source, ip_detection_note?, validated_from_draft?}`. |
-| `GET`         | `/client-ip`                                                    | Operator IPv4 detection for lockout warnings (same logic as validate). |
-| `POST`        | `/peers/{index}/qr.png`                                         | PNG QR code of WireGuard client config text (plain-text body, max 16 KiB). Auth required. |
-| `POST`        | `/peers/generate-keypair`                                       | Generate a WireGuard keypair when the admin UI cannot use Web Crypto (plain HTTP). Returns `{private_key, public_key}` (base64). Auth required. Prefer HTTPS or localhost so keys stay in the browser when possible. |
-| `POST`        | `/peers/onboard-bundle`                                         | Build an **EVUB** onboarding blob (JSON body: `passphrase`, `peer_private_key`, `peer_tunnel_address`, `server_public_key`, `endpoint`, `allowed_ips`, optional `interface_name`). Returns `{blob_base64}`. Same HTTP caveat as keypair generation. |
+The **Scope** column is the token a route needs; see [Read and write tokens](#read-and-write-tokens).
 
+| Method        | Scope | Path                                                            | Purpose                                                                                                                                                   |
+| ------------- | ----- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET` / `PUT` | write | `/config`                                                       | Read or replace full config. **`PUT`** accepts JSON, validates, writes **YAML** to disk; **does not** reload WireGuard/nftables until **`POST /reload`**. Does not modify **`config.yaml.bak`** or **`config.yaml.bak.N`**. **`GET`** returns an **`ETag`**; **`PUT`** accepts **`If-Match`** and answers **409** on a stale revision (see [Config revisions](#config-revisions-etag--if-match)). |
+| `POST`        | write | `/config/discard`                                               | Replace **`config.yaml`** with **`config.yaml.bak`** when they differ (validates `.bak`). **400** if no `.bak`, already in sync, or invalid backup. Does not reload the host. |
+| `POST`        | write | `/config/restore-previous-applied`                              | Replace **`config.yaml`** with the first **`config.yaml.bak.N`** (`N` = 1…5) whose contents differ from **`config.yaml.bak`**. Does not rotate or modify any **`.bak*`** files. **400** if no such history entry or invalid YAML. Does not reload the host. |
+| `GET`         | write | `/pending`                                                      | Compare on-disk config to last successful apply. **`nftables`** is the **generated ruleset text** from the current on-disk config. **`nftables_baseline`** is the contents of **`generated/nftables.nft`** when **`os.ReadFile`** succeeds (typically the ruleset last written by **`POST /reload`**); if the file is missing or unreadable (permissions, I/O), it is an empty string. **`discard_available`**: **`config.yaml.bak`** exists and its raw bytes differ from **`config.yaml`**. **`restore_previous_applied_available`**: **`.bak`** exists and some **`.bak.N`** differs from **`.bak`**. **`discard_change_count`** and **`restore_previous_change_count`**: how many list rows and other values each of those actions would change in **`config.yaml`** (comments, key order and row order do not count); **`0`** when not available or not computable. **`applied_config`**: the last applied config (**`config.yaml.bak`**) in the same shape as **`GET /config`**, for comparing with the saved config. **`null`** when **`.bak`** is missing or no longer loads, or when its hash differs from **`applied_config_sha256`** (it is then not known to be what the host is running). |
+| `GET` / `PUT` | write | `/preferences`                                                   | UI helper fields in **`ui-preferences.json`**: tunnel subnet CIDR, WireGuard endpoint, **`metrics_collection_enabled`** (default false; **`PUT`** is partial merge; legacy **`show_peer_latency`** in JSON is migrated on read). |
+| `GET` / `PUT` | write | `/config/notes`                                                  | Operator scratchpad stored as **`config-notes.txt`** beside **`config.yaml`** (plain text, size-capped). **`PUT`** body: **`{"text":"…"}`**. Emits **`config_notes_saved`** in audit events. Does not reload WireGuard/nftables. |
+| `GET`         | read  | `/metrics/peers`                                                | Stored peer ICMP metrics (**SQLite**, maintained by **`evuproxy metrics`**). JSON: **`peers`**, **`collection_disabled`**, **`collected_at_utc`**, **`dashboard`** (`last_ping` / `last_10m` min/avg/max ms). Read-only from API; **`serve --metrics-db`** overrides DB path (default **`metrics.sqlite`** beside `--config`). See **[Metrics peers semantics](#metrics-peers-semantics)**. |
+| `POST`        | write | `/reload`                                                       | Regenerate and apply WireGuard + nftables from config. Also updates **`config.yaml.bak`** / rotation (see [Applying changes](config.md#applying-changes)). The body must carry **`config_hash`** from **`POST /validate`** or **`force`**, or it gets **409**; see [Apply gate](#apply-gate-config_hash--force). One-way unless the body asks otherwise; see [Confirm or revert](#confirm-or-revert). |
+| `GET`         | write | `/apply/session`                                                | Whether an Apply is waiting for confirmation, and the last revert. See [Confirm or revert](#confirm-or-revert). |
+| `POST`        | write | `/apply/confirm`, `/apply/revert`                               | Keep the waiting Apply, or revert it now. **`/apply/revert`** also retries a revert that failed. |
+| `POST`        | write | `/apply/reverted/restore`, `/apply/reverted/dismiss`            | Bring the rejected config back as unapplied changes, or forget it. |
+| `GET`         | write | `/reload/progress`                                              | Stage of the **`POST /reload`** running in this API process, which answers only when it has finished: **`step`** is **`firewall`**, **`wireguard`**, or an empty string when none is running. Does not see a reload run by the CLI. |
+| `POST`        | write | `/update-geo`                                                   | Download zones and refresh geo sets in nftables. With [confirm mode](config.md#confirm-or-revert-apply) on it refreshes the last applied config's sets, and **`geo_changes_held_back`** in the answer is **`true`** when **`config.yaml`** has geo set changes that it left for the next Apply. **409** with **`apply_session_active`** while a confirm session exists. |
+| `GET`         | read  | `/status`, `/overview`, `/metrics`, `/stats`, `/logs`           | Diagnostics, config summary, **`/metrics`** text for both **inet evuproxy** forward and input chains (either `nft list` failure → 5xx), host stats, recent firewall-related journal lines. **`/overview`** adds **`scope`**: **`read`** or **`write`**, what the token sent with the request may do. **`/logs`** accepts **`?limit=N`** (default **200**) and is rate-limited to **20 requests/minute per token** (excess → **429** with `error_code: rate_limit`). |
+| `GET`         | write | `/stats/route-accepted`                                         | Only [**`route_accepted`**](#route-accepted-counters), as `{"route_accepted": […]}`. Unlike **`/stats`**, its cost doesn't depend on the size of the geo sets, so use this to poll the counts. |
+| `GET`         | write | `/about`                                                        | Version info. |
+| `GET`         | write | `/diagnostics.md`                                               | Markdown **host support bundle** (`Content-Disposition: attachment`). Collects WireGuard, routes, sockets, networkd drop-ins, unit/kernel logs, nftables snapshot, sanitized config, version + best-effort UI Docker OCI labels. Secrets redacted (no API token / private keys); public IPs and peer public keys may still appear. Rate-limited (**10**/minute per token → **429** `rate_limit`). CLI: **`evuproxy diagnostics`**. |
+| `POST`        | write | `/backup?path=…`, `/restore?path=…`                             | Archive or restore under `/etc/evuproxy`. Paths must resolve under **`EVUPROXY_BACKUP_DIR`** (default `/var/backups`). **`backup`** defaults `path` to `/var/backups/evuproxy-config.tgz` if omitted; **`restore`** requires `path`.   |
+| `GET`         | write | `/backup/info?path=…`                                           | **`archive`**, **`modified`** (RFC 3339, UTC) and **`size_bytes`** of an archive, under the same path rules. **404** if there is no such file. |
+| `GET`         | none  | `/healthz`                                                      | Plain `ok` (no `/api/v1` prefix, no token).                                                                                                               |
+| `GET`         | write | `/config.yaml`                                                  | Raw **`config.yaml` bytes** from disk (`Content-Disposition: attachment`). Same auth as **`GET /config`**.                                               |
+| `GET`         | read  | `/events?limit=`                                                | Recent mutating-operation audit events (JSONL-backed, newest first; default **50**, max **200**). Omit **`limit`** or use **`1`–`200`**; other values return **400** with **`error_code`:** `invalid_limit`. |
+| `GET`         | write | `/geo/summary`                                                  | Per-country zone file stats (CIDR line counts, approximate IPv4 totals) and optional merged **`nft`** set size; short-lived server cache.                  |
+| `GET`         | write | `/auto-pause`                                                   | Routes currently paused because their target peer is offline: **`{"paused_routes":[{name?, proto, ports, target_ip, peer}]}`**, an empty list when none is. Runtime state from the [`auto_pause`](config.md#auto_pause) loop, so it follows the last applied config and starts empty after a restart. |
+| `POST`        | write | `/geo/check-ip`                                                 | Dry-run: would this source IPv4 be allowed or blocked by geoblocking / global denylist / break-glass? Body: **`{"ip":"…"}`** plus optional **`config`** draft (same shape as **`PUT /config`**; not persisted). Uses on-disk zone files and optional GeoLite2 — does **not** probe live nftables. Rate-limited (**30**/minute per token → **429** `rate_limit`). Response: **`{ok, ip, verdict, summary, …}`** with **`verdict`** one of **`allowed`**, **`blocked`**, **`geo_off`**, **`uncertain`** (not enough zone/GeoLite2 evidence), **`invalid`**. |
+| `POST`        | write | `/routes/test`                                                  | On-demand **TCP/UDP** connect/probe from the host to a route’s **`target_ip`** and port (body: `{"route_index":0,"port":optional}`). Rate-limited.        |
+| `POST`        | write | `/validate`                                                     | Dry-run: validate config, generate nftables + WireGuard artifacts, run **`nft -c`**; **no** apply and **no** `.bak` changes. Optional JSON body = draft config (not persisted). Response: `{ok, errors?, warnings?, detected_client_ip, ip_detection_source, ip_detection_note?, validated_from_draft?, config_hash?}`. **`config_hash`** is there when the check passed on the saved file, not for a failed check or a draft; see [Apply gate](#apply-gate-config_hash--force). |
+| `GET`         | write | `/client-ip`                                                    | Operator IPv4 detection for lockout warnings (same logic as validate). |
+| `POST`        | write | `/peers/{index}/qr.png`                                         | PNG QR code of WireGuard client config text (plain-text body, max 16 KiB). Auth required. |
+| `POST`        | write | `/peers/generate-keypair`                                       | Generate a WireGuard keypair when the admin UI cannot use Web Crypto (plain HTTP). Returns `{private_key, public_key}` (base64). Auth required. Prefer HTTPS or localhost so keys stay in the browser when possible. |
+| `POST`        | write | `/peers/onboard-bundle`                                         | Build an **EVUB** onboarding blob (JSON body: `passphrase`, `peer_private_key`, `peer_tunnel_address`, `server_public_key`, `endpoint`, `allowed_ips`, optional `interface_name`). Returns `{blob_base64}`. Same HTTP caveat as keypair generation. |
+
+
+**`POST /validate` lockout risks:** warnings whose **`code`** starts with **`lockout_risk_`** must be acknowledged in the UI before a one-way Apply. With [confirm or revert](#confirm-or-revert) on, the UI shows them through the countdown and asks for no acknowledgement. The server doesn't refuse a reload because of them: **`config_hash`** says which file was checked, not that its warnings were accepted.
+
+| Code | Meaning |
+|------|---------|
+| `lockout_risk_maintenance` | Maintenance mode is on, so public port forwards are omitted. |
+| `lockout_risk_source_deny` | The client address is in the global or a route's forward denylist. |
+| `lockout_risk_source_allow` | A route's allowlist does not include the client address. |
+| `lockout_risk_geo` | Geoblocking may block the client address on a route. |
+| `lockout_risk_input_allows` | The last applied config (`config.yaml.bak`) accepts TCP port 22 (SSH), 9080 (admin UI) or the port of the current connection, and this config does not, through either an enabled **`input_allows`** rule or **`network.admin_tcp_ports`**. One warning per port. With no readable snapshot, every one of those ports without a rule warns. The connection port comes from **`X-Forwarded-Port`** (set by the UI nginx), otherwise from the API's own socket, and loopback sockets are ignored. SSH on another port or a custom UI port is only caught when it is the current connection. |
+| `lockout_risk_check_unavailable` | The client IPv4 address could not be detected, so the address-specific checks did not run. |
 
 **`PUT /api/v1/config`** replaces the file with marshalled YAML from the known struct; **comments and unknown keys** in the previous file are **not** preserved.
+
+### Apply gate (`config_hash` / `force`)
+
+Another tab, operator or the CLI can save config between a check and the reload that follows it. **`POST /reload`** therefore has to say what it means to apply:
+
+| Body | Result |
+|------|--------|
+| **`{"config_hash": "<hash>"}`** | Applies if **`config.yaml`** still has the **`config_hash`** that **`POST /validate`** returned. Otherwise applies nothing and answers **409** with **`error_code`:** `config_hash_mismatch`. Check again, then retry with the new hash. |
+| **`{"force": true}`** | Applies whatever is saved, with no check that it is what anyone looked at. For automation that owns the config. The audit event detail says **`reload, forced`**. |
+| No body, **`{}`**, a body that isn't a JSON object, or **`{"force": false}`** | Applies nothing and answers **409** with **`error_code`:** `config_hash_required`. |
+| Both **`config_hash`** and **`force`** | **400** with **`error_code`:** `invalid_reload_body`. |
+
+Either can be combined with **`confirm_timeout_seconds`**. The comparison runs under the apply lock, so a save through the API or the CLI can't land between it and the reload. A refusal doesn't add to **`evuproxy_apply_failure_total`**, starts no confirmation window and leaves a running one alone, though the audit log records it as **`reload_failed`** with its **`error_code`**.
+
+**`config_hash`** is the SHA-256 of **`config.yaml`**, the same value as the **`GET /config`** **`ETag`** without the quotes. **`POST /validate`** only returns it for a check that passed on the saved file: there is none for a failed check (fix the config first) or a draft (it isn't what a reload applies). The gate doesn't make the server remember the check, so a hash from any source is accepted if it matches.
+
+The CLI isn't gated: **`evuproxy reload`** and **`--apply`** work as before.
+
+#### Migrating automation (breaking change)
+
+Before this gate, **`POST /reload`** with no body applied the config. **It now answers 409 and applies nothing.** Anything that calls it directly needs one of these changes. Check that a failed reload stops your script, since a caller that ignores the status now silently stops applying.
+
+To keep the old behavior, add **`force`**:
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"force": true}' http://127.0.0.1:9847/api/v1/reload
+```
+
+To apply only what was checked, which is better when anything else can edit the config:
+
+```bash
+hash=$(curl -fsS -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9847/api/v1/validate | jq -er .config_hash)
+curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"config_hash\": \"$hash\"}" http://127.0.0.1:9847/api/v1/reload
+```
+
+**`curl -f`** makes the first command fail when the check does (**400**). An admin UI older than the API sends no hash, so its Apply shows the **`config_hash_required`** error until the UI is updated. **`scripts/update.sh`** updates both. The current UI still works with an older API, which ignores the field.
+
+### Confirm or revert
+
+**`POST /reload`** with **`{"force": true, "confirm_timeout_seconds": 60}`** (**10** to **3600**; or **`config_hash`** in place of **`force`**, see [Apply gate](#apply-gate-config_hash--force)) applies the config and reverts it unless **`POST /apply/confirm`** arrives in time. A systemd timer does the revert, so it happens even with the API stopped. Behavior, the **`apply`** config setting and the matching CLI commands are in [Confirm or revert](config.md#confirm-or-revert-apply).
+
+Without **`confirm_timeout_seconds`**, **`POST /reload`** stays one-way, whatever the **`apply`** setting says. The setting only tells the web UI what to send. During a confirmation window, a one-way reload gets **409**.
+
+The response to a confirmed reload adds **`session`**, in the same shape as below.
+
+**`GET /apply/session`**:
+
+```json
+{
+  "confirm_enabled": true,
+  "confirm_timeout_seconds": 60,
+  "session": {
+    "phase": "active",
+    "started_at": "2026-11-02T08:00:00Z",
+    "deadline": "2026-11-02T08:01:02Z",
+    "timeout_seconds": 60,
+    "remaining_seconds": 41
+  },
+  "last_revert": null
+}
+```
+
+- **`confirm_enabled`**, **`confirm_timeout_seconds`**: the **`apply`** setting in **`config.yaml`**.
+- **`session`**: **`null`** when nothing is waiting. **`phase`** is **`active`**, **`rolling_back`**, or **`failed`** with a **`failure`** message; **`failed`** also covers a session past its deadline whose timer ended without reverting, and a revert that was killed before it finished. Prefer **`remaining_seconds`** to **`deadline`** for a countdown, since clocks differ.
+- **`last_revert`**: **`{at, reason, config_available}`** until it is dismissed or a new session starts. **`reason`** is **`timeout`**, **`manual`**, **`interrupted`** (the session outlived its timer, usually a reboot), or **`failed_apply`** (an Apply failed and so did its revert, then a reboot, API restart or **`evuproxy reload`** finished the revert). **`config_available`** says **`config.yaml.reverted`** exists.
+
+Refusals answer **409** with a stable **`error_code`**:
+
+| `error_code` | Meaning |
+|--------------|---------|
+| `apply_session_active` | One-way **`POST /reload`** or **`POST /restore`** during a window, or restoring a rejected config while a session exists. |
+| `no_apply_session` | Nothing to confirm or revert. A timer may have got there first; read **`GET /apply/session`**. |
+| `rollback_failed` | A revert failed and still stands, so this was refused. Retry **`POST /apply/revert`**. Also returned when an Apply failed and reverting it failed too. |
+| `no_baseline` | No known-good config to revert to: **`config.yaml.bak`** is missing, invalid, or not what was last applied. Run a one-way reload first. |
+| `confirm_unavailable` | The timer could not be armed (no systemd, or an API that isn't root). Nothing was changed. |
+| `no_reverted_config`, `pending_edits` | **`POST /apply/reverted/restore`** has nothing to restore, or **`config.yaml`** has unapplied changes it won't replace. |
+
+An invalid **`POST /reload`** body, such as a timeout out of range, answers **400** with **`error_code`:** `invalid_reload_body`. The audit events add **`apply_confirmed`**, **`apply_reverted`** (detail: the reason, or **`failed_apply`** when a failed Apply put the host back) and **`apply_revert_failed`**.
+
+### Config revisions (`ETag` / `If-Match`)
+
+**`PUT /config`** replaces the whole file, so a client holding an old copy would revert everything saved since it read it. Send a revision to detect that:
+
+- **`GET /config`** returns the current revision in the **`ETag`** response header (a quoted SHA-256 of **`config.yaml`**). The body is unchanged, so it can still be sent back as the **`PUT`** body. A successful **`PUT`** returns the new revision the same way.
+- **`PUT /config`** with **`If-Match: "<revision>"`** saves only if the file still has that revision. Otherwise it writes nothing and answers **HTTP 409** with **`error_code`:** `config_revision_mismatch`. Fetch the config again, reapply your change, and retry. The check runs before validation, so a stale draft gets **409** rather than **400**.
+- **`PUT /config`** with **no `If-Match`** (or **`If-Match: *`**) is an **unconditional save**: last write wins, exactly as before revisions existed. Existing scripts and automation keep working, but can overwrite concurrent changes, so send **`If-Match`** when other clients may be editing. A header that is present but names no revision gets **409**.
+
+Revisions hash the file, so anything that changes it moves the revision: **`evuproxy`** CLI commands, hand edits, **`POST /config/discard`**, **`POST /config/restore-previous-applied`**, **`POST /restore`**. **`POST /reload`** does not change it. Saving identical content produces the same revision.
+
+```bash
+etag=$(curl -sS -D - -o config.json -H "X-API-Token: $TOKEN" http://127.0.0.1:9847/api/v1/config | awk 'tolower($1)=="etag:" {print $2}' | tr -d '\r')
+# ...edit config.json...
+curl -sS -X PUT -H "X-API-Token: $TOKEN" -H "If-Match: $etag" -d @config.json http://127.0.0.1:9847/api/v1/config
+```
+
+The admin UI always sends **`If-Match`**. On **409** it reapplies the single edit (a switch, a row Remove, one form) to the fresh config and retries. If that edit no longer applies, for example because the same row changed elsewhere, it says so and leaves your input in place. With **`--cors-origins`**, **`If-Match`** is an allowed request header and **`ETag`** is exposed to the browser.
 
 Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**, **`route_target_peer_disabled`**, or **`config_invalid`**) with HTTP **400** in addition to **`error`**. **`route_target_peer_disabled`** means an enabled route’s `target_ip` does not match any non-disabled peer (common when disabling a peer that still has forwards).
 
 **`GET /api/v1/overview`** may include **`geo_last_success_utc`** and **`geo_last_success_source`** after a successful geo loader run, and **`host_warnings`** (array of `{code, message}`) when live WireGuard host checks fail — e.g. tunnel address missing after systemd-networkd wipe, or **`wg_endpoint_host_mismatch`** when Settings’ WireGuard server endpoint DNS does not match this host’s public IPs (Cloudflare orange-cloud footgun — see [config.md](config.md#wireguard-server-endpoint-ui-preferences)).
+
+### Route accepted counters
+
+**`GET /stats`** and **`GET /stats/route-accepted`** return **`route_accepted`**, a list with one row per route and protocol. It is always a list, and is empty when no rules are loaded, nothing has been applied yet, or `nft` is unavailable.
+
+```json
+"route_accepted": [
+  { "route_index": 0, "name": "Minecraft", "proto": "tcp", "ports": ["25565"], "target_ip": "10.100.0.10", "packets": 8516, "bytes": 7082475 }
+]
+```
+
+| Field | Meaning |
+|-------|---------|
+| `route_index` | The route's position in `forwarding.routes` of the **applied** config, which may differ from the saved one until the next Apply. |
+| `name` | The route's name. Left out if it has none. |
+| `proto` | `tcp` or `udp`. A route with both protocols has two rows. |
+| `ports` | The route's public ports, as written in the applied config. |
+| `target_ip` | The route's target. |
+| `packets`, `bytes` | Inbound packets the firewall accepted for this route since the last Apply. |
+
+**This is accepted traffic. It does not mean players or legitimate clients.** A source that passes the route's filters counts even if the backend never replies, so a scanner in an allowed country adds to it, and so does traffic to a backend that is down.
+
+- **What counts:** every inbound packet the **forward** chain accepted for the route, including the established packets of a flow, not just the first. The counter counts what nftables sees, so a burst of TCP packets the kernel has merged can count as one packet while `bytes` stays correct. Replies from the peer don't count. Neither does traffic the route's rules accept on the **input** chain, which is for a listener on the proxy itself.
+- **What doesn't count:** anything dropped by a deny list, geo, CrowdSec, a rate limit or the forward catch-all. See [`stats.drop_counters`](config.md#stats) for those.
+- **Counts can still be lost later.** Counting happens after EvuProxy's forward chain, so a packet can still be lost after it: by a firewall rule at a later priority, or by WireGuard if the peer is gone.
+- **Counters reset on Apply.** `evuproxy reload` replaces the tables, as it does for `stats.drop_counters`, so the counts start from zero after each Apply, revert or reboot. A paused route's counter stays, and **`evuproxy update-geo`** keeps the counts too. After upgrading from a version without the `inet evuproxy_accepted` table that holds these counters, the list stays empty until the next Apply.
+- **A route can have no row.** A failed Apply can leave the live rules and the applied config apart. A rule whose protocol, target or public ports don't match the route it names is left out until the next successful Apply, so one route's traffic isn't shown against another.
+
+These rules are always generated, whatever `stats.drop_counters` says, and they aren't listed in **`nftables_counters`**.
 
 ### Metrics peers semantics
 
@@ -117,9 +374,29 @@ Host metrics are exposed on a **separate HTTP listener** from the JSON API. **Di
 
 - Enable: `evuproxy serve --metrics-listen 127.0.0.1:9848` or environment variable **`EVUPROXY_METRICS_LISTEN`**.
 - Endpoint: **`GET /metrics`** (Prometheus text exposition). **No authentication** — must bind to loopback (`127.0.0.1`, `::1`, or `localhost`). Non-loopback addresses are **rejected** unless you also pass **`--metrics-listen-insecure`** (not recommended).
-- Metrics include: `evuproxy_apply_success_total`, `evuproxy_apply_failure_total`, `evuproxy_geo_last_success_timestamp_seconds`, `evuproxy_peers_online`, `evuproxy_maintenance_mode`.
+- Metrics include: `evuproxy_apply_success_total`, `evuproxy_apply_failure_total`, `evuproxy_geo_last_success_timestamp_seconds`, `evuproxy_peers_online`, `evuproxy_maintenance_mode`, and the [route accepted metrics](#route-accepted-metrics).
 
-Example scrape config:
+### Route accepted metrics
+
+`evuproxy_route_accepted_packets_total` and `evuproxy_route_accepted_bytes_total` are counters with the same numbers as [`route_accepted` in `GET /stats`](#route-accepted-counters), and they mean the same thing. **This is accepted traffic. It does not mean players or legitimate clients.**
+
+```
+evuproxy_route_accepted_packets_total{route_index="0",name="Minecraft",proto="tcp"} 8516
+evuproxy_route_accepted_bytes_total{route_index="0",name="Minecraft",proto="tcp"} 7082475
+```
+
+| Label | Meaning |
+|-------|---------|
+| `route_index` | The route's position in `forwarding.routes` of the **applied** config. Names are optional and needn't be unique, so this is what tells routes apart. |
+| `name` | The route's name, empty if it has none. |
+| `proto` | `tcp` or `udp`. A route with both protocols has a series for each. |
+
+- **Resets:** the counters go back to zero on each Apply, revert or reboot. `rate()` and `increase()` handle a reset, but traffic since the last scrape before it is lost.
+- **Changed routes:** moving a route changes its `route_index`, and renaming it changes `name`. Either starts a new series, and the old one goes stale.
+- **No samples:** the metrics have no samples when `route_accepted` is empty, such as in maintenance mode or when `nft` is unavailable.
+- **Cardinality:** at most 4 series per route: packets and bytes, for each protocol. The count follows `forwarding.routes` and not the traffic, because there are no labels for sources, ports or targets, and a port range is still one series. Disabled routes have none. EvuProxy has no cap or switch for these metrics, so on a host with many routes, use `metric_relabel_configs` to drop what you don't need.
+
+### Example scrape config
 
 ```yaml
 scrape_configs:
@@ -138,6 +415,6 @@ When **`EVUPROXY_LOG_DIR`** is set (e.g. **`/var/log/evuproxy`**), **`evuproxy s
 
 ## Audit events file
 
-Mutations append JSON lines under **`/etc/evuproxy/state/events.jsonl`** (config-adjacent **`state/`** directory). Size is capped (**default 2 MiB**; override **`EVUPROXY_EVENTS_MAX_BYTES`**, clamped **256 KiB–8 MiB**). Only one **`evuproxy serve`** process should write this file unless you add external locking.
+Mutations append JSON lines under **`/etc/evuproxy/state/events.jsonl`** (config-adjacent **`state/`** directory). Size is capped (**default 2 MiB**; override **`EVUPROXY_EVENTS_MAX_BYTES`**, clamped **256 KiB–8 MiB**). Only one **`evuproxy serve`** process should write this file unless you add external locking. The one exception is confirm-or-revert, whose events come from whichever process acted, including the revert timer and the CLI, so they appear with the API stopped. A line could be lost if the file is being trimmed at that moment.
 
 **`POST /api/v1/config/discard`** and **`POST /api/v1/config/restore-previous-applied`** match **`evuproxy discard-pending`** and **`evuproxy restore-previous-applied`** (see [Applying changes](config.md#applying-changes)).

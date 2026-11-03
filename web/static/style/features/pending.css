@@ -6,6 +6,49 @@
   margin-top: 0.75rem;
 }
 
+.pending-changes {
+  margin-top: 1rem;
+}
+
+.pending-changes-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.pending-change {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--evu-border);
+}
+
+.pending-change:last-child {
+  border-bottom: 1px solid var(--evu-border);
+}
+
+/* Peer names and CIDR lists can be long and unbroken. */
+.pending-change__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pending-change .evu-btn {
+  flex: none;
+}
+
+.pending-raw-diff {
+  margin-top: 1rem;
+}
+
+.pending-raw-diff > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.25rem 0;
+}
+
 .pending-validate-panel {
   margin: 0 0 1rem;
 }
@@ -27,9 +70,9 @@
   color: var(--evuproxy-warning-text);
 }
 
-/* Errors are failures to fix, not risks to accept — colour them accordingly. */
+/* The panel's tint says these are errors; red text on that tint misses 4.5:1 in both schemes. */
 .evu-alert--danger .pending-validate-warnings {
-  color: var(--evuproxy-danger-text);
+  color: var(--evu-foreground);
 }
 
 /* Machine code trails the message it belongs to; useful for docs, not the fix. */
@@ -42,15 +85,6 @@
   border-top: 1px solid var(--evu-border);
   margin-top: 0.65rem;
   padding-top: 0.65rem;
-}
-
-.pending-lockout-ack {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
-  margin-top: 0;
-  font-size: 0.9rem;
-  color: var(--evu-foreground);
 }
 
 .pending-status-alert {

@@ -1,0 +1,31 @@
+name: E2E smoke
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: The harness refuses outside its container
+        run: |
+          set +e
+          bash devtools/e2e/inside.sh
+          test $? -eq 100
+      - name: Load WireGuard
+        # A container can't count on the kernel loading this for it.
+        run: sudo modprobe wireguard
+      - name: Tunnel, forwards, geo, narrow AllowedIPs and forwarding policies
+        run: make e2e

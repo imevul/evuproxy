@@ -1,11 +1,14 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/imevul/evuproxy/internal/apply"
@@ -13,26 +16,189 @@ import (
 	"github.com/imevul/evuproxy/internal/eventlog"
 )
 
+// The error_code of a POST /reload that has no acknowledgement of what it would apply.
+const configHashRequiredCode = "config_hash_required"
+
+// reloadRequest is a POST /reload body.
+type reloadRequest struct {
+	ConfirmTimeoutSeconds int    `json:"confirm_timeout_seconds"`
+	ConfigHash            string `json:"config_hash"`
+	Force                 bool   `json:"force"`
+}
+
+// readReloadRequest parses a POST /reload body. One that isn't a JSON object carries no
+// fields, so it gets the same answer as no body at all. A malformed object is an error:
+// guessing could apply one-way what the caller asked to be able to take back.
+func readReloadRequest(r *http.Request) (reloadRequest, error) {
+	var body reloadRequest
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<14))
+	if err != nil {
+		return body, err
+	}
+	if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) {
+		return body, nil
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return body, err
+	}
+	if t := body.ConfirmTimeoutSeconds; t != 0 && (t < config.MinConfirmTimeoutSeconds || t > config.MaxConfirmTimeoutSeconds) {
+		return body, fmt.Errorf("confirm_timeout_seconds must be %d to %d", config.MinConfirmTimeoutSeconds, config.MaxConfirmTimeoutSeconds)
+	}
+	// They contradict each other, and a client bug must not pass as the unconditional one.
+	if body.Force && body.ConfigHash != "" {
+		return body, errors.New("send config_hash or force, not both")
+	}
+	return body, nil
+}
+
+// confirmErrorCode maps a refusal to its status and stable code. ok is false for any other
+// error, which is a reload that actually failed.
+func confirmErrorCode(err error) (status int, code string, ok bool) {
+	switch {
+	case errors.Is(err, apply.ErrConfirmSessionActive):
+		return http.StatusConflict, "apply_session_active", true
+	case errors.Is(err, apply.ErrNoConfirmSession):
+		return http.StatusConflict, "no_apply_session", true
+	case errors.Is(err, apply.ErrRollbackFailed):
+		return http.StatusConflict, "rollback_failed", true
+	case errors.Is(err, apply.ErrNoConfirmBaseline):
+		return http.StatusConflict, "no_baseline", true
+	case errors.Is(err, apply.ErrConfirmUnavailable):
+		return http.StatusConflict, "confirm_unavailable", true
+	case errors.Is(err, apply.ErrNoRevertedConfig):
+		return http.StatusConflict, "no_reverted_config", true
+	case errors.Is(err, apply.ErrPendingEditsExist):
+		return http.StatusConflict, "pending_edits", true
+	case errors.Is(err, apply.ErrConfigHashMismatch):
+		return http.StatusConflict, "config_hash_mismatch", true
+	}
+	return 0, "", false
+}
+
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
+	body, err := readReloadRequest(r)
+	if err != nil {
+		s.jsonAPIError(w, http.StatusBadRequest, "invalid reload body: "+err.Error(), "invalid_reload_body")
+		return
+	}
 	if !s.tryMutatingLock(w) {
 		return
 	}
 	defer s.applyMu.Unlock()
-	s.emit(eventlog.Record{Event: "reload_started", Detail: "reload"})
+	if body.ConfigHash == "" && !body.Force {
+		const msg = "send the config_hash from POST /validate, or force to apply without a check"
+		s.emit(eventlog.Record{Event: "reload_failed", Detail: msg, ErrorCode: configHashRequiredCode})
+		s.jsonAPIError(w, http.StatusConflict, msg, configHashRequiredCode)
+		return
+	}
+	timeout := body.ConfirmTimeoutSeconds
+	detail := "reload"
+	// In the event log, so that an apply nobody checked can be told from one that was.
+	if body.Force {
+		detail += ", forced"
+	}
+	if timeout > 0 {
+		detail += ", confirm within " + strconv.Itoa(timeout) + "s"
+	}
+	s.emit(eventlog.Record{Event: "reload_started", Detail: detail})
 	// Detach from the request context: a client disconnect must not cancel the
 	// privileged pipeline mid-way (nftables replaced but WireGuard/apply-state
 	// not updated). The per-command 60s timeout still bounds individual hangs.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
 	defer cancel()
-	if err := apply.Reload(ctx, s.Config); err != nil {
+	defer s.reloadStep.Store("")
+	progress := func(step string) { s.reloadStep.Store(step) }
+	var session *apply.ConfirmSessionView
+	if timeout > 0 {
+		session, err = apply.ReloadWithConfirmIfMatch(ctx, s.Config, body.ConfigHash, timeout, progress)
+	} else {
+		err = apply.ReloadIfMatch(ctx, s.Config, body.ConfigHash, progress)
+	}
+	if err != nil {
 		s.logErr("reload", err)
+		if status, code, ok := confirmErrorCode(err); ok {
+			s.emit(eventlog.Record{Event: "reload_failed", Detail: eventDetail(err.Error()), ErrorCode: code})
+			s.jsonAPIError(w, status, err.Error(), code)
+			return
+		}
 		s.emit(eventlog.Record{Event: "reload_failed", Detail: eventDetail(err.Error()), ErrorCode: "reload_error"})
 		s.jsonErr(w, http.StatusInternalServerError, "reload failed")
 		return
 	}
 	apply.InvalidateGeoSummaryCache()
-	s.emit(eventlog.Record{Event: "reload_ok", Detail: "reload"})
+	s.emit(eventlog.Record{Event: "reload_ok", Detail: detail})
+	if session != nil {
+		s.jsonOK(w, map[string]any{"result": "reloaded", "session": session})
+		return
+	}
 	s.jsonOK(w, map[string]string{"result": "reloaded"})
+}
+
+func (s *Server) handleApplySession(w http.ResponseWriter, r *http.Request) {
+	st, err := apply.ReadConfirmStatus(r.Context(), s.Config)
+	if err != nil {
+		s.logErr("apply session", err)
+		s.jsonErr(w, http.StatusInternalServerError, "could not read apply session")
+		return
+	}
+	s.jsonOK(w, st)
+}
+
+// confirmAction runs one session action under the apply lock, detached from the
+// request for the same reason as handleReload. The actions emit their own events, so
+// the CLI and the timer leave the same trail.
+func (s *Server) confirmAction(w http.ResponseWriter, r *http.Request, name, result string, action func(ctx context.Context) error) {
+	if !s.tryMutatingLock(w) {
+		return
+	}
+	defer s.applyMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Minute)
+	defer cancel()
+	if err := action(ctx); err != nil {
+		s.logErr(name, err)
+		if status, code, ok := confirmErrorCode(err); ok {
+			s.jsonAPIError(w, status, err.Error(), code)
+			return
+		}
+		s.jsonErr(w, http.StatusInternalServerError, name+" failed")
+		return
+	}
+	s.jsonOK(w, map[string]string{"result": result})
+}
+
+func (s *Server) handleApplyConfirm(w http.ResponseWriter, r *http.Request) {
+	s.confirmAction(w, r, "apply confirm", "confirmed", func(ctx context.Context) error {
+		return apply.ConfirmApply(ctx, s.Config)
+	})
+}
+
+func (s *Server) handleApplyRevert(w http.ResponseWriter, r *http.Request) {
+	s.confirmAction(w, r, "apply revert", "reverted", func(ctx context.Context) error {
+		if err := apply.RevertApply(ctx, s.Config, apply.RevertReasonManual, ""); err != nil {
+			return err
+		}
+		apply.InvalidateGeoSummaryCache()
+		return nil
+	})
+}
+
+func (s *Server) handleApplyRevertedRestore(w http.ResponseWriter, r *http.Request) {
+	s.confirmAction(w, r, "restore reverted config", "restored", func(ctx context.Context) error {
+		return apply.RestoreRevertedConfig(ctx, s.Config)
+	})
+}
+
+func (s *Server) handleApplyRevertedDismiss(w http.ResponseWriter, r *http.Request) {
+	s.confirmAction(w, r, "dismiss revert", "dismissed", func(ctx context.Context) error {
+		return apply.DismissLastRevert(ctx, s.Config)
+	})
+}
+
+// handleReloadProgress reports the stage of a running POST /reload, which only
+// answers once it has finished. It takes no lock: that reload is holding it.
+func (s *Server) handleReloadProgress(w http.ResponseWriter, r *http.Request) {
+	step, _ := s.reloadStep.Load().(string)
+	s.jsonOK(w, map[string]string{"step": step})
 }
 
 func (s *Server) handleUpdateGeo(w http.ResponseWriter, r *http.Request) {
@@ -45,15 +211,21 @@ func (s *Server) handleUpdateGeo(w http.ResponseWriter, r *http.Request) {
 	// many countries are slow, so allow a longer overall budget.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
 	defer cancel()
-	if err := apply.UpdateGeo(ctx, s.Config); err != nil {
+	heldBack, err := apply.UpdateGeo(ctx, s.Config)
+	if err != nil {
 		s.logErr("update-geo", err)
+		if status, code, ok := confirmErrorCode(err); ok {
+			s.emit(eventlog.Record{Event: "update_geo_failed", Detail: eventDetail(err.Error()), ErrorCode: code})
+			s.jsonAPIError(w, status, err.Error(), code)
+			return
+		}
 		s.emit(eventlog.Record{Event: "update_geo_failed", Detail: eventDetail(err.Error()), ErrorCode: "update_geo_error"})
 		s.jsonErr(w, http.StatusInternalServerError, "geo update failed")
 		return
 	}
 	apply.InvalidateGeoSummaryCache()
 	s.emit(eventlog.Record{Event: "update_geo_ok", Detail: "update-geo"})
-	s.jsonOK(w, map[string]string{"result": "geo_updated"})
+	s.jsonOK(w, map[string]any{"result": "geo_updated", "geo_changes_held_back": heldBack})
 }
 
 func (s *Server) handleRouteTest(w http.ResponseWriter, r *http.Request) {

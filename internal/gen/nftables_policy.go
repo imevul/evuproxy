@@ -32,22 +32,36 @@ type routePolicy struct {
 	routeIndex int
 	proto      string
 	portExpr   string
-	target     string
-	srcAllow   string // route source-allow set name, "" = any source
-	srcDeny    string // route source-deny set name, "" = none
-	geo        routeGeoParams
-	globalRL   config.RateLimit
-	routeRL    config.RateLimit
-	dnat       []routeDNATLine
+	// forwardPorts is what portExpr looks like in the forward chain, after DNAT.
+	forwardPorts string
+	target       string
+	srcAllow     string // route source-allow set name, "" = any source
+	srcDeny      string // route source-deny set name, "" = none
+	geo          routeGeoParams
+	globalRL     config.RateLimit
+	routeRL      config.RateLimit
+	dnat         []routeDNATLine
 	// Global sets shared by all routes ("" when the feature is off).
 	crowdsecSet string
 	breakGlass  string
 	globalDeny  string
+	counter     string // dropCounter statement, "" = stats.drop_counters off
 }
 
 func buildRouteDNATLines(r config.ForwardRoute) ([]routeDNATLine, error) {
 	var lines []routeDNATLine
+	target := strings.TrimSpace(r.TargetIP)
 	for _, tok := range normalizedPortTokensFromPorts(r.Ports) {
+		pairs, err := config.RangePortPairs(tok, r.PortMaps)
+		if err != nil {
+			return nil, err
+		}
+		if pairs != nil {
+			for _, p := range pairs {
+				lines = append(lines, routeDNATLine{publicDport: fmt.Sprint(p.Public), dnatTo: fmt.Sprintf("%s:%d", target, p.Internal)})
+			}
+			continue
+		}
 		to, err := config.DNATDestination(r.TargetIP, tok, r.PortMaps)
 		if err != nil {
 			return nil, err
@@ -55,6 +69,25 @@ func buildRouteDNATLines(r config.ForwardRoute) ([]routeDNATLine, error) {
 		lines = append(lines, routeDNATLine{publicDport: tok, dnatTo: to})
 	}
 	return lines, nil
+}
+
+// routeForwardPorts returns the port match for a route in the forward chain, given its public
+// port expression. Prerouting has already rewritten a mapped port by then, so the packet carries
+// the internal port. Conntrack still knows the public one, and requiring both keeps the internal
+// port closed to anything that didn't come through this route's DNAT.
+func routeForwardPorts(r config.ForwardRoute, publicExpr string) (string, error) {
+	if len(r.PortMaps) == 0 {
+		return publicExpr, nil
+	}
+	var internal []string
+	for _, tok := range normalizedPortTokensFromPorts(r.Ports) {
+		internal = append(internal, config.InternalPort(tok, r.PortMaps))
+	}
+	internalExpr, err := formatPortSets(internal)
+	if err != nil {
+		return "", err
+	}
+	return internalExpr + " ct original proto-dst " + publicExpr, nil
 }
 
 func normalizedPortTokensFromPorts(ports []string) []string {
@@ -152,25 +185,30 @@ func writePolicyDnatLine(b *strings.Builder, r routePolicy, line routeDNATLine) 
 	if line.publicDport == "" || line.dnatTo == "" {
 		return
 	}
+	writePolicyPrerouting(b, r, line.publicDport, "dnat to "+line.dnatTo)
+}
+
+// writePolicyPrerouting emits a route's prerouting rules for one public port, with verdict for
+// the sources the route accepts. Every other source falls through to the input chain.
+func writePolicyPrerouting(b *strings.Builder, r routePolicy, publicDport, verdict string) {
 	if r.globalDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.globalDeny, r.proto, line.publicDport)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.globalDeny, r.proto, publicDport, r.counter)
 	}
 	if r.srcDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.srcDeny, r.proto, line.publicDport)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.srcDeny, r.proto, publicDport, r.counter)
 	}
-	dnatVerdict := "dnat to " + line.dnatTo
 	if !r.geo.enabled {
-		writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, "", dnatVerdict)
+		writePolicyAllow(b, r.proto, publicDport, r.srcAllow, "", verdict)
 		return
 	}
 	if r.geo.blockListed {
-		writePolicyGeoBlockDrop(b, r.geo.setName, r.breakGlass, r.proto, line.publicDport)
-		writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, "", dnatVerdict)
+		writePolicyGeoBlockDrop(b, r.geo.setName, r.breakGlass, r.proto, publicDport, r.counter)
+		writePolicyAllow(b, r.proto, publicDport, r.srcAllow, "", verdict)
 		return
 	}
-	writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, r.geo.setName, dnatVerdict)
+	writePolicyAllow(b, r.proto, publicDport, r.srcAllow, r.geo.setName, verdict)
 	if r.breakGlass != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s dnat to %s\n", r.breakGlass, r.proto, line.publicDport, line.dnatTo)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %s\n", r.breakGlass, r.proto, publicDport, verdict)
 	}
 }
 
@@ -191,12 +229,12 @@ func writePolicyAllow(b *strings.Builder, proto, portExpr, srcAllow, geoSet, ver
 	}
 }
 
-func writePolicyGeoBlockDrop(b *strings.Builder, geoSet, breakGlass, proto, portExpr string) {
+func writePolicyGeoBlockDrop(b *strings.Builder, geoSet, breakGlass, proto, portExpr, counter string) {
 	if breakGlass != "" {
-		fmt.Fprintf(b, "        ip saddr @%s ip saddr != @%s %s dport %s drop\n", geoSet, breakGlass, proto, portExpr)
+		fmt.Fprintf(b, "        ip saddr @%s ip saddr != @%s %s dport %s %sdrop\n", geoSet, breakGlass, proto, portExpr, counter)
 		return
 	}
-	fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", geoSet, proto, portExpr)
+	fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", geoSet, proto, portExpr, counter)
 }
 
 func writePolicyInputPort(b *strings.Builder, r routePolicy) {
@@ -204,19 +242,19 @@ func writePolicyInputPort(b *strings.Builder, r routePolicy) {
 		return
 	}
 	if r.globalDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.globalDeny, r.proto, r.portExpr)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.globalDeny, r.proto, r.portExpr, r.counter)
 	}
 	if r.srcDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.srcDeny, r.proto, r.portExpr)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.srcDeny, r.proto, r.portExpr, r.counter)
 	}
-	writePolicyCrowdsecDrop(b, r.crowdsecSet, r.breakGlass, r.proto, r.portExpr)
-	writePolicyRateLimit(b, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.breakGlass)
+	writePolicyCrowdsecDrop(b, r.crowdsecSet, r.breakGlass, r.proto, r.portExpr, r.counter)
+	writePolicyRateLimit(b, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.breakGlass, r.counter)
 	if !r.geo.enabled {
 		writePolicyAllow(b, r.proto, r.portExpr, r.srcAllow, "", "accept")
 		return
 	}
 	if r.geo.blockListed {
-		writePolicyGeoBlockDropLogged(b, r.geo.setName, r.breakGlass, r.proto, r.portExpr)
+		writePolicyGeoBlockDropLogged(b, r.geo.setName, r.breakGlass, r.proto, r.portExpr, r.counter)
 		writePolicyAllow(b, r.proto, r.portExpr, r.srcAllow, "", "accept")
 		return
 	}
@@ -225,13 +263,21 @@ func writePolicyInputPort(b *strings.Builder, r routePolicy) {
 		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", r.breakGlass, r.proto, r.portExpr)
 		return
 	}
-	fmt.Fprintf(b, "        %s dport %s ip saddr != @%s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", r.proto, r.portExpr, r.geo.setName)
+	writeGeoLogDrop(b, fmt.Sprintf("%s dport %s ip saddr != @%s", r.proto, r.portExpr, r.geo.setName), r.counter)
 }
 
-func writePolicyGeoBlockDropLogged(b *strings.Builder, geoSet, breakGlass, proto, portExpr string) {
+func writePolicyGeoBlockDropLogged(b *strings.Builder, geoSet, breakGlass, proto, portExpr, counter string) {
 	if breakGlass != "" {
-		fmt.Fprintf(b, "        ip saddr @%s ip saddr != @%s %s dport %s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", geoSet, breakGlass, proto, portExpr)
+		writeGeoLogDrop(b, fmt.Sprintf("ip saddr @%s ip saddr != @%s %s dport %s", geoSet, breakGlass, proto, portExpr), counter)
 		return
 	}
-	fmt.Fprintf(b, "        ip saddr @%s %s dport %s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \" drop\n", geoSet, proto, portExpr)
+	writeGeoLogDrop(b, fmt.Sprintf("ip saddr @%s %s dport %s", geoSet, proto, portExpr), counter)
+}
+
+// writeGeoLogDrop logs a sample of what match catches and drops all of it. The limit needs a rule
+// of its own: past the limit a limit statement stops the rule matching, and the packet would go
+// on to whatever accept comes next.
+func writeGeoLogDrop(b *strings.Builder, match, counter string) {
+	fmt.Fprintf(b, "        %s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \"\n", match)
+	fmt.Fprintf(b, "        %s %sdrop\n", match, counter)
 }

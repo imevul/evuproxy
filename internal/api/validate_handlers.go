@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/imevul/evuproxy/internal/apply"
 	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 func bytesTrimSpace(b []byte) []byte {
@@ -23,6 +25,7 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	clientIP := DetectClientIP(r)
+	clientIP.ConnPort = detectConnPort(r)
 	var draft *config.Config
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -41,20 +44,34 @@ func (s *Server) handleValidate(w http.ResponseWriter, r *http.Request) {
 
 	var c *config.Config
 	fromDraft := false
+	configHash := ""
 	if draft != nil {
 		c = draft
 		fromDraft = true
 	} else {
-		loaded, err := config.Load(s.Config)
+		// One read, so the hash can only name the bytes this check evaluated.
+		b, err := os.ReadFile(s.Config)
+		if err != nil {
+			s.logErr("validate load", err)
+			s.jsonErr(w, http.StatusInternalServerError, "could not read configuration")
+			return
+		}
+		loaded, err := config.Parse(b)
 		if err != nil {
 			s.logErr("validate load", err)
 			s.jsonErr(w, http.StatusInternalServerError, "could not read configuration")
 			return
 		}
 		c = loaded
+		configHash = state.ConfigBytesSHA256(b)
 	}
 
-	res := apply.ValidateConfigWithWarnings(c, clientIP, s.GeoIP, fromDraft)
+	res := apply.ValidateConfigWithWarnings(c, apply.LoadAppliedConfig(s.Config), clientIP, s.GeoIP, fromDraft)
+	// POST /reload takes this as "I checked this file": a failed check is no such thing,
+	// and a draft isn't what a reload would apply.
+	if res.OK {
+		res.ConfigHash = configHash
+	}
 	if !res.OK {
 		w.WriteHeader(http.StatusBadRequest)
 	}

@@ -3,16 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EvuProxy Admin</title>
+  <title>EvuProxy</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
     href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
     rel="stylesheet"
   />
-  <script>
-  (function(){try{var r=document.documentElement;var s=localStorage.getItem('evu-color-scheme')||'system';var d=s==='dark'||(s!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);r.classList.toggle('dark',d);r.style.colorScheme=d?'dark':'light';var p=localStorage.getItem('evu-palette');r.setAttribute('data-evu-palette',(p==='blue'||p==='indigo')?p:'indigo');}catch(e){}})();
-  </script>
+  <script src="/static/js/theme-boot.js"></script>
   <link rel="stylesheet" href="/static/evu/tokens.css" />
   <link rel="stylesheet" href="/static/evu/base.css" />
   <link rel="stylesheet" href="/static/evu/components.css" />
@@ -29,11 +28,13 @@
   <link rel="stylesheet" href="/static/style/features/logs.css" />
   <link rel="stylesheet" href="/static/style/features/peers.css" />
   <link rel="stylesheet" href="/static/style/features/routes.css" />
+  <link rel="stylesheet" href="/static/style/mobile.css" />
 </head>
 <body class="app evu-shell evu-shell--sidebar">
   <a class="skip-link" href="#main-content">Skip to main content</a>
   <div class="evu-backdrop" id="sidebar-backdrop" hidden></div>
   <header class="evu-app-header">
+    <button type="button" class="evu-shell__menu-btn" id="shell-menu-toggle" aria-label="Open navigation" aria-expanded="false">☰</button>
     <div class="evu-brand">
       <span class="evu-brand__mark" aria-hidden="true">
         <svg class="evu-brand__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -49,15 +50,6 @@
       </div>
     </div>
     <div class="evu-app-header__meta">
-      <label class="evu-sr-only" for="global-table-search">Filter peers and routes tables</label>
-      <input
-        type="search"
-        id="global-table-search"
-        class="header-search evu-input"
-        placeholder="Filter peers/routes (press /)"
-        autocomplete="off"
-        spellcheck="false"
-      />
       <span id="api-status" class="evu-pill" aria-live="polite">API</span>
     </div>
   </header>
@@ -73,7 +65,7 @@
         <a href="#/topology" class="nav-link evu-nav-link" data-route="topology">Topology</a>
         <a href="#/inbound" class="nav-link evu-nav-link" data-route="inbound">Inbound access</a>
         <a href="#/geoblocking" class="nav-link evu-nav-link" data-route="geoblocking">Geoblock &amp; limits</a>
-        <a href="#/pending" class="nav-link evu-nav-link" data-route="pending">Pending changes<span class="nav-pending-dot is-hidden" id="nav-pending-dot" aria-hidden="true"></span><span class="evu-sr-only" id="nav-pending-sr"></span></a>
+        <a href="#/pending" class="nav-link evu-nav-link" data-route="pending">Pending changes<span class="nav-pending-count" id="nav-pending-count" aria-hidden="true" hidden></span><span class="evu-sr-only" id="nav-pending-sr"></span></a>
         <a href="#/stats" class="nav-link evu-nav-link" data-route="stats">Stats</a>
         <a href="#/logs" class="nav-link evu-nav-link" data-route="logs">Logs</a>
       </nav>
@@ -123,34 +115,99 @@
     </aside>
 
     <div class="evu-main">
-      <div class="evu-main__topbar">
-        <button type="button" class="evu-shell__menu-btn" id="shell-menu-toggle" aria-label="Open navigation" aria-expanded="false">☰</button>
-        <span class="evu-brand__name">EvuProxy</span>
-      </div>
       <main class="evu-main__inner content" id="main-content" tabindex="-1">
+      <div id="apply-region" class="apply-region">
+        <div id="read-only-notice" class="evu-alert read-only-notice" role="status" hidden>
+          <div class="evu-alert__body">
+            <p class="evu-alert__title">Read-only token</p>
+            <p>You can see Overview, Stats and Logs. To change anything, connect with the write token on the <a href="#/token">API token</a> page.</p>
+          </div>
+        </div>
+        <div id="connection-banner" class="evu-alert evu-alert--danger connection-banner" role="alert" hidden>
+          <div class="evu-alert__body">
+            <p class="evu-alert__title" id="connection-banner-title"></p>
+            <p id="connection-banner-detail" class="connection-banner__detail"></p>
+            <p id="connection-banner-stale" class="connection-banner__detail"></p>
+            <p id="connection-banner-note" class="connection-banner__detail"></p>
+          </div>
+          <div class="connection-banner__actions">
+            <a id="connection-banner-token" class="evu-btn evu-btn--outline evu-btn--sm" href="#/token" hidden>Open API token</a>
+            <button type="button" id="connection-banner-retry" class="evu-btn evu-btn--primary evu-btn--sm">Retry now</button>
+          </div>
+        </div>
+        <div id="apply-bar" class="apply-bar" role="group" aria-label="Unapplied changes" hidden>
+          <span id="apply-bar-text" class="apply-bar__text" aria-live="polite"></span>
+          <div class="apply-bar__actions">
+            <a id="apply-bar-review" class="evu-btn evu-btn--outline evu-btn--sm" href="#/pending">Review</a>
+            <button type="button" id="apply-bar-apply" class="evu-btn evu-btn--primary evu-btn--sm" data-needs-write>Apply</button>
+          </div>
+        </div>
+        <div id="apply-session" class="evu-alert apply-session" role="group" aria-labelledby="apply-session-title" hidden>
+          <div class="evu-alert__body apply-session__body">
+            <p class="evu-alert__title" id="apply-session-title"></p>
+            <p id="apply-session-detail" class="apply-session__detail"></p>
+            <p id="apply-session-check" class="apply-session__detail" hidden>Keep opens a new connection, so it fails if this change blocks new connections to this page. Through an SSH tunnel or a proxy on this host it can still work after a cut, and it doesn't test other ports, so check those yourself before keeping.</p>
+            <p id="apply-session-note" class="msg apply-session__note"></p>
+            <span id="apply-session-status" class="evu-sr-only" role="status"></span>
+          </div>
+          <div class="apply-session__actions">
+            <button type="button" id="apply-session-keep" class="evu-btn evu-btn--primary evu-btn--sm" aria-describedby="apply-session-check" hidden>Keep changes</button>
+            <button type="button" id="apply-session-revert" class="evu-btn evu-btn--outline evu-btn--sm" hidden>Revert now</button>
+            <button type="button" id="apply-session-restore" class="evu-btn evu-btn--outline evu-btn--sm" hidden>Restore as unapplied changes</button>
+            <button type="button" id="apply-session-dismiss" class="evu-btn evu-btn--ghost evu-btn--sm" hidden>Dismiss</button>
+          </div>
+        </div>
+        <div id="apply-result" class="apply-result" tabindex="0" role="group" aria-label="Apply result" hidden>
+          <div class="apply-result__head">
+            <ol id="apply-progress" class="apply-progress" aria-label="Apply progress" hidden>
+              <li data-apply-step="validate">Validating</li>
+              <li data-apply-step="firewall">Applying firewall</li>
+              <li data-apply-step="wireguard">Applying WireGuard</li>
+              <li data-apply-step="done">Done</li>
+            </ol>
+            <button type="button" id="apply-result-dismiss" class="evu-btn evu-btn--ghost evu-btn--sm apply-result__dismiss">Dismiss</button>
+          </div>
+          <span id="apply-progress-status" class="evu-sr-only" role="status"></span>
+          <p id="apply-msg" class="msg" aria-live="polite"></p>
+          <div id="pending-validate-panel" class="evu-alert pending-validate-panel is-hidden" role="group" aria-labelledby="pending-validate-title">
+            <div class="evu-alert__body pending-validate-body">
+              <p class="evu-alert__title" id="pending-validate-title">Config check</p>
+              <p id="pending-client-ip" class="meta pending-client-ip"></p>
+              <ul id="pending-validate-warnings" class="pending-validate-warnings is-hidden"></ul>
+              <div id="pending-lockout-ack-wrap" class="pending-lockout-ack-wrap is-hidden">
+                <label class="evu-check pending-lockout-ack">
+                  <input type="checkbox" id="pending-lockout-ack" class="evu-checkbox" />
+                  <span class="evu-check__text">
+                    <span>I understand these rules may lock me out of this host, and I have another way in.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       <section id="page-overview" class="page" hidden>
         <div class="page-title-row">
           <h1 class="page-title">Overview</h1>
           <button type="button" class="btn-help-trigger" aria-label="More about Overview (dialog)" data-help-title="Overview" data-help-template="help-overview-intro">?</button>
         </div>
-        <p class="hint">Host, tunnel and geo state at a glance, plus the two host actions that do not need a config change.</p>
+        <p class="hint">Host, tunnel and geo state at a glance, plus maintenance mode and geo list updates.</p>
         <div id="overview-cards" class="card-grid overview-cards-compact"></div>
         <div class="overview-bottom-grid">
           <div id="overview-actions-card" class="evu-card card actions-card">
-            <h3>Apply</h3>
+            <h3>Host actions</h3>
             <div class="field overview-maintenance-field">
               <div class="toggle-switch-row">
                 <span class="toggle-switch-text" id="overview-maintenance-desc">Maintenance mode</span>
                 <label class="evu-switch toggle-switch">
-                  <input type="checkbox" id="overview-maintenance-toggle" class="evu-switch__input toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" />
+                  <input type="checkbox" id="overview-maintenance-toggle" class="evu-switch__input toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" data-needs-write />
                   <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                 </label>
               </div>
-              <p class="meta">When on, public forwards are omitted until you turn this off and reload.</p>
+              <p class="meta">When on, public forwards are omitted until you turn this off and Apply.</p>
             </div>
             <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="btn-reload">Reload config</button>
-              <button type="button" class="evu-btn evu-btn--outline" id="btn-geo">Update geo lists</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="btn-geo" data-needs-write>Update geo lists</button>
             </div>
             <p id="overview-action-msg" class="msg" aria-live="polite"></p>
           </div>
@@ -160,7 +217,7 @@
               <button type="button" class="evu-btn evu-btn--outline" id="overview-events-export-csv">Export CSV</button>
             </div>
             <p class="hint meta">From the host <code class="inline">state/events.jsonl</code> (append-only, size-capped). Polls while you stay on Overview.</p>
-            <ul id="overview-events-list" class="overview-events-list"></ul>
+            <ul id="overview-events-list" class="overview-events-list" tabindex="0" aria-label="Recent events"></ul>
             <p id="overview-events-empty" class="hint meta is-hidden">No events recorded yet.</p>
           </div>
         </div>
@@ -212,6 +269,7 @@
               <div class="field">
                 <div class="field-label-row">
                   <label for="settings-public-interface">Public interface</label>
+                  <span class="evu-badge evu-badge--warning">Needs Apply</span>
                   <button
                     type="button"
                     class="btn-help-trigger btn-help-trigger--compact"
@@ -223,7 +281,7 @@
                     ?
                   </button>
                 </div>
-                <p class="hint meta hint--tight">Linux NIC facing the Internet, e.g. <code class="inline">eth0</code>. Reload firewall rules after changing.</p>
+                <p class="hint meta hint--tight">Linux NIC facing the Internet, e.g. <code class="inline">eth0</code>. The firewall keeps the old interface until you Apply.</p>
                 <input type="text" id="settings-public-interface" placeholder="eth0" spellcheck="false" autocomplete="off" />
               </div>
             </div>
@@ -254,9 +312,26 @@
                 </label>
               </div>
               <p class="hint meta hint--tight">Runs the <code class="inline">evuproxy metrics</code> service on the host and enables the Ping column on Peers.</p>
+              <p id="settings-metrics-collection-msg" class="msg err switch-error" role="alert"></p>
+            </div>
+            <div class="field settings-prefs-switch">
+              <div class="toggle-switch-row">
+                <span class="toggle-switch-text" id="settings-apply-confirm-desc">Revert Apply unless confirmed</span>
+                <label class="evu-switch toggle-switch">
+                  <input
+                    type="checkbox"
+                    id="settings-apply-confirm"
+                    class="evu-switch__input toggle-switch-input"
+                    autocomplete="off"
+                    aria-labelledby="settings-apply-confirm-desc"
+                  />
+                  <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+              <p class="hint meta hint--tight">After each Apply here, asks you to keep the changes. If you can't answer because the change locked you out, the host goes back to the last confirmed config by itself. Needs systemd and a root API. Takes effect from the next Apply. The command line and scripts choose for themselves.</p>
+              <p id="settings-apply-confirm-msg" class="msg err switch-error" role="alert"></p>
             </div>
             <div class="btn-row stack-gap">
-              <button type="button" class="evu-btn evu-btn--primary" id="settings-save-prefs">Save preferences</button>
               <button type="button" class="evu-btn evu-btn--outline" id="settings-download-yaml">Download config.yaml</button>
             </div>
             <p id="settings-prefs-msg" class="msg" aria-live="polite"></p>
@@ -269,9 +344,6 @@
             <div class="field">
               <label for="config-notes-body">Notes</label>
               <textarea id="config-notes-body" rows="6" spellcheck="false" autocomplete="off" placeholder="Why this host is configured this way…"></textarea>
-            </div>
-            <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="config-notes-save">Save notes</button>
             </div>
             <p id="config-notes-msg" class="msg" aria-live="polite"></p>
           </div>
@@ -286,14 +358,14 @@
               <input type="text" id="backup-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
             </div>
             <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="btn-backup-run">Create backup</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="btn-backup-run" data-needs-write>Create backup</button>
             </div>
             <div class="field stack-gap">
               <label for="restore-path-input">Restore from archive</label>
               <input type="text" id="restore-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
             </div>
             <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="btn-restore-run">Restore</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="btn-restore-run" data-needs-write>Restore</button>
             </div>
             <p id="backup-restore-msg" class="msg" aria-live="polite"></p>
           </div>
@@ -369,10 +441,16 @@
           <button type="button" class="btn-help-trigger" aria-label="More about the API token (dialog)" data-help-title="API token" data-help-template="help-token-intro">?</button>
         </div>
         <p class="hint">Credentials this browser uses to talk to the EvuProxy API. Never sent anywhere else.</p>
+        <div id="token-not-connected" class="evu-alert token-not-connected is-hidden">
+          <div class="evu-alert__body">
+            <p class="evu-alert__title">Not connected</p>
+            <p>Paste the API token from this host to get started.</p>
+          </div>
+        </div>
         <div class="evu-card card">
           <div class="field">
             <label for="token">API token</label>
-            <p class="hint meta hint--tight">Matches <code class="inline">/etc/evuproxy/api.token</code> on the host (mock dev: <code class="inline">dev</code>).</p>
+            <p class="hint meta hint--tight">Use <code class="inline">/etc/evuproxy/api.token</code> from the host for full access, or <code class="inline">/etc/evuproxy/api-read.token</code> to only view Overview, Stats and Logs (mock dev: <code class="inline">dev</code> or <code class="inline">dev-read</code>).</p>
             <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
           </div>
           <div class="field stack-gap">
@@ -383,7 +461,7 @@
             <input type="text" id="api-base" placeholder="/api" autocomplete="off" spellcheck="false" />
           </div>
           <div class="btn-row stack-gap">
-            <button type="button" id="save-token" class="evu-btn evu-btn--primary">Save in browser</button>
+            <button type="button" id="token-connect" class="evu-btn evu-btn--primary">Connect</button>
           </div>
           <p id="auth-msg" class="msg" aria-live="polite"></p>
         </div>
@@ -403,14 +481,16 @@
           </button>
         </div>
         <p class="hint">
-          Tunnel endpoints and WireGuard keys for each client. Saves write server YAML; use <strong>Pending changes</strong> to reload the tunnel and firewall rules.
+          Tunnel endpoints and WireGuard keys for each client.
         </p>
         <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="peers-refresh">Refresh</button>
-            <button type="button" class="evu-btn evu-btn--outline" id="peers-add-start">Add peer</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="peers-add-start">Add peer</button>
+            <button type="button" class="evu-btn evu-btn--ghost" id="peers-refresh">Refresh</button>
+            <label class="evu-sr-only" for="peers-filter">Filter peers</label>
+            <input type="search" id="peers-filter" class="table-filter evu-input" data-filter-table="peers-table-wrap" placeholder="Filter peers (press /)" autocomplete="off" spellcheck="false" />
           </div>
-          <div id="peers-table-wrap" class="table-wrap"></div>
+          <div id="peers-table-wrap" class="table-wrap table-wrap--sticky"></div>
           <p id="peers-msg" class="msg" aria-live="polite"></p>
         </div>
 
@@ -448,34 +528,26 @@
                   <input type="text" id="peer-f-pub" class="mono" spellcheck="false" autocomplete="off" />
                 </div>
                 <div class="field">
-                  <div class="toggle-switch-row">
-                    <span class="toggle-switch-label-group">
-                      <span class="toggle-switch-text" id="peer-f-disabled-desc">Enabled</span>
-                      <button
-                        type="button"
-                        class="btn-help-trigger btn-help-trigger--compact"
-                        aria-label="Details: Enabled off omits peer from WireGuard"
-                        title="Explain “Enabled” / off behaviour"
-                        data-help-title="Peer: Enabled"
-                        data-help-template="help-enabled-omit-wireguard"
-                      >
-                        ?
-                      </button>
-                    </span>
-                    <label class="evu-switch toggle-switch">
-                      <input
-                        type="checkbox"
-                        id="peer-f-disabled"
-                        class="evu-switch__input toggle-switch-input"
-                        autocomplete="off"
-                        aria-labelledby="peer-f-disabled-desc"
-                      />
-                      <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
+                  <div class="check-with-help">
+                    <label class="evu-check">
+                      <input type="checkbox" id="peer-f-disabled" class="evu-checkbox" autocomplete="off" />
+                      <span class="evu-check__text"><span>Enabled</span></span>
                     </label>
+                    <button
+                      type="button"
+                      class="btn-help-trigger btn-help-trigger--compact"
+                      aria-label="Details: Enabled off omits peer from WireGuard"
+                      title="Explain “Enabled” / off behaviour"
+                      data-help-title="Peer: Enabled"
+                      data-help-template="help-enabled-omit-wireguard"
+                    >
+                      ?
+                    </button>
                   </div>
                 </div>
+                <p id="peer-editor-msg" class="msg err editor-msg" role="alert"></p>
                 <div class="btn-row">
-                  <button type="button" class="evu-btn evu-btn--primary" id="peer-save">Save</button>
+                  <button type="button" class="evu-btn evu-btn--primary" id="peer-save" data-needs-write>Save</button>
                   <button type="button" class="evu-btn evu-btn--outline" id="peer-cancel">Cancel</button>
                 </div>
               </div>
@@ -616,14 +688,22 @@
           </button>
         </div>
         <p class="hint">
-          WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily; edits apply after <strong>Pending changes</strong> → Apply/reload.
+          WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily.
         </p>
+        <div id="routes-auto-paused" class="evu-alert evu-alert--warning routes-auto-paused is-hidden" role="status">
+          <div class="evu-alert__body">
+            <p class="evu-alert__title" id="routes-auto-paused-title"></p>
+            <ul id="routes-auto-paused-list" class="routes-auto-paused__list"></ul>
+          </div>
+        </div>
         <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="routes-refresh">Refresh</button>
-            <button type="button" class="evu-btn evu-btn--outline" id="routes-add">Add route</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="routes-add">Add route</button>
+            <button type="button" class="evu-btn evu-btn--ghost" id="routes-refresh">Refresh</button>
+            <label class="evu-sr-only" for="routes-filter">Filter routes</label>
+            <input type="search" id="routes-filter" class="table-filter evu-input" data-filter-table="routes-table-wrap" placeholder="Filter routes (press /)" autocomplete="off" spellcheck="false" />
           </div>
-          <div id="routes-table-wrap" class="table-wrap"></div>
+          <div id="routes-table-wrap" class="table-wrap table-wrap--sticky"></div>
           <p id="routes-msg" class="msg" aria-live="polite"></p>
         </div>
 
@@ -640,30 +720,21 @@
               <h3 id="route-editor-title">Edit route</h3>
               <input type="hidden" id="route-edit-index" value="" />
               <div class="field route-editor-enabled-field">
-                <div class="toggle-switch-row">
-                  <span class="toggle-switch-label-group">
-                    <span class="toggle-switch-text" id="route-f-disabled-desc">Enabled</span>
-                    <button
-                      type="button"
-                      class="btn-help-trigger btn-help-trigger--compact"
-                      aria-label="Details: Enabled off omits route from nftables"
-                      title="Explain “Enabled” / off behaviour"
-                      data-help-title="Route: Enabled"
-                      data-help-template="help-enabled-omit-nftables"
-                    >
-                      ?
-                    </button>
-                  </span>
-                  <label class="evu-switch toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="route-f-disabled"
-                      class="evu-switch__input toggle-switch-input"
-                      autocomplete="off"
-                      aria-labelledby="route-f-disabled-desc"
-                    />
-                    <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
+                <div class="check-with-help">
+                  <label class="evu-check">
+                    <input type="checkbox" id="route-f-disabled" class="evu-checkbox" autocomplete="off" />
+                    <span class="evu-check__text"><span>Enabled</span></span>
                   </label>
+                  <button
+                    type="button"
+                    class="btn-help-trigger btn-help-trigger--compact"
+                    aria-label="Details: Enabled off omits route from nftables"
+                    title="Explain “Enabled” / off behaviour"
+                    data-help-title="Route: Enabled"
+                    data-help-template="help-enabled-omit-nftables"
+                  >
+                    ?
+                  </button>
                 </div>
               </div>
               <div class="evu-tabs section-tabs route-editor-tabs" role="tablist" aria-label="Route editor sections">
@@ -695,10 +766,20 @@
               </p>
               <div id="route-tab-default-panel" role="tabpanel" aria-labelledby="route-tab-default-btn">
                 <div class="field">
+                  <label for="route-f-name">Name <span class="meta">(optional)</span></label>
+                  <input type="text" id="route-f-name" maxlength="64" placeholder="Minecraft" autocomplete="off" />
+                </div>
+                <div class="field">
                   <span class="field-label" id="route-proto-label">Protocol</span>
-                  <div class="proto-checks" role="group" aria-labelledby="route-proto-label">
-                    <label class="check"><input type="checkbox" id="route-f-proto-tcp" checked /> TCP</label>
-                    <label class="check"><input type="checkbox" id="route-f-proto-udp" /> UDP</label>
+                  <div class="evu-check-group" role="group" aria-labelledby="route-proto-label">
+                    <label class="evu-check">
+                      <input type="checkbox" id="route-f-proto-tcp" class="evu-checkbox" checked />
+                      <span class="evu-check__text"><span>TCP</span></span>
+                    </label>
+                    <label class="evu-check">
+                      <input type="checkbox" id="route-f-proto-udp" class="evu-checkbox" />
+                      <span class="evu-check__text"><span>UDP</span></span>
+                    </label>
                   </div>
                   <span class="meta">Choose one or both. Both is saved as <code class="inline">tcp,udp</code> in config.</span>
                 </div>
@@ -709,6 +790,13 @@
                 <div class="field">
                   <label for="route-f-target">Target peer IP</label>
                   <select id="route-f-target"></select>
+                </div>
+                <div class="field">
+                  <label class="evu-check">
+                    <input type="checkbox" id="route-f-pause-offline" class="evu-checkbox" autocomplete="off" />
+                    <span class="evu-check__text"><span>Pause when peer is offline</span></span>
+                  </label>
+                  <span class="meta">Resumes by itself when the peer is back. Takes effect after Apply.</span>
                 </div>
               </div>
               <div id="route-tab-advanced-panel" role="tabpanel" aria-labelledby="route-tab-advanced-btn" hidden>
@@ -811,8 +899,9 @@
                 </section>
               </div>
               <div class="route-editor-actions">
+                <p id="route-editor-msg" class="msg err editor-msg" role="alert"></p>
                 <div class="btn-row">
-                  <button type="button" class="evu-btn evu-btn--primary" id="route-save">Save route</button>
+                  <button type="button" class="evu-btn evu-btn--primary" id="route-save" data-needs-write>Save</button>
                   <button type="button" class="evu-btn evu-btn--outline" id="route-cancel">Cancel</button>
                 </div>
               </div>
@@ -830,7 +919,6 @@
         <p class="hint">How WAN, this host, and each peer connect for the forwards you have configured.</p>
         <div class="evu-card card topology-card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="topology-refresh">Refresh</button>
             <button
               type="button"
               class="evu-btn evu-btn--outline"
@@ -840,6 +928,13 @@
             >
               Center
             </button>
+            <span id="topology-scale-controls" class="topology-scale-controls" hidden>
+              <label class="evu-sr-only" for="topology-filter">Filter routes and peers</label>
+              <input type="search" id="topology-filter" class="table-filter evu-input" placeholder="Filter routes and peers (press /)" autocomplete="off" spellcheck="false" />
+              <button type="button" class="evu-btn evu-btn--ghost" id="topology-expand-all">Expand all</button>
+              <button type="button" class="evu-btn evu-btn--ghost" id="topology-collapse-all">Collapse all</button>
+              <span id="topology-scale-summary" class="meta" role="status"></span>
+            </span>
           </div>
           <div class="topology-legend" role="list">
             <span class="topology-legend-item" role="listitem"><span class="topology-legend-card topology-legend-card--on" aria-hidden="true"></span> Enabled route / online peer</span>
@@ -879,10 +974,10 @@
         <p class="hint">Which ports on this host itself accept connections — SSH, HTTP and friends. Forwarded services live on Routes.</p>
         <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="inbound-refresh">Refresh</button>
-            <button type="button" class="evu-btn evu-btn--outline" id="inbound-add">Add rule</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="inbound-add">Add rule</button>
+            <button type="button" class="evu-btn evu-btn--ghost" id="inbound-refresh">Refresh</button>
           </div>
-          <div id="inbound-table-wrap" class="table-wrap"></div>
+          <div id="inbound-table-wrap" class="table-wrap table-wrap--sticky"></div>
           <p id="inbound-msg" class="msg" aria-live="polite"></p>
         </div>
 
@@ -914,34 +1009,26 @@
                 <input type="text" id="inbound-f-note" placeholder="e.g. public HTTPS" autocomplete="off" />
               </div>
               <div class="field">
-                <div class="toggle-switch-row">
-                  <span class="toggle-switch-label-group">
-                    <span class="toggle-switch-text" id="inbound-f-disabled-desc">Enabled</span>
-                    <button
-                      type="button"
-                      class="btn-help-trigger btn-help-trigger--compact"
-                      aria-label="Details: Enabled off omits rule from nftables"
-                      title="Explain “Enabled” / off behaviour"
-                      data-help-title="Inbound rule: Enabled"
-                      data-help-template="help-enabled-omit-nftables"
-                    >
-                      ?
-                    </button>
-                  </span>
-                  <label class="evu-switch toggle-switch">
-                    <input
-                      type="checkbox"
-                      id="inbound-f-disabled"
-                      class="evu-switch__input toggle-switch-input"
-                      autocomplete="off"
-                      aria-labelledby="inbound-f-disabled-desc"
-                    />
-                    <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
+                <div class="check-with-help">
+                  <label class="evu-check">
+                    <input type="checkbox" id="inbound-f-disabled" class="evu-checkbox" autocomplete="off" />
+                    <span class="evu-check__text"><span>Enabled</span></span>
                   </label>
+                  <button
+                    type="button"
+                    class="btn-help-trigger btn-help-trigger--compact"
+                    aria-label="Details: Enabled off omits rule from nftables"
+                    title="Explain “Enabled” / off behaviour"
+                    data-help-title="Inbound rule: Enabled"
+                    data-help-template="help-enabled-omit-nftables"
+                  >
+                    ?
+                  </button>
                 </div>
               </div>
+              <p id="inbound-editor-msg" class="msg err editor-msg" role="alert"></p>
               <div class="btn-row">
-                <button type="button" class="evu-btn evu-btn--primary" id="inbound-save">Save rule</button>
+                <button type="button" class="evu-btn evu-btn--primary" id="inbound-save" data-needs-write>Save</button>
                 <button type="button" class="evu-btn evu-btn--outline" id="inbound-cancel">Cancel</button>
               </div>
             </div>
@@ -963,7 +1050,7 @@
           </button>
         </div>
         <p class="hint">
-          Which countries may reach forwarded ports. Save here, then apply from <strong>Pending changes</strong>.
+          Which countries may reach forwarded ports. Switches save as you flip them, and other edits save from the bar that appears.
         </p>
         <div class="evu-card card geo-editor">
           <div class="geo-enable-row">
@@ -981,6 +1068,7 @@
               </label>
             </div>
             <p class="meta geo-enable-hint">Off keeps country lists in config but leaves them out of nftables.</p>
+            <p id="geo-f-enabled-msg" class="msg err switch-error" role="alert"></p>
           </div>
           <div class="evu-tabs section-tabs geo-page-tabs" role="tablist" aria-label="Geoblock and limits sections">
             <button
@@ -1075,6 +1163,7 @@
               <p class="hint meta geo-field-subhint geo-inbound-rule-hint">
                 Off (default) leaves SSH, HTTP and other <code class="inline">input_allows</code> reachable from any source IPv4.
               </p>
+              <p id="geo-f-apply-input-allows-msg" class="msg err switch-error" role="alert"></p>
             </div>
           </div>
           <div id="geo-tab-advanced-panel" role="tabpanel" aria-labelledby="geo-tab-advanced-btn" hidden>
@@ -1146,6 +1235,7 @@
                 <a href="https://doc.crowdsec.net/docs/bouncers/nftables" target="_blank" rel="noopener noreferrer">CrowdSec nftables bouncer docs</a>.
                 See <code class="inline">contrib/crowdsec/</code> in the repo.
               </p>
+              <p id="geo-f-crowdsec-enabled-msg" class="msg err switch-error" role="alert"></p>
             </div>
           </div>
           <div id="geo-tab-zones-panel" role="tabpanel" aria-labelledby="geo-tab-zones-btn" hidden>
@@ -1202,11 +1292,9 @@
             </div>
           </section>
           <div class="btn-row geo-actions-row">
-            <button type="button" class="evu-btn evu-btn--primary" id="geo-save">Save</button>
             <button type="button" class="evu-btn evu-btn--outline" id="geo-refresh">Refresh</button>
             <button type="button" class="evu-btn evu-btn--outline" id="geo-update-lists">Update geo lists</button>
           </div>
-          <p id="geo-unsaved-msg" class="msg geo-unsaved-msg meta" hidden aria-live="polite"></p>
           <p id="geo-msg" class="msg" aria-live="polite"></p>
         </div>
 
@@ -1228,7 +1316,7 @@
             <div id="geo-modal-list" class="geo-modal-list scroll-thin" role="group" aria-label="Countries"></div>
             <div class="btn-row geo-modal-actions">
               <button type="button" class="evu-btn evu-btn--outline" id="geo-modal-cancel">Cancel</button>
-              <button type="button" class="evu-btn evu-btn--primary" id="geo-modal-save">Save</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="geo-modal-done">Done</button>
             </div>
           </div>
         </div>
@@ -1236,7 +1324,7 @@
 
       <section id="page-pending" class="page" hidden>
         <div class="page-title-row">
-          <h1 class="page-title">Pending changes</h1>
+          <h1 id="pending-page-title" class="page-title" tabindex="-1">Pending changes</h1>
           <button
             type="button"
             class="btn-help-trigger"
@@ -1247,34 +1335,28 @@
             ?
           </button>
         </div>
-        <p class="hint">Saved config that the host is not running yet. Review the generated rules, then apply.</p>
+        <p class="hint">Saved config that the host is not running yet. Review the changes, then apply.</p>
         <div class="evu-card card">
           <div id="pending-status-alert" class="evu-alert pending-status-alert">
             <div class="evu-alert__body pending-status-body">
               <p id="pending-status" class="pending-banner" aria-live="polite"></p>
             </div>
           </div>
+          <div id="pending-changes" class="pending-changes is-hidden">
+            <h3 id="pending-changes-title" tabindex="-1">Changes</h3>
+            <ul id="pending-changes-list" class="pending-changes-list" aria-labelledby="pending-changes-title"></ul>
+            <p id="pending-changes-note" class="hint meta is-hidden"></p>
+            <p id="pending-changes-msg" class="msg" aria-live="polite"></p>
+          </div>
           <div class="toolbar pending-toolbar">
             <button type="button" class="evu-btn evu-btn--outline" id="pending-check-config">Check config</button>
-            <button type="button" class="evu-btn evu-btn--primary" id="pending-apply">Apply to host</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="pending-apply" data-needs-write>Apply</button>
             <button type="button" class="evu-btn evu-btn--outline" id="pending-discard" disabled>Discard pending</button>
             <button type="button" class="evu-btn evu-btn--danger-outline" id="pending-restore-previous" disabled>Restore previous applied</button>
-            <button type="button" class="evu-btn evu-btn--outline" id="pending-refresh">Refresh preview</button>
+            <button type="button" class="evu-btn evu-btn--outline" id="pending-refresh">Refresh</button>
           </div>
-          <div id="pending-validate-panel" class="evu-alert pending-validate-panel is-hidden" role="group" aria-labelledby="pending-validate-title">
-            <div class="evu-alert__body pending-validate-body">
-              <p class="evu-alert__title" id="pending-validate-title">Config check</p>
-              <p id="pending-client-ip" class="meta pending-client-ip"></p>
-              <ul id="pending-validate-warnings" class="pending-validate-warnings is-hidden"></ul>
-              <div id="pending-lockout-ack-wrap" class="pending-lockout-ack-wrap is-hidden">
-                <label class="check pending-lockout-ack">
-                  <input type="checkbox" id="pending-lockout-ack" />
-                  I understand these rules may lock me out of this host, and I have another way in.
-                </label>
-              </div>
-            </div>
-          </div>
-          <h3>Generated nftables</h3>
+          <details id="pending-raw-diff" class="pending-raw-diff">
+          <summary>Generated nftables</summary>
           <p class="hint meta">
             Compare <code class="inline">generated/nftables.nft</code> as it exists on disk to the ruleset generated from the current saved config (what apply would write).
           </p>
@@ -1305,6 +1387,7 @@
             </div>
             <div id="pending-diff-panel" class="pending-diff-panel" role="tabpanel"></div>
           </div>
+          </details>
           <p id="pending-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>
@@ -1317,8 +1400,8 @@
         <p class="hint">Live counters read from the host: WireGuard transfer and handshakes, plus nftables rule hits.</p>
         <div class="evu-card card">
           <div class="toolbar">
-            <button type="button" class="evu-btn evu-btn--primary" id="stats-refresh">Refresh</button>
             <button type="button" class="evu-btn evu-btn--outline" id="stats-export-metrics-csv">Export peer metrics CSV</button>
+            <button type="button" class="evu-btn evu-btn--ghost" id="stats-refresh">Refresh</button>
           </div>
           <h3>WireGuard peers</h3>
           <div id="stats-wg-wrap" class="table-wrap"></div>
@@ -1345,7 +1428,7 @@
         <div class="evu-card card">
           <div class="logs-toolbar-wrap">
             <div class="toolbar logs-toolbar logs-toolbar-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="logs-refresh">Refresh</button>
+              <button type="button" class="evu-btn evu-btn--ghost" id="logs-refresh">Refresh</button>
               <button type="button" class="evu-btn evu-btn--outline" id="logs-filter-clear">Clear filters</button>
               <span class="logs-toolbar-spacer" aria-hidden="true"></span>
               <div class="evu-tabs section-tabs logs-view-mode" role="group" aria-label="Log view mode">
@@ -1404,8 +1487,10 @@
           <!-- Announced separately from the visible count: that updates on every
                keystroke, which is too chatty to be a live region itself. -->
           <p id="logs-count-status" class="evu-sr-only" role="status" aria-live="polite"></p>
-          <div id="logs-table-wrap" class="table-wrap logs-table-wrap" hidden></div>
-          <pre id="logs-pre" class="code-block logs-pre" hidden></pre>
+          <div id="logs-view">
+            <div id="logs-table-wrap" class="table-wrap logs-table-wrap" hidden></div>
+            <pre id="logs-pre" class="code-block logs-pre" hidden></pre>
+          </div>
           <p id="logs-msg" class="msg" aria-live="polite"></p>
         </div>
       </section>
@@ -1452,8 +1537,10 @@
         <div class="modal-panel">
           <h3 id="confirm-modal-title">Confirm</h3>
           <p id="confirm-modal-desc" class="confirm-modal-body"></p>
+          <p id="confirm-modal-status" class="msg" aria-live="polite"></p>
           <div class="btn-row confirm-modal-actions">
-            <button type="button" class="evu-btn evu-btn--primary" id="confirm-modal-ok">OK</button>
+            <button type="button" class="evu-btn evu-btn--danger" id="confirm-modal-ok">OK</button>
+            <button type="button" class="evu-btn evu-btn--outline is-hidden" id="confirm-modal-extra"></button>
             <button type="button" class="evu-btn evu-btn--outline" id="confirm-modal-cancel">Cancel</button>
           </div>
         </div>
@@ -1470,7 +1557,7 @@
         <div class="modal-panel">
           <h3 id="shortcuts-modal-title">Keyboard shortcuts</h3>
           <ul class="shortcuts-list meta">
-            <li><kbd class="kbd">/</kbd> — Focus peer/route filter</li>
+            <li><kbd class="kbd">/</kbd> — Focus the filter on Peers and Routes</li>
             <li><kbd class="kbd">?</kbd> — This help</li>
             <li><kbd class="kbd">Esc</kbd> — Close the topmost dialog, or the navigation drawer</li>
           </ul>
@@ -1502,7 +1589,7 @@
             </div>
           </div>
           <div class="btn-row">
-            <button type="button" class="evu-btn evu-btn--primary" id="config-upload-apply">Save to server</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="config-upload-apply" data-needs-write>Save</button>
             <button type="button" class="evu-btn evu-btn--outline" id="config-upload-cancel">Cancel</button>
           </div>
           <p id="config-upload-apply-msg" class="msg" aria-live="polite"></p>
@@ -1529,9 +1616,11 @@
     </div>
   </div>
 
+  <div id="toaster" class="evu-toaster" role="status"></div>
+
     <template id="help-peers-intro">
       <div class="help-modal-body">
-        <p>Saves write YAML on the server only; reload WireGuard and nftables from <strong>Pending changes</strong> when ready.</p>
+        <p>Save writes YAML on the server only; <strong>Apply</strong> updates WireGuard and nftables.</p>
         <p>
           <strong>Status:</strong> from host handshake time — roughly <strong>Online</strong> if the latest handshake was within about three minutes, otherwise stale/offline;
           <strong>Unknown</strong> if statistics are unavailable.
@@ -1546,11 +1635,17 @@
       <div class="help-modal-body">
         <p>Routes are <code class="inline">forwarding.routes</code>: WAN TCP/UDP ports mapped to a peer <strong>tunnel IPv4 host</strong>.</p>
         <p>
-          Turning <strong>Enabled</strong> off keeps the route in config but omits it from generated nftables until you enable it again, then Apply/reload.
+          Turning <strong>Enabled</strong> off keeps the route in config but omits it from generated nftables until you enable it again, then Apply.
         </p>
-        <p><strong>Source allowlist</strong> limits which WAN IPv4 sources may reach the forwarded port (<strong>Apply to host</strong> required).</p>
+        <p><strong>Source allowlist</strong> limits which WAN IPv4 sources may reach the forwarded port (<strong>Apply</strong> required).</p>
         <p>
           Geoblocking in <strong>block</strong> mode evaluates country-drop rules before these forwards — a blocked-country source can still be dropped even if allowlisted here.
+        </p>
+        <p>
+          <strong>Accepted</strong> is the traffic the firewall accepted for a route since the last Apply, as packets and bytes. It does not mean players or legitimate clients: a source that passes the route's filters counts even if the backend never replies. Dropped traffic stays out. Bytes are the more exact figure, because merged TCP packets can count as one packet.
+        </p>
+        <p>
+          The counts reset on Apply, revert or reboot. A dash means no count for that route: it is disabled, it was added or changed since the last Apply, or the host has no counters yet. A route disabled since the last Apply keeps its count until the next Apply, unless another route has the same protocol, ports and target.
         </p>
       </div>
     </template>
@@ -1560,7 +1655,7 @@
         <p>
           Restricts public <strong>forwarded</strong> ports using GeoIP zones; configured under <code class="inline">geo</code> in the YAML.
         </p>
-        <p>Choose allow vs block via <strong>List mode</strong>, then run <strong>Update geo lists</strong> here or Overview, and <strong>Apply</strong> from Pending.</p>
+        <p>Choose allow vs block via <strong>List mode</strong>, then run <strong>Update geo lists</strong> here or Overview, and <strong>Apply</strong>.</p>
         <p>
           Inbound SSH/HTTP (<code class="inline">input_allows</code>) obey geo only if <strong>Apply geoblocking to inbound allow rules</strong> is on (<strong>Countries &amp; rules</strong> tab).
           Break-glass CIDRs, the global denylist and rate limits are on the <strong>Advanced</strong> tab, and <strong>Zone files</strong> shows what is currently on disk per country.
@@ -1575,11 +1670,8 @@
           A read-only summary of what the host is running right now: WireGuard interface and peer counts, forwarding, geo zone freshness, peer latency, and recent
           activity from <code class="inline">state/events.jsonl</code>.
         </p>
-        <p>
-          <strong>Reload config</strong> re-applies the saved config to nftables and WireGuard — the same action as Apply on <strong>Pending changes</strong>, including the
-          pre-apply check, so it asks you to confirm if the config could cut off your own access. <strong>Update geo lists</strong> refreshes the on-disk country zone files.
-        </p>
-        <p><strong>Maintenance mode</strong> keeps every route in config but omits public forwards from the generated rules until you turn it off and reload.</p>
+        <p><strong>Update geo lists</strong> refreshes the on-disk country zone files.</p>
+        <p><strong>Maintenance mode</strong> keeps every route in config but omits public forwards from the generated rules until you turn it off and Apply.</p>
       </div>
     </template>
 
@@ -1604,6 +1696,9 @@
           On the host it is the contents of <code class="inline">/etc/evuproxy/api.token</code>. Rotate it there and the UI will report an API error until you paste the
           new value here.
         </p>
+        <p>
+          <code class="inline">/etc/evuproxy/api-read.token</code>, if the host has one, is a read-only token for monitoring. It opens Overview, Stats and Logs and can't change anything.
+        </p>
       </div>
     </template>
 
@@ -1614,18 +1709,23 @@
           that carry traffic to each peer.
         </p>
         <p>An edge is drawn as traffic when the peer is online and its byte counters moved since the last refresh; otherwise it stays idle. Scroll to zoom, drag the background to pan, and use <strong>Center</strong> to reset.</p>
+        <p>With many routes the graph groups them by peer, collapsed, so it stays readable: open a peer with its arrow, or filter to find a route. Scrolling then moves through the graph, and Ctrl+scroll zooms.</p>
       </div>
     </template>
 
     <template id="help-pending-intro">
       <div class="help-modal-body">
         <p>
-          Saving on Peers, Routes, Inbound access or Geoblock writes YAML on the server only. Nothing reaches nftables or WireGuard until you apply here — so this page
+          Saving on Peers, Routes, Inbound access or Geoblock writes YAML on the server only. Nothing reaches nftables or WireGuard until you Apply — so this page
           is the diff between what is saved and what the host is running.
         </p>
         <p>
-          <strong>Check config</strong> validates the pending ruleset and reports anything that could lock you out of this host; <strong>Apply to host</strong> runs it
-          for real. <strong>Discard pending</strong> throws away unapplied edits and <strong>Restore previous applied</strong> rolls back to the last known-good config.
+          <strong>Changes</strong> lists each difference in plain language. <strong>Revert</strong> takes one of them back out of the saved config and leaves the others in
+          place; it has no time limit, unlike the Undo on a toast. The exact rules are under <strong>Generated nftables</strong>.
+        </p>
+        <p>
+          <strong>Apply</strong> checks first and stops if the check fails or could lock you out of this host; the result stays at the top of the page.
+          <strong>Check config</strong> runs only the check. <strong>Discard pending</strong> throws away unapplied edits and <strong>Restore previous applied</strong> rolls back to the last known-good config.
         </p>
       </div>
     </template>
@@ -1638,7 +1738,7 @@
         </p>
         <p>
           <strong>nftables counters</strong> lists the packet and byte counters attached to the generated rules, which is the quickest way to confirm a forward or a
-          drop rule is actually being hit. Counters reset when the ruleset is reloaded.
+          drop rule is actually being hit. Counters reset on every Apply.
         </p>
       </div>
     </template>
@@ -1650,10 +1750,9 @@
           in the config. Ports forwarded to peers belong on <strong>Routes</strong> instead.
         </p>
         <p>
-          Turning <strong>Enabled</strong> off keeps a rule in the config but omits it from the generated nftables until you turn it back on. Changes reach the host from
-          <strong>Pending changes</strong>.
+          Turning <strong>Enabled</strong> off keeps a rule in the config but omits it from the generated nftables until you turn it back on.
         </p>
-        <p>Take care with the rule that keeps your own SSH session alive — the config check on Pending changes warns before an apply would lock you out.</p>
+        <p>Take care with the rule that keeps your own SSH session alive — Apply warns first if it would lock you out.</p>
       </div>
     </template>
 
@@ -1665,7 +1764,7 @@
         </p>
         <p>
           That is the setting most likely to lock you out: if your own address is outside the allowed countries, your next SSH connection is dropped. Add a break-glass
-          CIDR on the <strong>Advanced</strong> tab first, and read the config check on <strong>Pending changes</strong> before applying.
+          CIDR on the <strong>Advanced</strong> tab first, and read the config check before applying.
         </p>
       </div>
     </template>
@@ -1700,7 +1799,7 @@
           Both lists take comma or whitespace separated WAN IPv4 addresses and CIDRs, and apply to this route only. The denylist is evaluated first, then the allowlist,
           then geoblocking, then forwarding.
         </p>
-        <p>An empty allowlist means any source. A non-empty one drops everything else, so a typo here is enough to make the service unreachable — the entries take effect on <strong>Apply to host</strong>.</p>
+        <p>An empty allowlist means any source. A non-empty one drops everything else, so a typo here is enough to make the service unreachable — the entries take effect on <strong>Apply</strong>.</p>
       </div>
     </template>
 
@@ -1729,7 +1828,7 @@
           The public address peers dial to reach this VPN — <code class="inline">host:port</code> or <code class="inline">hostname:port</code>. It is pre-filled when you
           create a peer.
         </p>
-        <p>The port can be omitted if it matches the server listen port, once you have refreshed server details on Overview.</p>
+        <p>The port can be omitted if it matches the server listen port, once server details have loaded on Overview.</p>
         <p>
           Use an address peers can reach with <strong>UDP</strong> on the WireGuard listen port. Do not put a Cloudflare
           <strong>orange-cloud</strong> (proxied) hostname here — DNS will resolve to Cloudflare anycast instead of this VPS, and clients will show
@@ -1765,8 +1864,8 @@
     <template id="help-enabled-omit-nftables">
       <div class="help-modal-body">
         <p>
-          Turning <strong>Enabled</strong> off keeps this entry in the server YAML but omits it from generated nftables until you turn it on again and reload firewall
-          rules from <strong>Pending changes</strong> (Apply/reload).
+          Turning <strong>Enabled</strong> off keeps this entry in the server YAML but omits it from generated nftables until you turn it on again and
+          <strong>Apply</strong>.
         </p>
       </div>
     </template>
@@ -1774,8 +1873,8 @@
     <template id="help-enabled-omit-wireguard">
       <div class="help-modal-body">
         <p>
-          Turning <strong>Enabled</strong> off keeps this peer in the server YAML but omits them from WireGuard until you turn it on again and reload the tunnel from
-          <strong>Pending changes</strong>.
+          Turning <strong>Enabled</strong> off keeps this peer in the server YAML but omits them from WireGuard until you turn it on again and
+          <strong>Apply</strong>.
         </p>
       </div>
     </template>
@@ -1831,7 +1930,6 @@
       </div>
     </template>
 
-  <script>window.__EVUPROXY_DEV_UI__ = false;</script>
   <script src="/static/dev-boot.js"></script>
   <script src="/static/evu/theme-autoload.js"></script>
   <script type="module" src="/static/js/main.js"></script>

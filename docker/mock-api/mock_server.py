@@ -13,11 +13,23 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Set from MOCK_API_TOKEN in __main__ before serve_forever (required non-empty).
 TOKEN = ""
+# From MOCK_API_READ_TOKEN; empty means no read token.
+READ_TOKEN = ""
+READ_SCOPE_PATHS = {
+    "/api/v1/status",
+    "/api/v1/overview",
+    "/api/v1/stats",
+    "/api/v1/logs",
+    "/api/v1/events",
+    "/api/v1/metrics",
+    "/api/v1/metrics/peers",
+}
 PORT = int(os.environ.get("PORT", "9847"))
 MAX_JSON_PUT = 2 << 20
 MAX_JSON_SMALL = 1 << 14
@@ -151,6 +163,7 @@ MOCK_CONFIG_DEFAULT = {
     "forwarding": {
         "routes": [
             {
+                "name": "Minecraft",
                 "proto": "tcp",
                 "ports": ["25565", "25566", "25567"],
                 "target_ip": "10.100.0.10",
@@ -207,6 +220,69 @@ MOCK_APPLIED_SHA: str | None = None
 # Last distinct applied config (updated on POST /reload); .bak.1 … .bak.5 in MOCK_BAK_SLOTS[0..4].
 MOCK_BAK: dict | None = None
 MOCK_BAK_SLOTS: list[dict | None] = [None, None, None, None, None]
+
+# Archives the mock pretends are on disk, by path: unix time of the last backup.
+MOCK_BACKUPS: dict[str, float] = {"/var/backups/evuproxy-config.tgz": time.time()}
+
+# An Apply waiting for confirmation; the real API keeps this on disk and reverts from a systemd timer.
+MOCK_SESSION: dict | None = None
+MOCK_REVERTED_CONFIG: dict | None = None
+MOCK_LAST_REVERT: dict | None = None
+
+
+def _utc_iso(ts: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts))
+
+
+def _mock_session_view() -> dict | None:
+    if MOCK_SESSION is None:
+        return None
+    return {
+        "phase": "active",
+        "started_at": _utc_iso(MOCK_SESSION["started_at"]),
+        "deadline": _utc_iso(MOCK_SESSION["deadline"]),
+        "timeout_seconds": MOCK_SESSION["timeout"],
+        "remaining_seconds": max(0, round(MOCK_SESSION["deadline"] - time.time())),
+    }
+
+
+def _mock_revert_session(reason: str) -> None:
+    global MOCK_SESSION, MOCK_REVERTED_CONFIG, MOCK_LAST_REVERT, MOCK_CONFIG
+    global MOCK_CONFIG_BASELINE, MOCK_APPLIED_SHA, MOCK_BAK, MOCK_BAK_SLOTS
+    MOCK_REVERTED_CONFIG = copy.deepcopy(MOCK_CONFIG)
+    MOCK_CONFIG = copy.deepcopy(MOCK_SESSION["baseline"])
+    MOCK_CONFIG_BASELINE = copy.deepcopy(MOCK_SESSION["baseline"])
+    MOCK_APPLIED_SHA = MOCK_SESSION["applied_sha"]
+    MOCK_BAK = MOCK_SESSION["bak"]
+    MOCK_BAK_SLOTS = MOCK_SESSION["bak_slots"]
+    MOCK_SESSION = None
+    MOCK_LAST_REVERT = {"at": _utc_iso(time.time()), "reason": reason, "config_available": True}
+    _persist_mock_config()
+    _push_mock_event("apply_reverted", reason)
+
+
+def _mock_expire_session() -> None:
+    if MOCK_SESSION is not None and time.time() >= MOCK_SESSION["deadline"]:
+        _mock_revert_session("timeout")
+
+
+def _config_change_count(a, b) -> int:
+    """Match configChangeCount in internal/apply/config_changes.go."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return sum(_config_change_count(a.get(k), b.get(k)) for k in a.keys() | b.keys())
+    if isinstance(a, list) and (isinstance(b, list) or b is None):
+        rows = [json.dumps(r, sort_keys=True) for r in a]
+        only_b = 0
+        for row in b or []:
+            key = json.dumps(row, sort_keys=True)
+            if key in rows:
+                rows.remove(key)
+            else:
+                only_b += 1
+        return max(len(rows), only_b)
+    if isinstance(b, list) and a is None:
+        return len(b)
+    return 0 if a == b else 1
 
 MOCK_PREFS: dict = {
     "peer_tunnel_subnet_cidr": "",
@@ -297,6 +373,21 @@ def _disk_config_sha() -> str:
     return _config_sha(MOCK_CONFIG)
 
 
+def _config_etag() -> str:
+    return '"%s"' % _disk_config_sha()
+
+
+def _if_match_ok(values: list[str] | None) -> bool:
+    """Match parseIfMatch: no header or * is unconditional; otherwise some tag must be current."""
+    if not values:
+        return True
+    tags = [t.strip() for v in values for t in v.split(",")]
+    if "*" in tags:
+        return True
+    current = _disk_config_sha()
+    return any(t.removeprefix("W/").strip('"') == current for t in tags)
+
+
 def _mock_record_applied_snapshot() -> None:
     """Match RecordAppliedConfigSnapshot: rotate .bak chain when applied config differs from .bak."""
     global MOCK_BAK, MOCK_BAK_SLOTS
@@ -333,6 +424,15 @@ def _format_port_set(ports: list) -> str:
     if not parts:
         return ""
     return "{ " + ", ".join(parts) + " }"
+
+
+def _route_name_error(name: str) -> str:
+    """Same rule and messages as validRouteName in internal/config/validators.go."""
+    if any(ch != "\t" and unicodedata.category(ch) == "Cc" for ch in name):
+        return "name cannot contain newlines or control characters"
+    if len(name.strip()) > 64:
+        return "name is longer than 64 characters"
+    return ""
 
 
 def _route_protocols(proto: str | None) -> list[str]:
@@ -384,8 +484,8 @@ def _rate_limit_burst(per_second: int) -> int:
     return per_second * 2
 
 
-def _rate_limit_conn_threshold(max_conn: int) -> int:
-    return max_conn - 1
+def _rate_limit_conn_set(route_index: int, proto: str) -> str:
+    return "ratelimit_conn_r%d_%s" % (route_index, proto)
 
 
 def _rate_limit_set_needs(cfg: dict) -> tuple[bool, bool, set[int], set[int]]:
@@ -447,26 +547,25 @@ def _rate_limit_mock_lines(
         return []
     out: list[str] = []
     if rl["conn_n"] > 0:
-        thr = _rate_limit_conn_threshold(rl["conn_n"])
+        conn_set = _rate_limit_conn_set(route_index, proto)
         out.append(
-            '%s%s%s dport %s ct state established,related ct count over %d log prefix "evuproxy-ratelimit: " drop'
-            % (scope, exempt, proto, port_expr, thr)
+            '%s%s%s dport %s ct state established,related add @%s { ip saddr ct count over %d } log prefix "evuproxy-ratelimit: " drop'
+            % (scope, exempt, proto, port_expr, conn_set, rl["conn_n"])
         )
-        if proto == "tcp":
-            out.append(
-                '%s%s%s dport %s ct state new ct count over %d log prefix "evuproxy-ratelimit: " drop'
-                % (scope, exempt, proto, port_expr, thr)
-            )
+        out.append(
+            '%s%s%s dport %s ct state new add @%s { ip saddr ct count over %d } log prefix "evuproxy-ratelimit: " drop'
+            % (scope, exempt, proto, port_expr, conn_set, rl["conn_n"])
+        )
     if proto == "tcp" and rl["syn_set"] and rl["syn_n"] > 0:
         burst = _rate_limit_burst(rl["syn_n"])
         out.append(
-            '%s%s%s dport %s tcp flags syn ct state new add @%s { ip saddr limit rate %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
+            '%s%s%s dport %s tcp flags syn ct state new update @%s { ip saddr limit rate over %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
             % (scope, exempt, proto, port_expr, rl["syn_set"], rl["syn_n"], burst)
         )
     if proto == "udp" and rl["udp_set"] and rl["udp_n"] > 0:
         burst = _rate_limit_burst(rl["udp_n"])
         out.append(
-            '%s%s%s dport %s add @%s { ip saddr limit rate %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
+            '%s%s%s dport %s update @%s { ip saddr limit rate over %d/second burst %d packets } log prefix "evuproxy-ratelimit: " drop'
             % (scope, exempt, proto, port_expr, rl["udp_set"], rl["udp_n"], burst)
         )
     return out
@@ -569,6 +668,20 @@ def _nft_from_config(cfg: dict) -> str:
                 "",
             ]
         )
+    for ri, r in enumerate(cfg.get("forwarding", {}).get("routes") or []):
+        if r.get("disabled"):
+            continue
+        if (r.get("rate_limit") or {}).get("max_conn_per_ip") or global_rl.get("max_conn_per_ip"):
+            for pr in _route_protocols(r.get("proto")):
+                lines.extend(
+                    [
+                        "    set %s {" % _rate_limit_conn_set(ri, pr),
+                        "        type ipv4_addr",
+                        "        flags dynamic",
+                        "    }",
+                        "",
+                    ]
+                )
 
     lines.extend(
         [
@@ -781,6 +894,40 @@ def _mock_peer_rx_tx(public_key: str) -> tuple[int, int]:
     return half, cur - half
 
 
+def _mock_peer_online(plist: list[dict], i: int) -> bool:
+    """The mock's fixed picture: with two or more peers, the last one has no handshake."""
+    if plist[i].get("disabled"):
+        return False
+    return not (len(plist) >= 2 and i == len(plist) - 1)
+
+
+def _mock_auto_paused_routes() -> list[dict]:
+    """Fake GET /api/v1/auto-pause. Like the real loop it reads the applied config, so a
+    route pauses after Apply; unlike it there is no hysteresis, the peer is simply offline."""
+    cfg = MOCK_CONFIG_BASELINE
+    plist = list(cfg.get("peers") or [])
+    out: list[dict] = []
+    for r in (cfg.get("forwarding") or {}).get("routes") or []:
+        if not r.get("pause_when_peer_offline") or r.get("disabled"):
+            continue
+        target = (r.get("target_ip") or "").strip()
+        for i, p in enumerate(plist):
+            if p.get("disabled") or (p.get("tunnel_ip") or "").split("/")[0].strip() != target:
+                continue
+            if not _mock_peer_online(plist, i):
+                row = {
+                    "proto": r.get("proto") or "",
+                    "ports": list(r.get("ports") or []),
+                    "target_ip": target,
+                    "peer": p.get("name") or "",
+                }
+                if r.get("name"):
+                    row["name"] = r["name"]
+                out.append(row)
+            break
+    return out
+
+
 def _mock_wireguard_peers_payload() -> list[dict]:
     now = int(time.time())
     out: list[dict] = []
@@ -789,12 +936,7 @@ def _mock_wireguard_peers_payload() -> list[dict]:
         pk = (p.get("public_key") or "").strip()
         if not pk:
             continue
-        if p.get("disabled"):
-            hand = 0
-        elif len(plist) >= 2 and i == len(plist) - 1:
-            hand = 0
-        else:
-            hand = now - 45
+        hand = now - 45 if _mock_peer_online(plist, i) else 0
         rx, tx = _mock_peer_rx_tx(pk)
         tip = (p.get("tunnel_ip") or "").strip()
         out.append(
@@ -807,6 +949,29 @@ def _mock_wireguard_peers_payload() -> list[dict]:
                 "transfer_tx": tx,
             }
         )
+    return out
+
+
+def _mock_route_accepted() -> list:
+    """One row per route and protocol, shaped like apply.RouteAcceptedCounter."""
+    out = []
+    routes = MOCK_CONFIG.get("forwarding", {}).get("routes", [])
+    for i, r in enumerate(routes):
+        if r.get("disabled"):
+            continue
+        for proto in _route_protocols(r.get("proto")):
+            packets = 8516 * (i + 1) + (0 if proto == "tcp" else 41)
+            row = {
+                "route_index": i,
+                "proto": proto,
+                "ports": r.get("ports", []),
+                "target_ip": r.get("target_ip", ""),
+                "packets": packets,
+                "bytes": packets * 832,
+            }
+            if r.get("name"):
+                row["name"] = r["name"]
+            out.append(row)
     return out
 
 
@@ -833,6 +998,7 @@ def _mock_stats_response() -> dict:
                 "bytes": 180,
             },
         ],
+        "route_accepted": _mock_route_accepted(),
     }
 
 
@@ -953,6 +1119,44 @@ def _mock_ip_in_cidrs(ip: str, cidrs) -> bool:
     return False
 
 
+def _dport_covers(dport: str, port: int) -> bool:
+    for tok in str(dport or "").strip().strip("{}").split(","):
+        lo, _, hi = tok.strip().partition("-")
+        try:
+            if int(lo) <= port <= int(hi or lo):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _tcp_port_accepted(cfg: dict, port: int) -> bool:
+    for a in cfg.get("input_allows") or []:
+        if a.get("disabled") or str(a.get("proto") or "").strip().lower() != "tcp":
+            continue
+        if _dport_covers(a.get("dport"), port):
+            return True
+    return port in ((cfg.get("network") or {}).get("admin_tcp_ports") or [])
+
+
+def _input_allow_warnings(cfg: dict, applied: dict) -> list:
+    """Same rule as apply.InputAllowLockoutWarnings; the mock has no connection port."""
+    warnings = []
+    for port, label in ((22, "SSH"), (9080, "admin UI")):
+        if _tcp_port_accepted(cfg, port) or not _tcp_port_accepted(applied, port):
+            continue
+        warnings.append(
+            {
+                "code": "lockout_risk_input_allows",
+                "message": (
+                    f"No enabled inbound rule allows TCP port {port} ({label}) in this config; "
+                    "new connections to it would be dropped."
+                ),
+            }
+        )
+    return warnings
+
+
 def _geo_check_ip_mock(ip: str, cfg: dict, from_draft: bool) -> dict:
     geo = cfg.get("geo") or {}
     fwd = cfg.get("forwarding") or {}
@@ -1017,14 +1221,28 @@ def _geo_check_ip_mock(ip: str, cfg: dict, from_draft: bool) -> dict:
     return out
 
 
-def _auth_ok(handler: BaseHTTPRequestHandler) -> bool:
+def _token_scope(handler: BaseHTTPRequestHandler) -> str | None:
     auth = handler.headers.get("Authorization", "")
     tok = ""
     if auth.lower().startswith("bearer "):
         tok = auth[7:].strip()
     if not tok:
         tok = handler.headers.get("X-API-Token", "").strip()
-    return tok == TOKEN
+    if tok == TOKEN:
+        return "write"
+    if READ_TOKEN and tok == READ_TOKEN:
+        return "read"
+    return None
+
+
+def _auth_error(handler: BaseHTTPRequestHandler, path: str) -> tuple[int, dict] | None:
+    """The refusal for this request, if any. Same classification as apiRoutes in server.go."""
+    scope = _token_scope(handler)
+    if scope is None:
+        return 401, {"error": "unauthorized"}
+    if scope == "read" and not (handler.command == "GET" and path in READ_SCOPE_PATHS):
+        return 403, {"error": "this route needs the write token", "error_code": "insufficient_scope"}
+    return None
 
 
 def _content_len(handler: BaseHTTPRequestHandler) -> int:
@@ -1058,11 +1276,15 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         print("%s - %s" % (self.address_string(), fmt % args))
 
-    def _send_json(self, code: int, body: object) -> None:
+    def _send_json(
+        self, code: int, body: object, headers: dict[str, str] | None = None
+    ) -> None:
         data = json.dumps(body).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -1089,17 +1311,22 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"ok")
             return
-        if not _auth_ok(self):
-            return self._send_json(401, {"error": "unauthorized"})
+        refused = _auth_error(self, path)
+        if refused:
+            return self._send_json(*refused)
         if path == "/api/v1/status":
             return self._send_json(
                 200,
                 {"report": "mock: WireGuard + nftables status would appear here."},
             )
         if path == "/api/v1/overview":
-            return self._send_json(200, _overview_from_config(MOCK_CONFIG))
+            return self._send_json(200, {**_overview_from_config(MOCK_CONFIG), "scope": _token_scope(self)})
         if path == "/api/v1/config":
-            return self._send_json(200, copy.deepcopy(MOCK_CONFIG))
+            return self._send_json(
+                200,
+                copy.deepcopy(MOCK_CONFIG),
+                {"ETag": _config_etag(), "Cache-Control": "no-store"},
+            )
         if path == "/api/v1/metrics":
             return self._send_json(
                 200,
@@ -1110,6 +1337,10 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/v1/stats":
             return self._send_json(200, _mock_stats_response())
+        if path == "/api/v1/stats/route-accepted":
+            return self._send_json(200, {"route_accepted": _mock_route_accepted()})
+        if path == "/api/v1/auto-pause":
+            return self._send_json(200, {"paused_routes": _mock_auto_paused_routes()})
         if path == "/api/v1/client-ip":
             return self._send_json(
                 200,
@@ -1132,6 +1363,21 @@ class Handler(BaseHTTPRequestHandler):
                 )
             )
             return
+        if path == "/api/v1/reload/progress":
+            # The mock's reload finishes at once, so one is never seen running.
+            return self._send_json(200, {"step": ""})
+        if path == "/api/v1/apply/session":
+            _mock_expire_session()
+            settings = MOCK_CONFIG.get("apply") or {}
+            return self._send_json(
+                200,
+                {
+                    "confirm_enabled": bool(settings.get("confirm")),
+                    "confirm_timeout_seconds": settings.get("confirm_timeout_seconds") or 60,
+                    "session": _mock_session_view(),
+                    "last_revert": MOCK_LAST_REVERT,
+                },
+            )
         if path == "/api/v1/pending":
             _ensure_mock_apply_bootstrap()
             disk = _disk_config_sha()
@@ -1140,10 +1386,12 @@ class Handler(BaseHTTPRequestHandler):
                 MOCK_BAK is not None and _disk_config_sha() != _config_sha(MOCK_BAK)
             )
             restore_previous_applied_available = False
+            restore_previous_change_count = 0
             if MOCK_BAK is not None:
                 for slot in MOCK_BAK_SLOTS:
                     if slot is not None and _config_sha(slot) != _config_sha(MOCK_BAK):
                         restore_previous_applied_available = True
+                        restore_previous_change_count = _config_change_count(MOCK_CONFIG, slot)
                         break
             return self._send_json(
                 200,
@@ -1155,8 +1403,22 @@ class Handler(BaseHTTPRequestHandler):
                     "nftables_baseline": _nft_from_config(MOCK_CONFIG_BASELINE),
                     "discard_available": discard_available,
                     "restore_previous_applied_available": restore_previous_applied_available,
+                    "discard_change_count": (
+                        _config_change_count(MOCK_CONFIG, MOCK_BAK) if MOCK_BAK is not None else 0
+                    ),
+                    "restore_previous_change_count": restore_previous_change_count,
+                    "applied_config": MOCK_CONFIG_BASELINE,
                 },
             )
+        if path == "/api/v1/backup/info":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            apath = (qs.get("path") or [""])[0].strip()
+            if not apath:
+                return self._send_json(400, {"error": "path query required"})
+            if apath not in MOCK_BACKUPS:
+                return self._send_json(404, {"error": "archive not found"})
+            modified = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(MOCK_BACKUPS[apath]))
+            return self._send_json(200, {"archive": apath, "modified": modified, "size_bytes": 4096})
         if path == "/api/v1/preferences":
             return self._send_json(200, _normalize_prefs(MOCK_PREFS))
         if path == "/api/v1/metrics/peers":
@@ -1220,8 +1482,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         path = self.path.split("?", 1)[0]
-        if not _auth_ok(self):
-            return self._send_json(401, {"error": "unauthorized"})
+        refused = _auth_error(self, path)
+        if refused:
+            return self._send_json(*refused)
         if path == "/api/v1/preferences":
             if _content_len(self) > MAX_JSON_SMALL:
                 return self._send_json(413, {"error": "request body too large"})
@@ -1272,6 +1535,25 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             return self._send_json(400, {"error": "invalid json body"})
         global MOCK_CONFIG
+        if not _if_match_ok(self.headers.get_all("If-Match")):
+            return self._send_json(
+                409,
+                {
+                    "error": "configuration changed since it was loaded; fetch it again and reapply your change",
+                    "error_code": "config_revision_mismatch",
+                },
+            )
+        # Same messages as Config.Validate, for the rules the UI's instant switches can trip.
+        geo = body.get("geo") or {}
+        if geo.get("enabled"):
+            if not geo.get("countries"):
+                return self._send_json(400, {"error": "geo.countries required when geo.enabled"})
+            if not geo.get("zone_dir"):
+                return self._send_json(400, {"error": "geo.zone_dir required when geo.enabled"})
+        for i, route in enumerate((body.get("forwarding") or {}).get("routes") or []):
+            name_err = _route_name_error(route.get("name") or "")
+            if name_err:
+                return self._send_json(400, {"error": "forwarding.routes[%d]: %s" % (i, name_err)})
         MOCK_CONFIG = copy.deepcopy(body)
         _persist_mock_config()
         return self._send_json(
@@ -1280,13 +1562,16 @@ class Handler(BaseHTTPRequestHandler):
                 "result": "saved",
                 "hint": "Review and apply from GET /api/v1/pending or POST /api/v1/reload",
             },
+            {"ETag": _config_etag()},
         )
 
     def do_POST(self) -> None:
         global MOCK_CONFIG, MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE, MOCK_EVENTS
+        global MOCK_SESSION, MOCK_REVERTED_CONFIG, MOCK_LAST_REVERT
         path = self.path.split("?", 1)[0]
-        if not _auth_ok(self):
-            return self._send_json(401, {"error": "unauthorized"})
+        refused = _auth_error(self, path)
+        if refused:
+            return self._send_json(*refused)
         if path == "/api/v1/validate":
             cfg = copy.deepcopy(MOCK_CONFIG)
             body = self._read_json_body(MAX_JSON_PUT) if _content_len(self) else None
@@ -1308,16 +1593,18 @@ class Handler(BaseHTTPRequestHandler):
                         "message": "Mock: your IP may not match geo allow list.",
                     }
                 )
-            return self._send_json(
-                200,
-                {
-                    "ok": True,
-                    "warnings": warnings,
-                    "detected_client_ip": "203.0.113.50",
-                    "ip_detection_source": "direct",
-                    "validated_from_draft": bool(isinstance(body, dict) and body),
-                },
-            )
+            warnings.extend(_input_allow_warnings(cfg, MOCK_CONFIG_BASELINE))
+            from_draft = bool(isinstance(body, dict) and body)
+            result = {
+                "ok": True,
+                "warnings": warnings,
+                "detected_client_ip": "203.0.113.50",
+                "ip_detection_source": "direct",
+                "validated_from_draft": from_draft,
+            }
+            if not from_draft:
+                result["config_hash"] = _disk_config_sha()
+            return self._send_json(200, result)
         if path == "/api/v1/geo/check-ip":
             body = self._read_json_body(MAX_JSON_PUT) if _content_len(self) else {}
             if not isinstance(body, dict):
@@ -1427,6 +1714,10 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path not in (
             "/api/v1/reload",
+            "/api/v1/apply/confirm",
+            "/api/v1/apply/revert",
+            "/api/v1/apply/reverted/restore",
+            "/api/v1/apply/reverted/dismiss",
             "/api/v1/update-geo",
             "/api/v1/backup",
             "/api/v1/restore",
@@ -1435,8 +1726,42 @@ class Handler(BaseHTTPRequestHandler):
         ):
             return self._send_json(404, {"error": "not found"})
         length = int(self.headers.get("Content-Length", 0) or 0)
-        if length:
-            self.rfile.read(length)
+        raw_body = self.rfile.read(length) if length else b""
+        _mock_expire_session()
+        if path == "/api/v1/apply/confirm":
+            if MOCK_SESSION is None:
+                return self._send_json(
+                    409, {"error": "no Apply is waiting for confirmation", "error_code": "no_apply_session"}
+                )
+            MOCK_SESSION = None
+            _push_mock_event("apply_confirmed", "confirm")
+            return self._send_json(200, {"result": "confirmed"})
+        if path == "/api/v1/apply/revert":
+            if MOCK_SESSION is None:
+                return self._send_json(
+                    409, {"error": "no Apply is waiting for confirmation", "error_code": "no_apply_session"}
+                )
+            _mock_revert_session("manual")
+            return self._send_json(200, {"result": "reverted"})
+        if path == "/api/v1/apply/reverted/restore":
+            if MOCK_REVERTED_CONFIG is None:
+                return self._send_json(
+                    409, {"error": "no reverted config is being kept", "error_code": "no_reverted_config"}
+                )
+            if _disk_config_sha() != MOCK_APPLIED_SHA:
+                return self._send_json(
+                    409,
+                    {"error": "config.yaml has unapplied changes: apply or discard them first", "error_code": "pending_edits"},
+                )
+            MOCK_CONFIG = copy.deepcopy(MOCK_REVERTED_CONFIG)
+            _persist_mock_config()
+            MOCK_REVERTED_CONFIG = None
+            MOCK_LAST_REVERT = None
+            return self._send_json(200, {"result": "restored"})
+        if path == "/api/v1/apply/reverted/dismiss":
+            MOCK_REVERTED_CONFIG = None
+            MOCK_LAST_REVERT = None
+            return self._send_json(200, {"result": "dismissed"})
         if path == "/api/v1/config/discard":
             if MOCK_BAK is None:
                 return self._send_json(
@@ -1475,19 +1800,78 @@ class Handler(BaseHTTPRequestHandler):
                 400, {"error": "could not restore previous applied configuration"}
             )
         if path == "/api/v1/reload":
+            try:
+                body = json.loads(raw_body) if raw_body.lstrip().startswith(b"{") else {}
+                timeout = int(body.get("confirm_timeout_seconds") or 0)
+                config_hash = body.get("config_hash") or ""
+                force = body.get("force") or False
+            except (ValueError, TypeError):
+                return self._send_json(400, {"error": "invalid reload body", "error_code": "invalid_reload_body"})
+            if timeout and not 10 <= timeout <= 3600:
+                return self._send_json(400, {"error": "invalid reload body", "error_code": "invalid_reload_body"})
+            if not isinstance(config_hash, str) or not isinstance(force, bool) or (force and config_hash):
+                return self._send_json(400, {"error": "invalid reload body", "error_code": "invalid_reload_body"})
+            if not config_hash and not force:
+                return self._send_json(
+                    409,
+                    {
+                        "error": "send the config_hash from POST /validate, or force to apply without a check",
+                        "error_code": "config_hash_required",
+                    },
+                )
+            if MOCK_SESSION is not None and not timeout:
+                return self._send_json(
+                    409,
+                    {"error": "an Apply is waiting for confirmation", "error_code": "apply_session_active"},
+                )
+            if config_hash and config_hash != _disk_config_sha():
+                return self._send_json(
+                    409,
+                    {
+                        "error": "config.yaml changed after it was checked, so nothing was applied: check it again",
+                        "error_code": "config_hash_mismatch",
+                    },
+                )
+            if timeout:
+                if MOCK_SESSION is None:
+                    MOCK_SESSION = {
+                        "started_at": time.time(),
+                        "baseline": copy.deepcopy(MOCK_CONFIG_BASELINE),
+                        "applied_sha": MOCK_APPLIED_SHA,
+                        "bak": copy.deepcopy(MOCK_BAK),
+                        "bak_slots": copy.deepcopy(MOCK_BAK_SLOTS),
+                    }
+                    MOCK_REVERTED_CONFIG = None
+                    MOCK_LAST_REVERT = None
+                MOCK_SESSION["timeout"] = timeout
+                MOCK_SESSION["deadline"] = time.time() + timeout
             MOCK_APPLIED_SHA = _disk_config_sha()
             MOCK_CONFIG_BASELINE = copy.deepcopy(MOCK_CONFIG)
             _mock_record_applied_snapshot()
             _push_mock_event("reload_ok", "reload")
+            if timeout:
+                return self._send_json(200, {"result": "reloaded", "session": _mock_session_view()})
             return self._send_json(200, {"result": "reloaded"})
         if path == "/api/v1/update-geo":
+            if MOCK_SESSION:
+                return self._send_json(
+                    409,
+                    {
+                        "error": "an Apply is waiting for confirmation: run `evuproxy reload-confirm` or `evuproxy reload-revert` first",
+                        "error_code": "apply_session_active",
+                    },
+                )
             _push_mock_event("update_geo_ok", "update-geo")
-            return self._send_json(200, {"result": "geo_updated"})
+            held_back = bool((MOCK_CONFIG_BASELINE.get("apply") or {}).get("confirm")) and (
+                MOCK_CONFIG.get("geo") != MOCK_CONFIG_BASELINE.get("geo")
+            )
+            return self._send_json(200, {"result": "geo_updated", "geo_changes_held_back": held_back})
         if path == "/api/v1/backup":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             apath = (qs.get("path") or [""])[0].strip()
             if not apath:
                 apath = "/var/backups/evuproxy-config.tgz"
+            MOCK_BACKUPS[apath] = time.time()
             _push_mock_event("backup_ok", apath)
             return self._send_json(200, {"archive": apath})
         if path == "/api/v1/restore":
@@ -1548,6 +1932,7 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     TOKEN = tok
+    READ_TOKEN = (os.environ.get("MOCK_API_READ_TOKEN") or "").strip()
     _load_mock_config_from_disk()
     metrics_listen = (os.environ.get("MOCK_METRICS_LISTEN") or "").strip()
     if metrics_listen:

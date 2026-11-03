@@ -7,6 +7,14 @@ wireguard:
   private_key_file: /etc/evuproxy/wg-private.key
   address: 10.100.0.1/24
 
+# The web UI's Apply reverts by itself unless you confirm it in time, so a change that
+# locks you out undoes itself. Needs systemd and a root API. Run `evuproxy reload` once
+# first, so there is a config to go back to. Configs without this keep a one-way Apply.
+# A reboot then applies the last confirmed config too: run `evuproxy reload` to apply edits.
+apply:
+  confirm: true
+  confirm_timeout_seconds: 60
+
 network:
   public_interface: eth0
   # Docker on the same host — two separate knobs:
@@ -19,6 +27,11 @@ network:
 
 # Each target_ip must match a non-disabled peer tunnel_ip (host IPv4 only).
 # Set disabled: true on a route to keep it in config but omit it from nftables until re-enabled.
+# Optional name: a label shown first in the web UI (up to 64 characters), e.g.
+#   - name: Minecraft
+#     proto: tcp
+#     ports: ["25565"]
+#     target_ip: 10.100.0.2
 # Start empty; add routes after you define peers.
 forwarding:
   routes: []
@@ -28,9 +41,21 @@ forwarding:
   #   max_conn_per_ip: 200
   #   udp_per_second: 500
 
+# Optional auto-pause (off by default). Set pause_when_peer_offline: true on a route to track its target peer.
+# Values below are the defaults; see docs/config.md for what a pause does today.
+# auto_pause:
+#   failures_to_pause: 3 # consecutive offline probes before the peer's routes pause
+#   successes_to_resume: 2 # consecutive online probes before they resume
+#   interval: 15s # time between probes (5s to 1h)
+#   icmp_fallback: false # true = ping the peer when its WireGuard handshake is stale
+
 # Optional CrowdSec nftables bouncer (off by default). See contrib/crowdsec/README.md.
 # crowdsec:
 #   enabled: false
+
+# Optional nft counters on generated drop rules, listed on the Stats page (off by default).
+# stats:
+#   drop_counters: true
 
 geo:
   enabled: false

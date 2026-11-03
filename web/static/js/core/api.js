@@ -29,8 +29,13 @@ export function getApiBase() {
 
 export const tokenKey = "evuproxy_api_token";
 
+/** The token Connect stored, leaving out anything still being typed into the field. */
+export function savedToken() {
+  return sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey) || "";
+}
+
 export function token() {
-  return sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey) || ($("token") && $("token").value.trim()) || "";
+  return savedToken() || ($("token") && $("token").value.trim()) || "";
 }
 
 function headers() {
@@ -47,12 +52,40 @@ export function headersDownload() {
   return h;
 }
 
+/* All a read token can open. The other pages are built on GET /v1/config, which needs the write token. */
+const readOnlyPages = ["overview", "stats", "logs", "token"];
+
+/** Whether the API said this browser's token is the read token. See `scope` on GET /v1/overview. */
+export function isReadOnlyToken() {
+  return state.tokenScope === "read";
+}
+
+export function pageNeedsWriteToken(route) {
+  return isReadOnlyToken() && !readOnlyPages.includes(route);
+}
+
+/** Only undoes its own disabling, because other code disables some of these too. */
+function applyTokenScope() {
+  const readOnly = isReadOnlyToken();
+  $("read-only-notice").hidden = !readOnly;
+  document.querySelectorAll("[data-needs-write]").forEach((el) => {
+    if (readOnly && !el.disabled) {
+      el.disabled = true;
+      el.dataset.readOnlyDisabled = "1";
+    } else if (!readOnly && el.dataset.readOnlyDisabled) {
+      el.disabled = false;
+      delete el.dataset.readOnlyDisabled;
+    }
+  });
+}
+
 export function applyNavRestriction() {
+  applyTokenScope();
   const restricted = !state.apiConnectionOk;
   document.querySelectorAll(".nav-link").forEach((a) => {
     const route = a.getAttribute("data-route");
     const allowed = route === "overview" || route === "token";
-    const dis = restricted && !allowed;
+    const dis = (restricted && !allowed) || pageNeedsWriteToken(route);
     a.classList.toggle("nav-disabled", dis);
     if (dis) {
       a.setAttribute("aria-disabled", "true");
@@ -81,16 +114,65 @@ export async function ensureApiGate() {
   } catch {
     state.apiConnectionOk = false;
     applyNavRestriction();
+    requestConnectionCheck();
     return false;
   }
 }
 
-export async function api(path, opts = {}) {
-  const r = await fetch(getApiBase() + path, {
-    ...opts,
-    headers: { ...headers(), ...opts.headers },
-  });
-  const text = await r.text();
+/* Told how each request went: "answered", "unreachable" or "auth". See connection.js. */
+let apiObserver = () => {};
+
+export function observeApi(fn) {
+  apiObserver = fn;
+}
+
+/** For a failure api() can't judge alone, such as a 500 on the request the nav gate depends on. */
+export function requestConnectionCheck() {
+  apiObserver("check");
+}
+
+/** A request that got no answer. Only an HTTP answer has a status, as callers rely on. */
+function noAnswerError() {
+  const ex = new Error("No answer from the EvuProxy API.");
+  ex.connectionKind = "unreachable";
+  return ex;
+}
+
+/**
+ * Sorts a failed answer into "auth", "unreachable" or neither (undefined). A gateway error
+ * comes from nginx with the API behind it down. The API's own 503 ("another operation is in
+ * progress") is JSON with an error, and means that it's up.
+ */
+function failureKind(status, body) {
+  if (status === 401) return "auth";
+  if ([502, 503, 504].includes(status) && !body.error) return "unreachable";
+  return undefined;
+}
+
+// ETag per parsed response body, so a revision cannot drift from the data it came with.
+const responseEtags = new WeakMap();
+
+/** The ETag sent with a body returned by api(), or "" if there was none. */
+export function responseEtag(body) {
+  return responseEtags.get(body) || "";
+}
+
+/** @param {RequestInit & { unobserved?: boolean }} [opts] `unobserved` for the connection probe itself. */
+export async function api(path, { unobserved, ...opts } = {}) {
+  const report = unobserved ? () => {} : apiObserver;
+  let r;
+  let text;
+  try {
+    r = await fetch(getApiBase() + path, {
+      ...opts,
+      headers: { ...headers(), ...opts.headers },
+    });
+    text = await r.text();
+  } catch (e) {
+    if (e.name === "AbortError") throw e;
+    report("unreachable");
+    throw noAnswerError();
+  }
   let body;
   try {
     body = JSON.parse(text);
@@ -111,12 +193,20 @@ export async function api(path, opts = {}) {
       }
     }
     const ex = new Error(err);
+    ex.status = r.status;
     if (body.error_code) ex.errorCode = body.error_code;
     // Some endpoints put the payload the caller needs behind a non-2xx status —
     // /validate answers 400 with the full result, error list included.
     ex.body = body;
+    ex.connectionKind = failureKind(r.status, body);
+    report(ex.connectionKind || "answered");
     throw ex;
   }
+  report("answered");
+  // An older API sends no scope, and its one token can do everything.
+  if (path === "/v1/overview") state.tokenScope = body.scope || "write";
+  const etag = r.headers.get("ETag");
+  if (etag && body && typeof body === "object") responseEtags.set(body, etag);
   return body;
 }
 

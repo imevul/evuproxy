@@ -5,9 +5,12 @@
  *
  * Every surface is captured in both light and dark: `<name>-light.png` / `<name>-dark.png`.
  */
-import { test } from "@playwright/test";
+import { test } from "./fixtures";
 
+import { assertNoCacheMisses } from "./freeze";
 import { ROUTES, SCHEMES, capture, gotoRoute, seed } from "./helpers";
+
+test.afterEach(() => assertNoCacheMisses());
 
 test.describe("routes (full-page screenshots)", () => {
   for (const scheme of SCHEMES) {
@@ -31,6 +34,8 @@ test.describe("modals (full-page screenshots)", () => {
 
       await page.locator("#peers-add-start").click();
       await page.locator("#peer-modal").waitFor({ state: "visible" });
+      // Focus lands on Name only after the keypair is generated, so the focus ring races the shot.
+      await page.locator("#peer-modal input:focus").waitFor({ state: "visible" });
       await capture(page, `modal-peer-editor-${scheme}`);
 
       // Onboarding and install copy live behind the editor's own tabs.
@@ -96,11 +101,13 @@ test.describe("modals (full-page screenshots)", () => {
     test(`capture confirm dialog ${scheme}`, async ({ page, baseURL }) => {
       test.skip(!baseURL, "baseURL unset");
       await seed(page, { scheme });
-      await gotoRoute(page, baseURL!, "peers");
+      await gotoRoute(page, baseURL!, "settings");
 
-      // Peer removal is the confirm trigger that is always reachable in the mock;
+      // Restore backup is the confirm trigger that is always reachable in the mock;
       // the Pending discard button is disabled whenever there is nothing pending.
-      await page.locator("#page-peers [data-peer-del]").first().click();
+      await page.locator("#settings-tab-maint-btn").click();
+      await page.locator("#restore-path-input").fill("/var/backups/evuproxy-config.tgz");
+      await page.locator("#btn-restore-run").click();
       await page.locator("#confirm-modal").waitFor({ state: "visible" });
       await capture(page, `modal-confirm-${scheme}`);
     });

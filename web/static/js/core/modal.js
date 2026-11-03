@@ -1,5 +1,6 @@
 import { state } from "./state.js";
-import { $ } from "./dom.js";
+import { $, lastInputWasKeyboard } from "./dom.js";
+import { createFormTracker } from "./dirty.js";
 
 /*
  * Shared modal helpers. All modals in index.html use `.modal` + `.is-hidden`
@@ -35,16 +36,75 @@ export function registerModalCloser(modal, close) {
   if (modal && typeof close === "function") modalClosers.set(modal, close);
 }
 
+/*
+ * Dialogs holding edits the operator could lose. Registered closers stay
+ * unguarded because Save uses them too; only `dismissModal` (Escape, backdrop,
+ * Cancel) asks first.
+ */
+const modalForms = new WeakMap();
+
 /**
- * Dismisses the topmost open modal, if any. Returns whether one was closed so
- * callers can decide if the key press was handled.
+ * Marks `modal` as an editor. It is dirty while its controls differ from how
+ * they were when it opened, or while `isDirty` says so for a draft kept outside
+ * the DOM. Returns the tracker, for openers that fill fields in after opening.
+ */
+export function registerModalForm(modal, isDirty) {
+  const form = isDirty
+    ? { mark() {}, clear() {}, isDirty }
+    : createFormTracker(() => modalPanel(modal).querySelectorAll("input, select, textarea"));
+  modalForms.set(modal, form);
+  return form;
+}
+
+function runModalCloser(modal) {
+  const close = modalClosers.get(modal);
+  if (close) close();
+  else closeModal(modal);
+}
+
+function isModalDirty(modal) {
+  const form = modalForms.get(modal);
+  return !!form && form.isDirty();
+}
+
+/** Whether any open dialog, on top or underneath, holds unsaved edits. */
+export function anyOpenModalDirty() {
+  return openModalStack.some((e) => isModalDirty(e.modal));
+}
+
+/** Runs every open dialog's closer, topmost first, without asking. */
+export function closeAllModals() {
+  while (openModalStack.length) {
+    runModalCloser(openModalStack[openModalStack.length - 1].modal);
+  }
+}
+
+/** Asks before edits are thrown away. Opens over whatever is on top of the stack. */
+export function confirmDiscard(onConfirm, onCancel) {
+  openConfirmModal({
+    title: "Discard unsaved changes?",
+    message: "Your edits have not been saved and will be lost.",
+    confirmLabel: "Discard changes",
+    cancelLabel: "Keep editing",
+    onConfirm,
+    onCancel,
+  });
+}
+
+/** Closes `modal` the way the operator asked to: a dirty editor warns first. */
+export function dismissModal(modal) {
+  if (isModalDirty(modal)) confirmDiscard(() => runModalCloser(modal));
+  else runModalCloser(modal);
+}
+
+/**
+ * Dismisses the topmost open modal, if any. Returns whether the key press was
+ * handled, which includes a dirty editor answering with a discard prompt.
  */
 export function closeTopModal() {
   const top = openModalStack[openModalStack.length - 1];
   if (!top) return false;
-  const close = modalClosers.get(top.modal);
-  if (close) close();
-  else closeModal(top.modal);
+  dismissModal(top.modal);
   return true;
 }
 
@@ -121,8 +181,11 @@ function focusModalPanel(modal) {
 export function openModal(modal) {
   if (!modal) return;
   const alreadyOpen = openModalStack.some((e) => e.modal === modal);
+  modal.classList.toggle("modal--instant", lastInputWasKeyboard());
   modal.classList.remove("is-hidden");
   if (alreadyOpen) return;
+  const form = modalForms.get(modal);
+  if (form) form.mark();
   openModalStack.push({ modal, previouslyFocused: document.activeElement });
   syncBackground();
   /* rAF so open paths that focus a specific field afterwards win (they also use rAF, queued later). */
@@ -139,7 +202,11 @@ export function openModal(modal) {
 /** Hide a modal and restore focus to the element focused before it opened. */
 export function closeModal(modal) {
   if (!modal) return;
+  modal.classList.toggle("modal--instant", lastInputWasKeyboard());
   modal.classList.add("is-hidden");
+  // The baseline can hold key material (the peer editor), so do not keep it.
+  const form = modalForms.get(modal);
+  if (form) form.clear();
   const i = openModalStack.findIndex((e) => e.modal === modal);
   if (i < 0) return;
   const wasTopmost = i === openModalStack.length - 1;
@@ -191,9 +258,44 @@ export function closeConfirmModal(opts) {
   const confirmed = !!(opts && opts.confirmed);
   state.confirmModalCallback = null;
   state.confirmModalCancelCallback = null;
+  confirmModalExtraRun = null;
+  const okBtn = $("confirm-modal-ok");
+  if (okBtn) okBtn.disabled = false;
   const m = $("confirm-modal");
   if (m) closeModal(m);
   if (!confirmed && cancelFn) cancelFn();
+}
+
+let confirmModalExtraRun = null;
+
+function setConfirmModalStatus(text, isErr) {
+  const el = $("confirm-modal-status");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("err", !!isErr);
+}
+
+async function runConfirmModalExtra() {
+  const run = confirmModalExtraRun;
+  const extraBtn = $("confirm-modal-extra");
+  const okBtn = $("confirm-modal-ok");
+  if (!run) return;
+  // The confirm waits too: the API takes one host-changing request at a time.
+  extraBtn.disabled = okBtn.disabled = true;
+  setConfirmModalStatus("…");
+  try {
+    const done = await run();
+    if (confirmModalExtraRun !== run) return;
+    setConfirmModalStatus(done);
+    okBtn.disabled = false;
+    // Disabling the button dropped focus; the next step is this one.
+    okBtn.focus();
+  } catch (e) {
+    if (confirmModalExtraRun !== run) return;
+    setConfirmModalStatus(String(e.message || e), true);
+    extraBtn.disabled = okBtn.disabled = false;
+    extraBtn.focus();
+  }
 }
 
 export function openConfirmModal(opts) {
@@ -205,10 +307,21 @@ export function openConfirmModal(opts) {
   titleEl.textContent = opts.title || "Confirm";
   descEl.textContent = opts.message || "";
   okBtn.textContent = opts.confirmLabel || "OK";
+  const cancelBtn = $("confirm-modal-cancel");
+  if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || "Cancel";
   state.confirmModalCallback = opts.onConfirm || null;
   state.confirmModalCancelCallback = opts.onCancel || null;
+  // Optional third button: `extraAction` ({ label, run }) does something first and stays in
+  // the dialog. `run` resolves to a line to show here, or throws to show the failure.
+  confirmModalExtraRun = opts.extraAction ? opts.extraAction.run : null;
+  const extraBtn = $("confirm-modal-extra");
+  if (extraBtn) {
+    extraBtn.textContent = opts.extraAction ? opts.extraAction.label : "";
+    extraBtn.classList.toggle("is-hidden", !opts.extraAction);
+    extraBtn.disabled = false;
+  }
+  setConfirmModalStatus("");
   openModal(modal);
-  const cancelBtn = $("confirm-modal-cancel");
   if (cancelBtn) requestAnimationFrame(() => cancelBtn.focus());
 }
 
@@ -220,6 +333,7 @@ export function initModals() {
   const confirmBackdrop = confirmModal && confirmModal.querySelector(".modal-backdrop");
   if (confirmBackdrop) confirmBackdrop.addEventListener("click", () => closeConfirmModal());
   $("confirm-modal-cancel").addEventListener("click", () => closeConfirmModal());
+  $("confirm-modal-extra").addEventListener("click", runConfirmModalExtra);
   $("confirm-modal-ok").addEventListener("click", async () => {
     const fn = state.confirmModalCallback;
     closeConfirmModal({ confirmed: true });

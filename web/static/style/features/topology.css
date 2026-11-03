@@ -23,6 +23,19 @@
   margin-bottom: 0.5rem;
 }
 
+.topology-scale-controls {
+  display: contents;
+}
+
+.topology-scale-controls[hidden] {
+  display: none;
+}
+
+.topology-scale-controls .meta {
+  align-self: center;
+  margin: 0;
+}
+
 .topology-legend {
   display: flex;
   flex-wrap: wrap;
@@ -279,6 +292,52 @@
   color: var(--evu-foreground);
   letter-spacing: 0.03em;
   overflow-wrap: anywhere;
+}
+
+.topology-route-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  color: var(--evu-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topology-route-split:has(.topology-route-name) .topology-route-ports {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.topology-peer-toggle {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0 0.2rem;
+  border: 1px solid var(--evu-border);
+  border-radius: 4px;
+  background: none;
+  color: var(--evu-foreground);
+  font: inherit;
+  font-size: 0.68rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.topology-peer-toggle:hover {
+  background: var(--evu-muted);
+}
+
+.topology-peer-toggle:focus-visible {
+  outline: 2px solid var(--evu-ring);
+  outline-offset: 1px;
 }
 
 .topology-node-vbar {

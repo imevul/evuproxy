@@ -21,6 +21,20 @@ func configYAMLBackupNth(cfgPath string, n int) string {
 	return cfgPath + ".bak." + strconv.Itoa(n)
 }
 
+// ConfigYAMLHistoryPaths returns .bak and .bak.1 … .bak.5, whether or not they exist.
+func ConfigYAMLHistoryPaths(cfgPath string) []string {
+	paths := []string{ConfigYAMLBackupPath(cfgPath)}
+	for n := 1; n <= 5; n++ {
+		paths = append(paths, configYAMLBackupNth(cfgPath, n))
+	}
+	return paths
+}
+
+// ValidateConfigYAML reports whether b is a config that could be saved.
+func ValidateConfigYAML(b []byte) error {
+	return validateConfigYAMLBytes(b)
+}
+
 func validateConfigYAMLBytes(b []byte) error {
 	var c config.Config
 	if err := yaml.Unmarshal(b, &c); err != nil {
@@ -132,12 +146,19 @@ func RestorePreviousAppliedConfigYAML(cfgPath string) error {
 
 // RestorePreviousAppliedAvailable reports whether some .bak.N differs from .bak.
 func RestorePreviousAppliedAvailable(cfgPath string) (bool, error) {
+	prev, err := PreviousAppliedConfigYAML(cfgPath)
+	return prev != nil, err
+}
+
+// PreviousAppliedConfigYAML returns what RestorePreviousAppliedConfigYAML would write:
+// the first .bak.N that differs from .bak, or nil when there is none.
+func PreviousAppliedConfigYAML(cfgPath string) ([]byte, error) {
 	bak, err := os.ReadFile(ConfigYAMLBackupPath(cfgPath))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil
+			return nil, nil
 		}
-		return false, err
+		return nil, err
 	}
 	for n := 1; n <= 5; n++ {
 		b, err := os.ReadFile(configYAMLBackupNth(cfgPath, n))
@@ -145,11 +166,11 @@ func RestorePreviousAppliedAvailable(cfgPath string) (bool, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return false, err
+			return nil, err
 		}
 		if !bytes.Equal(b, bak) {
-			return true, nil
+			return b, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }

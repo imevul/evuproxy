@@ -1,7 +1,12 @@
-import { $ } from "../core/dom.js";
-import { tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
+import { state } from "../core/state.js";
+import { $, setApiStatus } from "../core/dom.js";
+import { api, applyNavRestriction, isReadOnlyToken, tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
 import { invalidateUIPrefsCache } from "../core/prefs.js";
+import { createFormTrackerByIds, registerPageForm } from "../core/dirty.js";
 import { refreshOverviewPage } from "./overview.js";
+import { refreshPendingBadge } from "./pending.js";
+
+const tokenForm = createFormTrackerByIds(["token", "api-base"]);
 
 function setAuthMsg(text, isErr) {
   const el = $("auth-msg");
@@ -9,18 +14,27 @@ function setAuthMsg(text, isErr) {
   el.classList.toggle("err", !!isErr);
 }
 
+function setNotConnectedNotice(visible) {
+  const el = $("token-not-connected");
+  if (el) el.classList.toggle("is-hidden", !visible);
+}
+
 export function refreshTokenPage() {
   const el = $("token");
-  if (el) el.value = sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey) || "";
+  const saved = sessionStorage.getItem(tokenKey) || localStorage.getItem(tokenKey) || "";
+  if (el) el.value = saved;
+  setNotConnectedNotice(!saved);
   const ab = $("api-base");
   if (ab) {
     const saved = sessionStorage.getItem(apiBaseKey) || localStorage.getItem(apiBaseKey);
     ab.value = saved != null && String(saved).trim() !== "" ? String(saved).trim() : "";
   }
+  tokenForm.mark();
 }
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initTokenPage() {
+  registerPageForm("token", tokenForm);
   const savedTok = localStorage.getItem(tokenKey);
   if (savedTok && $("token")) $("token").value = savedTok;
   const savedApiBase = localStorage.getItem(apiBaseKey);
@@ -28,11 +42,15 @@ export function initTokenPage() {
     $("api-base").value = String(savedApiBase).trim();
   }
 
-  $("save-token").addEventListener("click", () => {
+  $("token-connect").addEventListener("click", async () => {
+    const wasConnected = state.apiConnectionOk;
     const t = $("token").value.trim();
-    if (t) {
-      localStorage.setItem(tokenKey, t);
+    if (!t) {
+      setAuthMsg("Enter an API token to connect.", true);
+      $("token").focus();
+      return;
     }
+    localStorage.setItem(tokenKey, t);
     const ab = $("api-base");
     if (ab) {
       const b = ab.value.trim();
@@ -48,7 +66,28 @@ export function initTokenPage() {
       }
     }
     invalidateUIPrefsCache();
-    setAuthMsg("Saved in browser storage.");
+    tokenForm.mark();
+    setAuthMsg("Connecting…");
+    try {
+      state.lastOverview = await api("/v1/overview");
+      state.apiConnectionOk = true;
+      setApiStatus(true);
+      setAuthMsg(
+        isReadOnlyToken()
+          ? "Connected with the read-only token, which is saved in this browser. Overview, Stats and Logs are available, and nothing can be changed."
+          : "Connected. The token is saved in this browser."
+      );
+    } catch (e) {
+      state.apiConnectionOk = false;
+      setApiStatus(false, String(e.message || e));
+      setAuthMsg("Could not connect: " + String(e.message || e), true);
+    }
+    applyNavRestriction();
+    setNotConnectedNotice(false);
+    const connected = state.apiConnectionOk;
     void refreshOverviewPage();
+    if (connected) void refreshPendingBadge();
+    // First connection: the setup checklist on Overview is the next step.
+    if (connected && !wasConnected) location.hash = "#/overview";
   });
 }

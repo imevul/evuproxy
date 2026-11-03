@@ -38,6 +38,31 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 	s.jsonOK(w, map[string]string{"archive": path})
 }
 
+// handleBackupInfo names an archive and its date, so a restore can be confirmed knowing what it replaces with.
+func (s *Server) handleBackupInfo(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		s.jsonErr(w, http.StatusBadRequest, "path query required")
+		return
+	}
+	path, err := apply.ResolveBackupPath(path)
+	if err != nil {
+		s.logErr("backup info path", err)
+		s.jsonErr(w, http.StatusBadRequest, "invalid or disallowed backup path")
+		return
+	}
+	info, err := apply.StatBackup(path)
+	if err != nil || !info.Mode().IsRegular() {
+		s.jsonErr(w, http.StatusNotFound, "archive not found")
+		return
+	}
+	s.jsonOK(w, map[string]any{
+		"archive":    path,
+		"modified":   info.ModTime().UTC().Format(time.RFC3339),
+		"size_bytes": info.Size(),
+	})
+}
+
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	if !s.tryMutatingLock(w) {
 		return
@@ -57,6 +82,10 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	if err := apply.Restore(s.Config, path); err != nil {
 		s.logErr("restore", err)
 		s.emit(eventlog.Record{Event: "restore_failed", Detail: eventDetail(err.Error())})
+		if status, code, ok := confirmErrorCode(err); ok {
+			s.jsonAPIError(w, status, err.Error(), code)
+			return
+		}
 		s.jsonErr(w, http.StatusInternalServerError, "restore failed")
 		return
 	}

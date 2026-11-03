@@ -6,7 +6,8 @@ set -euo pipefail
 #
 # - Builds with scripts/rebuild.sh (see that script for PREFIX / OUT).
 # - If EvuProxy systemd units are installed under /etc/systemd/system/, installs
-#   the binary to PREFIX (default /usr/local) and restarts active units.
+#   the binary to PREFIX (default /usr/local) and restarts active units. Installing
+#   also refreshes an unmodified evuproxy.service.
 # - If this repo's default Docker Compose UI stack is running, rebuilds and
 #   recreates those containers.
 

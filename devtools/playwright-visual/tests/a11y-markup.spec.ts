@@ -3,7 +3,7 @@
  * whether tables name their columns, and whether a failed validation actually
  * points at the field that failed.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { ROUTES, gotoRoute, seed } from "./helpers";
 
@@ -75,9 +75,9 @@ test.describe("validation", () => {
 
     const dport = page.locator("#inbound-f-dport");
     await expect(dport).toHaveAttribute("aria-invalid", "true");
-    await expect(dport).toHaveAttribute("aria-describedby", /inbound-msg/);
+    await expect(dport).toHaveAttribute("aria-describedby", /inbound-editor-msg/);
     await expect(dport).toBeFocused();
-    await expect(page.locator("#inbound-msg")).toHaveText(/Destination port is required/);
+    await expect(page.locator("#inbound-editor-msg")).toHaveText(/Destination port is required/);
   });
 });
 

@@ -2,17 +2,29 @@ import { state, defaultPeerSubnetCidr } from "../core/state.js";
 import {
   $,
   escapeHtml,
-  trunc,
   setApiStatus,
   tableDisabledToggleCell,
   monoIpCopyCellHtml,
   bindTunnelIpCopyButtons,
-  applyPeersRoutesTableFilter,
+  applyTableFilter,
+  fadeOutRow,
+  publicKeyCellHtml,
   downloadTextFile,
-  markFieldInvalid,
-  clearFieldInvalid,
+  setEditorMsg,
+  setRowError,
+  clearRowError,
+  rowErrorHtml,
+  restoreRowSwitchFocus,
+  focusTableRow,
+  rowIndexAfterRemoval,
 } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api, apiBlob } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
+import { showToast } from "../core/toast.js";
+import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
+import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
 import { tunnelToHost, tunnelHostOnly, parseIPv4CIDR, ipv4ToInt, intToIpv4, ipInCidr } from "../core/net.js";
 import {
   PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC,
@@ -23,8 +35,9 @@ import {
 import {
   openModal,
   closeModal,
-  openConfirmModal,
   registerModalCloser,
+  registerModalForm,
+  dismissModal,
 } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
@@ -69,12 +82,11 @@ function suggestedPeerTunnelIP(cfg) {
 }
 
 /* ——— Peers ——— */
-function setPeersMsg(text, isErr, field) {
+function setPeersMsg(text, isErr) {
   const el = $("peers-msg");
   el.textContent = text;
   el.classList.toggle("err", !!isErr);
-  if (isErr && field) markFieldInvalid(el, field);
-  else clearFieldInvalid(el);
+  if (!text) clearRowError("data-peer-disabled");
 }
 
 export function stopPeersPingPolling() {
@@ -100,6 +112,24 @@ function peerPingMsCell(peer, pingByTunnel) {
   }
   const err = row.error ? String(row.error) : "unreachable";
   return '<td class="mono peer-ping-cell" title="' + escapeHtml(err) + '">—</td>';
+}
+
+/** Latency to sort on; null for every state the cell draws as "—" or "…". */
+function peerPingMs(peer, pingByTunnel) {
+  if (peer.disabled || !pingByTunnel) return null;
+  const th = tunnelHostOnly(peer.tunnel_ip);
+  const row = th ? pingByTunnel.get(th) : null;
+  return row && row.ok ? Number(row.latency_ms) : null;
+}
+
+/** Sort value for the Status column: Online, then Offline, then Unknown. Disabled peers have no status. */
+function peerStatusRank(p, pubMap) {
+  if (p.disabled) return null;
+  const row = pubMap.get(String(p.public_key || "").trim());
+  if (!row) return 2;
+  const h = row.latest_handshake_unix;
+  if (!h || h <= 0) return 1;
+  return Math.floor(Date.now() / 1000) - h <= PEER_ONLINE_MAX_HANDSHAKE_AGE_SEC ? 0 : 1;
 }
 
 function peerConnectionStatusHtml(p, pubMap) {
@@ -154,34 +184,50 @@ function renderPeersTable(cfg, wgStats, pingByTunnel) {
       : "";
   const pubMap = wgPeerPubKeyMap(wgStats);
   const pingOn = showPeersMetricsColumn();
-  const pingHead = pingOn ? "<th scope=\"col\">Ping</th>" : "";
-  const rows = cfg.peers
-    .map((p, i) => {
+  const pingHead = pingOn ? sortHeaderHtml("peers", "ping", "Ping") : "";
+  const rows = sortedRows("peers", cfg.peers, {
+    name: (p) => p.name,
+    tunnel: (p) => p.tunnel_ip,
+    ping: (p) => peerPingMs(p, pingByTunnel),
+    status: (p) => peerStatusRank(p, pubMap),
+    enabled: (p) => (p.disabled ? 0 : 1),
+  })
+    .map(({ item: p, index: i }) => {
       const f = [p.name, p.tunnel_ip, p.public_key].join(" ").toLowerCase();
       const pingCell = peerPingMsCell(p, pingByTunnel);
       return (
-        `<tr data-filter="${escapeHtml(f)}"><td>${escapeHtml(p.name)}</td>` +
+        `<tr data-row="${i}" tabindex="-1" data-filter="${escapeHtml(f)}"${p.disabled ? ' class="is-row-disabled"' : ""}><td>${escapeHtml(p.name)}</td>` +
         monoIpCopyCellHtml(p.tunnel_ip) +
-        `<td class="mono">${escapeHtml(trunc(p.public_key, 20))}</td>${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>`
+        publicKeyCellHtml(p.public_key, p.name) +
+        `${pingCell}<td>${peerConnectionStatusHtml(p, pubMap)}</td>${tableDisabledToggleCell("data-peer-disabled", i, !!p.disabled, "Enabled: " + String(p.name || "peer"))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-peer-del="${i}">Remove</button></td></tr>` +
+        rowErrorHtml("data-peer-disabled", i, pingOn ? 7 : 6)
       );
     })
     .join("");
-  wrap.innerHTML = `${wgWarn}<table class="data"><thead><tr><th scope="col">Name</th><th scope="col">Tunnel IP</th><th scope="col">Public key</th>${pingHead}<th scope="col">Status</th><th scope="col">Enabled</th><th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
+  setTableHtml(
+    wrap,
+    `${wgWarn}<table class="data"><thead><tr>${sortHeaderHtml("peers", "name", "Name")}${sortHeaderHtml("peers", "tunnel", "Tunnel IP")}<th scope="col">Public key</th>${pingHead}${sortHeaderHtml("peers", "status", "Status")}${sortHeaderHtml("peers", "enabled", "Enabled")}<th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`
+  );
+  bindSortHeaders(wrap, "peers", () => renderPeersTable(cfg, wgStats, pingByTunnel));
   bindTunnelIpCopyButtons(wrap, setPeersMsg);
   wrap.querySelectorAll("[data-peer-edit]").forEach((b) => {
     b.addEventListener("click", () => openPeerEditor(+b.getAttribute("data-peer-edit")));
   });
   wrap.querySelectorAll("[data-peer-del]").forEach((b) => {
-    b.addEventListener("click", () => removePeer(+b.getAttribute("data-peer-del")));
+    b.addEventListener("click", (ev) => {
+      // The next row slides under the pointer, so a double-click must not remove it too.
+      if (ev.detail <= 1) removePeer(+b.getAttribute("data-peer-del"));
+    });
   });
   wrap.querySelectorAll("input[data-peer-disabled]").forEach((inp) => {
     inp.addEventListener("click", (ev) => ev.stopPropagation());
     inp.addEventListener("change", async () => {
       const idx = +inp.getAttribute("data-peer-disabled");
+      clearRowError("data-peer-disabled");
       await patchPeerDisabled(idx, !inp.checked);
     });
   });
-  applyPeersRoutesTableFilter();
+  applyTableFilter("peers-table-wrap");
 }
 
 function peerTunnelHost(peer) {
@@ -202,97 +248,137 @@ function dependentRoutesForPeer(cfg, peer) {
   return out;
 }
 
-function dependentRoutesConfirmMessage(peerName, deps) {
-  const labels = deps.map(({ route: r }) => {
-    const ports = (r.ports || []).join(", ") || "?";
-    const proto = String(r.proto || "").toLowerCase() || "?";
-    return proto + " " + ports + " → " + String(r.target_ip || "");
+/** Disables the peer's enabled routes in `cfg`, returning what Undo needs to find them again. */
+function disableDependentRoutes(cfg, peer) {
+  return dependentRoutesForPeer(cfg, peer).map(({ index, route }) => {
+    route.disabled = true;
+    return { index, identity: routeIdentity(route) };
   });
-  const list = labels.map((l) => "• " + l).join("\n");
-  return (
-    "Peer \"" +
-    peerName +
-    "\" still has " +
-    deps.length +
-    " enabled route(s):\n\n" +
-    list +
-    "\n\nDisable those routes in this save so the config stays valid?"
-  );
 }
 
-function disableDependentRoutes(cfg, deps) {
-  if (!cfg.forwarding || !cfg.forwarding.routes) return;
-  for (const { index } of deps) {
-    if (cfg.forwarding.routes[index]) cfg.forwarding.routes[index].disabled = true;
+/**
+ * Re-enables routes a cascade disabled, as far as they still exist as they were.
+ * Returns how many could not be found, so the confirmation can say so.
+ */
+function reenableRoutes(cfg, disabledRoutes) {
+  const routes = (cfg.forwarding && cfg.forwarding.routes) || [];
+  let missing = 0;
+  for (const { index, identity } of disabledRoutes) {
+    const i = resolveListIndex(routes, index, identity, routeIdentity);
+    if (i >= 0) routes[i].disabled = false;
+    else missing++;
   }
+  return missing;
+}
+
+function routeCount(n) {
+  return n === 1 ? "1 route" : n + " routes";
+}
+
+/** Undo's confirmation: `done` plus any cascaded route it could no longer find. */
+function undoneMessage(done, missing) {
+  if (!missing) return done + ".";
+  return done + ". " + routeCount(missing) + " changed elsewhere and stayed disabled.";
+}
+
+/** Peers are found by key, so a rename elsewhere does not stop an edit from applying. */
+function peerIdentity(p) {
+  return String(p.public_key || "");
 }
 
 async function patchPeerDisabled(index, disabled) {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.peers || cfg.peers[index] === undefined) return;
-  const peer = cfg.peers[index];
-  const finish = async (nextCfg) => {
-    try {
-      await api("/v1/config", { method: "PUT", body: JSON.stringify(nextCfg) });
-      state.lastConfig = nextCfg;
-      setPeersMsg("");
-      setApiStatus(true);
-      refreshPendingBadge();
-      renderPeersTable(nextCfg, state.lastPeerWgStats);
-    } catch (e) {
-      setPeersMsg(String(e.message || e), true);
-      renderPeersTable(state.lastConfig, state.lastPeerWgStats);
-    }
+  const cfg = state.lastConfig;
+  if (!cfg || !cfg.peers || cfg.peers[index] === undefined) return;
+  const identity = peerIdentity(cfg.peers[index]);
+  const wrap = $("peers-table-wrap");
+  // A save can adopt fresh config even when it fails, so the row may have moved or gone.
+  const currentIndex = () => resolveListIndex(state.lastConfig.peers, index, identity, peerIdentity);
+  /** Turning a peer off takes its enabled routes with it, or the config would not validate. */
+  const setDisabled = (c, off) => {
+    const i = findConfigRow(c.peers, index, identity, peerIdentity, "peer");
+    const cascaded = off ? disableDependentRoutes(c, c.peers[i]) : [];
+    c.peers[i].disabled = off;
+    return { peer: c.peers[i], cascaded };
   };
-  if (disabled) {
-    const deps = dependentRoutesForPeer(cfg, peer);
-    if (deps.length) {
-      openConfirmModal({
-        title: "Disable peer and routes?",
-        message: dependentRoutesConfirmMessage(peer.name || "peer", deps),
-        confirmLabel: "Disable peer and routes",
-        onConfirm: async () => {
-          const c = JSON.parse(JSON.stringify(state.lastConfig));
-          if (!c.peers || c.peers[index] === undefined) return;
-          disableDependentRoutes(c, dependentRoutesForPeer(c, c.peers[index]));
-          c.peers[index].disabled = true;
-          await finish(c);
-        },
-        onCancel: () => {
-          renderPeersTable(state.lastConfig, state.lastPeerWgStats);
-        },
-      });
-      return;
-    }
+  try {
+    let result = null;
+    const nextCfg = await saveConfigEdit((c) => {
+      result = setDisabled(c, disabled);
+    });
+    setPeersMsg("");
+    setApiStatus(true);
+    refreshPendingBadge();
+    renderPeersTable(nextCfg, state.lastPeerWgStats);
+    const name = result.peer.name || "peer";
+    const label = (off, routes) => {
+      if (routes.length) return "Disabled " + name + " and " + routeCount(routes.length) + ".";
+      return off ? "Peer disabled" : "Peer enabled";
+    };
+    const cascaded = result.cascaded;
+    let undone = "";
+    showUndoToast(label(disabled, cascaded), {
+      page: "peers",
+      edit: (c) => {
+        const reversed = setDisabled(c, !disabled);
+        const missing = reenableRoutes(c, cascaded);
+        undone = cascaded.length
+          ? undoneMessage("Enabled " + name + " and its routes", missing)
+          : label(!disabled, reversed.cascaded);
+      },
+      afterSave: (next, focus) => {
+        setPeersMsg("");
+        refreshPendingBadge();
+        renderPeersTable(next, state.lastPeerWgStats);
+        if (focus) restoreRowSwitchFocus(wrap, "data-peer-disabled", currentIndex(), { force: true });
+      },
+      message: () => undone,
+    });
+  } catch (e) {
+    const at = e instanceof ConfigMergeError ? -1 : currentIndex();
+    setPeersMsg("");
+    if (at >= 0) setRowError("data-peer-disabled", at, String(e.message || e));
+    else setPeersMsg(String(e.message || e), true);
+    renderPeersTable(state.lastConfig, state.lastPeerWgStats);
   }
-  cfg.peers[index].disabled = disabled;
-  await finish(cfg);
+  const focusAt = currentIndex();
+  restoreRowSwitchFocus(wrap, "data-peer-disabled", focusAt >= 0 ? focusAt : index);
 }
 
 export async function refreshPeersPage() {
   setPeersMsg("");
   stopPeersPingPolling();
+  const doneLoading = beginLoading("peers-table-wrap");
   try {
     const [cfgOut, stOut] = await Promise.allSettled([api("/v1/config"), api("/v1/stats")]);
     if (cfgOut.status !== "fulfilled") {
       throw cfgOut.reason;
     }
     state.lastConfig = cfgOut.value;
-    state.lastPeerWgStats = stOut.status === "fulfilled" ? stOut.value : null;
+    // Without stats every peer would read as offline, so a failed read keeps the last ones.
+    if (stOut.status === "fulfilled") state.lastPeerWgStats = stOut.value;
     setApiStatus(true);
     let pingMap = null;
+    let pingFailed = false;
     if (showPeersMetricsColumn()) {
       try {
         pingMap = await fetchPeerMetricsMap();
         state.lastPeerPingByTunnel = pingMap;
       } catch {
-        state.lastPeerPingByTunnel = null;
+        /* keep last values */
+        pingFailed = true;
       }
     } else {
       state.lastPeerPingByTunnel = null;
     }
     renderPeersTable(state.lastConfig, state.lastPeerWgStats, pingMap !== null ? pingMap : state.lastPeerPingByTunnel);
-    if (showPeersMetricsColumn()) {
+    markPageLoaded("peers");
+    if (stOut.status !== "fulfilled" || pingFailed) {
+      setPeersMsg("Some live values could not be refreshed, so handshakes, traffic or latency may be from an earlier load.", true);
+    }
+    // The operator can leave or come back while this loads: no timer for a page
+    // they left, and only one if overlapping refreshes both land here.
+    stopPeersPingPolling();
+    if (showPeersMetricsColumn() && !$("page-peers").hidden) {
       state.peersPingTimer = setInterval(async () => {
         try {
           const m = await fetchPeerMetricsMap();
@@ -306,7 +392,8 @@ export async function refreshPeersPage() {
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setPeersMsg(String(e.message || e), true);
-    $("peers-table-wrap").innerHTML = "";
+  } finally {
+    doneLoading();
   }
 }
 
@@ -393,11 +480,16 @@ async function openPeerQRModal() {
   }
 }
 
+/** JSON of the peer open in the editor, to detect it changing elsewhere before Save. */
+let peerEditBase = null;
+
 function openPeerEditor(index) {
   const cfg = state.lastConfig;
   if (!cfg || !cfg.peers[index]) return;
   resetPeerOnboardExtras();
+  $("peer-editor-msg").textContent = "";
   const p = cfg.peers[index];
+  peerEditBase = JSON.stringify(p);
   $("peer-edit-index").value = String(index);
   $("peer-editor-title").textContent = "Edit peer";
   $("peer-f-name").value = p.name || "";
@@ -445,6 +537,7 @@ function resetPeerPrivRevealState() {
 }
 
 function resetPeerOnboardExtras() {
+  setEditorMsg("peer-editor-msg", "");
   state.onboardingUnlockPassStored = "";
   $("onboard-client-priv").value = "";
   resetPeerPrivRevealState();
@@ -460,8 +553,6 @@ function resetPeerOnboardExtras() {
 }
 
 async function savePeerEditor() {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.peers) cfg.peers = [];
   const idxRaw = $("peer-edit-index").value;
   const peer = {
     name: $("peer-f-name").value.trim(),
@@ -477,67 +568,98 @@ async function savePeerEditor() {
     [peer.public_key, "peer-f-pub", "Public key is required."],
   ].find(([value]) => !value);
   if (missing) {
-    setPeersMsg(missing[2], true, $(missing[1]));
+    setEditorMsg("peer-editor-msg", missing[2], $(missing[1]));
     return;
   }
-  if (idxRaw === "") cfg.peers.push(peer);
-  else cfg.peers[+idxRaw] = peer;
+  setEditorMsg("peer-editor-msg", "");
+  const base = peerEditBase;
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
-    setPeersMsg("Saved. Open Pending changes to review nftables, then Apply to host.");
+    const cfg = await saveConfigEdit((c) => {
+      if (!c.peers) c.peers = [];
+      if (idxRaw === "") c.peers.push(peer);
+      // The form replaces the whole row, so only a row still as it was when opened is safe to overwrite.
+      else c.peers[findConfigRow(c.peers, +idxRaw, base, JSON.stringify, "peer")] = peer;
+    });
+    setPeersMsg("");
     closePeerEditor();
     renderPeersTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
+    showToast(idxRaw === "" ? "Peer added." : "Peer saved.");
   } catch (e) {
-    setPeersMsg(String(e.message || e), true);
+    if (e instanceof ConfigMergeError) {
+      setEditorMsg(
+        "peer-editor-msg",
+        e.message + " Your values are still in this form: note them, press Cancel, and edit the latest version."
+      );
+      renderPeersTable(state.lastConfig);
+    } else {
+      setEditorMsg("peer-editor-msg", String(e.message || e));
+    }
   }
 }
 
+/** One removal at a time: a second click on the same row would fail as "removed elsewhere". */
+let peerRemoveBusy = false;
+
 async function removePeer(index) {
   const cfg = state.lastConfig;
-  if (!cfg || !cfg.peers || !cfg.peers[index]) return;
-  const peer = cfg.peers[index];
-  const peerName = peer.name;
-  const deps = dependentRoutesForPeer(cfg, peer);
-  const baseMsg =
-    "Remove \"" +
-    peerName +
-    "\" from the saved config? The host is not updated until you apply on Pending changes.";
-  const message = deps.length
-    ? dependentRoutesConfirmMessage(peerName || "peer", deps) +
-      "\n\nThe peer will then be removed from the saved config. " +
-      "The host is not updated until you apply on Pending changes."
-    : baseMsg;
-  openConfirmModal({
-    title: deps.length ? "Remove peer and disable routes?" : "Remove peer?",
-    message,
-    confirmLabel: deps.length ? "Disable routes and remove" : "Remove",
-    onConfirm: async () => {
-      const c = JSON.parse(JSON.stringify(state.lastConfig));
-      if (!c.peers) return;
-      const i = c.peers.findIndex((p) => p.name === peerName);
-      if (i < 0) return;
-      const depNow = dependentRoutesForPeer(c, c.peers[i]);
-      disableDependentRoutes(c, depNow);
-      c.peers.splice(i, 1);
-      try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
-        state.lastConfig = c;
-        setPeersMsg(
-          deps.length
-            ? "Peer removed and dependent routes disabled in config. Apply on Pending changes when ready."
-            : "Peer removed from config. Apply on Pending changes when ready."
-        );
-        renderPeersTable(c);
-        setApiStatus(true);
-        refreshPendingBadge();
-      } catch (e) {
-        setPeersMsg(String(e.message || e), true);
+  if (peerRemoveBusy || !cfg || !cfg.peers || !cfg.peers[index]) return;
+  const identity = peerIdentity(cfg.peers[index]);
+  const wrap = $("peers-table-wrap");
+  const removeBtn = wrap.querySelector(`[data-peer-del="${index}"]`);
+  const row = removeBtn && removeBtn.closest("tr");
+  peerRemoveBusy = true;
+  try {
+    let removed = null;
+    let removedAt = index;
+    let cascaded = [];
+    const c = await saveConfigEdit((draft) => {
+      removedAt = findConfigRow(draft.peers, index, identity, peerIdentity, "peer");
+      cascaded = disableDependentRoutes(draft, draft.peers[removedAt]);
+      [removed] = draft.peers.splice(removedAt, 1);
+    });
+    const focusAt = rowIndexAfterRemoval(wrap, row, removedAt);
+    await fadeOutRow(row);
+    setPeersMsg("");
+    renderPeersTable(c);
+    setApiStatus(true);
+    refreshPendingBadge();
+    focusTableRow(wrap, focusAt, $("peers-add-start"));
+    const name = removed.name || "peer";
+    let undone = "";
+    showUndoToast(
+      cascaded.length ? "Removed " + name + " and disabled " + routeCount(cascaded.length) + "." : "Removed " + name + ".",
+      {
+        page: "peers",
+        edit: (draft) => {
+          if (!draft.peers) draft.peers = [];
+          // The key came back (saved elsewhere since): restoring would duplicate it.
+          if (draft.peers.some((p) => peerIdentity(p) === identity)) {
+            throw new ConfigMergeError(name + " is already back in the config, so nothing was restored.");
+          }
+          draft.peers.splice(Math.min(removedAt, draft.peers.length), 0, removed);
+          const missing = reenableRoutes(draft, cascaded);
+          undone = undoneMessage(cascaded.length ? "Restored " + name + " and its routes" : "Restored " + name, missing);
+        },
+        afterSave: (next, focus) => {
+          setPeersMsg("");
+          refreshPendingBadge();
+          renderPeersTable(next);
+          if (focus) {
+            const at = resolveListIndex(next.peers, removedAt, identity, peerIdentity);
+            focusTableRow(wrap, Math.max(at, 0), $("peers-add-start"), { force: true });
+          }
+        },
+        message: () => undone,
       }
-    },
-  });
+    );
+  } catch (e) {
+    setPeersMsg(String(e.message || e), true);
+    renderPeersTable(state.lastConfig);
+  } finally {
+    peerRemoveBusy = false;
+  }
 }
 
 /* ——— Onboarding (keys + YAML) ——— */
@@ -908,8 +1030,13 @@ function extractOnboardConfFromOutput() {
   return out.slice(idx).trim();
 }
 
+/** A generated keypair is a default, not something the operator would lose. */
+const GENERATED_KEY_FIELDS = ["peer-f-pub", "onboard-client-priv"];
+
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initPeersPage() {
+  const peerModal = $("peer-modal");
+  const peerForm = registerModalForm(peerModal);
   $("peers-refresh").addEventListener("click", refreshPeersPage);
   registerModalCloser($("peer-qr-modal"), closePeerQRModal);
   const peerTabFieldsBtn = $("peer-tab-fields-btn");
@@ -952,6 +1079,7 @@ export function initPeersPage() {
       const kp = await generatePeerKeypair();
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
+      peerForm.mark(GENERATED_KEY_FIELDS);
     } catch (e) {
       setPeersMsg(String(e.message || e), true);
     }
@@ -961,7 +1089,7 @@ export function initPeersPage() {
     if (first) requestAnimationFrame(() => first.focus());
   });
   $("peer-save").addEventListener("click", savePeerEditor);
-  $("peer-cancel").addEventListener("click", closePeerEditor);
+  $("peer-cancel").addEventListener("click", () => dismissModal(peerModal));
 
   $("onboard-client-priv-toggle").addEventListener("click", () => {
     const inp = $("onboard-client-priv");
@@ -988,6 +1116,7 @@ export function initPeersPage() {
       const kp = await generatePeerKeypair();
       $("peer-f-pub").value = kp.publicKey;
       $("onboard-client-priv").value = kp.privateKey;
+      peerForm.mark(GENERATED_KEY_FIELDS);
       setOnboardMsg("New keypair generated.");
       void rebuildOnboardingEncryptedBundle(false);
     } catch (e) {
@@ -1100,7 +1229,6 @@ export function initPeersPage() {
   const peerDisabled = $("peer-f-disabled");
   if (peerDisabled) peerDisabled.addEventListener("change", onPeerModalFieldActivity);
 
-  const peerModal = $("peer-modal");
   const peerBackdrop = peerModal && peerModal.querySelector(".modal-backdrop");
-  if (peerBackdrop) peerBackdrop.addEventListener("click", closePeerEditor);
+  if (peerBackdrop) peerBackdrop.addEventListener("click", () => dismissModal(peerModal));
 }

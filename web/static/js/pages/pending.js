@@ -1,120 +1,14 @@
 import { state } from "../core/state.js";
-import { $, escapeHtml, setApiStatus, clientIPSourceLabel } from "../core/dom.js";
-import { api } from "../core/api.js";
+import { $, escapeHtml, setApiStatus } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
+import { api, isReadOnlyToken, responseEtag } from "../core/api.js";
+import { markPageLoaded } from "../core/connection.js";
+import { showToast } from "../core/toast.js";
 import { openConfirmModal } from "../core/modal.js";
-import { fetchValidateResult, lockoutRisks, lockoutSignature } from "../core/lockout.js";
-
-/**
- * One warning or error from /validate.
- *
- * The message is what the operator has to act on, so it leads; the machine code
- * follows in muted text for anyone matching it against the docs or a bug report.
- */
-function validateFindingItem(finding) {
-  const li = document.createElement("li");
-  li.textContent = finding.message || String(finding);
-  if (finding.code) {
-    const code = document.createElement("span");
-    code.className = "meta pending-validate-code";
-    code.textContent = String(finding.code);
-    li.append(" ", code);
-  }
-  return li;
-}
-
-/**
- * Paints the check result.
- *
- * Rendering only; the Apply gate reads the response, not the DOM. Deriving
- * "is there a lockout risk" here would make the gate depend on this function
- * running and on `#pending-validate-warnings` existing — a missing element would
- * fail open, which is the exact class of bug that left this panel unbuilt.
- */
-function renderPendingValidateResult(res) {
-  const panel = $("pending-validate-panel");
-  const ipLine = $("pending-client-ip");
-  const warnUl = $("pending-validate-warnings");
-  const ackWrap = $("pending-lockout-ack-wrap");
-  const ack = $("pending-lockout-ack");
-  const risks = lockoutRisks(res);
-  const warnings = Array.isArray(res.warnings) ? res.warnings : [];
-  const errors = Array.isArray(res.errors) ? res.errors : [];
-
-  if (panel) {
-    panel.classList.remove("is-hidden");
-    // Severity: failed check > any warning > clean.
-    const severity = !res.ok
-      ? "evu-alert--danger"
-      : warnings.length
-        ? "evu-alert--warning"
-        : "evu-alert--success";
-    panel.classList.remove("evu-alert--danger", "evu-alert--warning", "evu-alert--success");
-    panel.classList.add(severity);
-  }
-  if (ipLine) {
-    const ip = res.detected_client_ip || "unknown";
-    const badge = clientIPSourceLabel(res.ip_detection_source);
-    ipLine.textContent = "Your connection appears as: " + ip + " (" + badge + ")";
-    if (res.ip_detection_note) {
-      ipLine.textContent += ". " + res.ip_detection_note;
-    }
-  }
-  if (warnUl) {
-    warnUl.innerHTML = "";
-    // Both lists, always: a config can fail nft -c *and* carry lockout risks,
-    // and showing only the errors would hide the risks the operator must ack.
-    errors.forEach((e) => warnUl.appendChild(validateFindingItem(e)));
-    warnings.forEach((w) => warnUl.appendChild(validateFindingItem(w)));
-    warnUl.classList.toggle("is-hidden", !errors.length && !warnings.length);
-  }
-
-  // Keep an existing tick only when it was given for these exact warnings.
-  const sig = lockoutSignature(risks);
-  state.pendingValidateSig = sig;
-  if (state.pendingLockoutAckSig !== sig) {
-    state.pendingLockoutAckSig = "";
-    if (ack) ack.checked = false;
-  }
-  if (ackWrap) ackWrap.classList.toggle("is-hidden", !risks.length);
-}
-
-/**
- * Runs the pre-apply check and renders it. Returns the result, or null when the
- * check could not be completed (the message is already on screen).
- */
-async function runPendingValidate() {
-  setPendingMsg("Checking config…");
-  const { res, error } = await fetchValidateResult();
-  if (!res) {
-    invalidatePendingValidate();
-    setPendingMsg(error, true);
-    return null;
-  }
-  renderPendingValidateResult(res);
-  setPendingMsg(
-    res.ok ? "Config check passed (nft -c)." : "Config check failed; fix the errors above.",
-    !res.ok
-  );
-  return res;
-}
-
-/**
- * Drops the panel and any acknowledgement.
- *
- * Called whenever the config underneath may have moved. Apply re-runs the check
- * regardless, so this is about not showing a stale verdict — and about not
- * leaving a ticked box behind for a set of warnings that no longer applies.
- */
-function invalidatePendingValidate() {
-  state.pendingValidateSig = "";
-  state.pendingLockoutAckSig = "";
-  const ack = $("pending-lockout-ack");
-  if (ack) ack.checked = false;
-  const ackWrap = $("pending-lockout-ack-wrap");
-  if (ackWrap) ackWrap.classList.add("is-hidden");
-  const panel = $("pending-validate-panel");
-  if (panel) panel.classList.add("is-hidden");
-}
+import { checkConfig, invalidateCheck, noteConfigRevision, showUnappliedCount } from "../core/apply_bar.js";
+import { saveConfigEdit } from "../core/config_save.js";
+import { describeConfigChanges, revertChange, reapplyChange } from "../core/config_changes.js";
+import { showUndoToast } from "../core/undo.js";
 
 function setPendingMsg(text, isErr) {
   const el = $("pending-msg");
@@ -488,7 +382,7 @@ function renderPendingDiffPanel() {
   const newText = state.lastPendingNew;
   const baselineHint =
     oldText === "" && newText !== ""
-      ? `<p class="hint pending-diff-baseline-missing">No readable on-disk <code class="inline">generated/nftables.nft</code> (missing, unreadable, or API older than baseline support). The left column compares against an empty baseline; reload the host after a successful apply to populate the file.</p>`
+      ? `<p class="hint pending-diff-baseline-missing">No readable on-disk <code class="inline">generated/nftables.nft</code> (missing, unreadable, or API older than baseline support). The left column compares against an empty baseline; a successful Apply populates the file.</p>`
       : "";
   if (oldText === newText) {
     let body = `<p class="hint pending-diff-same">No differences.</p>`;
@@ -515,22 +409,168 @@ function renderPendingDiffPanel() {
   }
 }
 
+function changeCount(n) {
+  return n === 1 ? "1 change" : n + " changes";
+}
+
+/** What the Changes list is showing, by position. Revert buttons refer to these. */
+let listedChanges = [];
+/** One revert at a time: the list re-renders after each, so positions would move. */
+let revertBusy = false;
+
+function setChangesMsg(text, isErr) {
+  const el = $("pending-changes-msg");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("err", !!isErr);
+}
+
+/**
+ * `applied_config` is null when the host's config is not known, and absent on an API
+ * older than this UI (the two deploy separately). The rules diff is then the only review,
+ * so it opens by itself.
+ */
+function renderChangesList(p, cfg) {
+  const section = $("pending-changes");
+  const list = $("pending-changes-list");
+  const note = $("pending-changes-note");
+  const rawDiff = $("pending-raw-diff");
+  if (!section || !list || !note) return;
+  const comparable = !!p.applied_config;
+  listedChanges = p.pending && comparable ? describeConfigChanges(p.applied_config, cfg) : [];
+  list.innerHTML = "";
+  listedChanges.forEach((change, i) => {
+    const li = document.createElement("li");
+    li.className = "pending-change";
+    const text = document.createElement("span");
+    text.className = "pending-change__text";
+    text.textContent = change.text;
+    const revert = document.createElement("button");
+    revert.type = "button";
+    revert.className = "evu-btn evu-btn--outline evu-btn--sm";
+    revert.textContent = "Revert";
+    revert.setAttribute("aria-label", "Revert: " + change.text);
+    revert.dataset.changeRevert = String(i);
+    li.append(text, revert);
+    list.appendChild(li);
+  });
+  section.classList.toggle("is-hidden", !p.pending);
+  list.classList.toggle("is-hidden", !listedChanges.length);
+  note.classList.toggle("is-hidden", !p.pending || !!listedChanges.length);
+  if (p.pending && !comparable) {
+    note.textContent =
+      "The config last applied to this host is not available to compare, so changes cannot be listed. Review the generated nftables below.";
+  } else if (p.pending) {
+    note.textContent = "The saved settings match what was applied. Only comments or formatting in the file differ.";
+  }
+  if (rawDiff && p.pending && !comparable) rawDiff.open = true;
+}
+
+/**
+ * Where focus goes once a row has left the list: the row now in its place, else the heading.
+ * With nothing left pending the Changes section is hidden and cannot take focus, so the page heading does.
+ */
+function focusChangeAt(index) {
+  const buttons = document.querySelectorAll("#pending-changes-list [data-change-revert]");
+  const heading = $("pending-changes").classList.contains("is-hidden") ? "pending-page-title" : "pending-changes-title";
+  const target = buttons[Math.min(index, buttons.length - 1)] || $(heading);
+  if (target) target.focus();
+}
+
+async function afterChangesSaved(focusIndex) {
+  await refreshPendingPage();
+  await refreshPendingBadge();
+  if (focusIndex !== null) focusChangeAt(focusIndex);
+}
+
+async function revertListedChange(index) {
+  const change = listedChanges[index];
+  if (revertBusy || !change) return;
+  revertBusy = true;
+  setChangesMsg("");
+  try {
+    let reverted = false;
+    await saveConfigEdit((draft) => {
+      reverted = revertChange(draft, change);
+      return reverted;
+    });
+    setApiStatus(true);
+    await afterChangesSaved(index);
+    if (!reverted) {
+      showToast("Already gone: " + change.text + ".");
+      return;
+    }
+    showUndoToast("Reverted: " + change.text + ".", {
+      page: "pending",
+      edit: (draft) => reapplyChange(draft, change),
+      afterSave: (_cfg, focus) => void afterChangesSaved(focus ? index : null),
+      message: () => "Back in place: " + change.text + ".",
+    });
+  } catch (e) {
+    // The save may have adopted fresh config, and this message has no time limit, unlike a toast.
+    await afterChangesSaved(index);
+    setChangesMsg("Could not revert: " + String(e.message || e), true);
+  } finally {
+    revertBusy = false;
+  }
+}
+
+/** Counts for a confirmation, fresh because the page may be stale. The dialog can go without them. */
+async function fetchPendingCounts() {
+  try {
+    return await api("/v1/pending");
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * How many separate places the ruleset changes in. An estimate, for when the Changes
+ * list has no rows to count. A pending edit that leaves the ruleset alone (a note, say)
+ * still counts as one.
+ */
+function rulesetChangeCount(p) {
+  const ops = computeLineDiff(splitLines(String(p.nftables_baseline ?? "")), splitLines(String(p.nftables ?? "")));
+  if (!ops) return 1;
+  let count = 0;
+  let inChange = false;
+  for (const op of ops) {
+    const changed = op.type !== "equal";
+    if (changed && !inChange) count++;
+    inChange = changed;
+  }
+  return Math.max(count, 1);
+}
+
+/** The rows on the Changes list, so the count and the list agree. */
+function unappliedCount(p, cfg) {
+  const rows = cfg ? describeConfigChanges(p.applied_config, cfg).length : 0;
+  return rows || rulesetChangeCount(p);
+}
+
+/** The saved config, without a second request when the page on screen just loaded this revision. */
+function savedConfig(p) {
+  const loaded = state.lastConfig;
+  return loaded && responseEtag(loaded) === '"' + p.current_config_sha256 + '"' ? loaded : api("/v1/config");
+}
+
+/* Saves and navigation both refresh this, so an earlier answer can land after a later one. */
+let pendingBadgeSeq = 0;
+
 export async function refreshPendingBadge() {
-  const dot = $("nav-pending-dot");
-  if (!dot) return;
-  // The dot is colour-only and aria-hidden, so the nav link carries the same
-  // state as text for anyone who cannot see it.
-  const sr = $("nav-pending-sr");
-  const setPending = (pending) => {
-    dot.classList.toggle("is-hidden", !pending);
-    dot.title = pending ? "Saved config not yet applied to host" : "";
-    if (sr) sr.textContent = pending ? " (unapplied changes)" : "";
-  };
+  const seq = ++pendingBadgeSeq;
+  if (isReadOnlyToken()) {
+    showUnappliedCount(0);
+    return;
+  }
   try {
     const p = await api("/v1/pending");
-    setPending(!!p.pending);
+    const cfg = p.pending && p.applied_config ? await savedConfig(p) : null;
+    if (seq !== pendingBadgeSeq) return;
+    noteConfigRevision(p.current_config_sha256);
+    showUnappliedCount(p.pending ? unappliedCount(p, cfg) : 0);
   } catch {
-    setPending(false);
+    /* Not knowing isn't "nothing to apply", so the last count stays. */
   }
 }
 
@@ -542,20 +582,24 @@ function setPendingStatusTone(tone) {
   alert.classList.toggle("is-hidden", tone === "hidden");
 }
 
+/* Once this page has loaded, a failed refresh leaves that on screen. */
+let pendingPageLoaded = false;
+
 export async function refreshPendingPage() {
   const status = $("pending-status");
   const panel = $("pending-diff-panel");
   if (!status || !panel) return;
   setPendingMsg("");
-  // The config may have changed since the last check (another tab, another
-  // page in this one, or an apply that just landed).
-  invalidatePendingValidate();
+  setChangesMsg("");
+  const doneLoading = beginLoading("pending-changes-list", "pending-diff-panel");
   try {
-    const p = await api("/v1/pending");
+    const [p, cfg] = await Promise.all([api("/v1/pending"), api("/v1/config")]);
+    state.lastConfig = cfg;
     setApiStatus(true);
+    renderChangesList(p, cfg);
     if (p.pending) {
       status.textContent =
-        "Unapplied changes: the saved config on disk differs from the last successful reload (nftables / WireGuard).";
+        "Unapplied changes: the saved config on disk differs from the last successful Apply (nftables / WireGuard).";
       setPendingStatusTone("warning");
     } else {
       status.textContent =
@@ -569,24 +613,35 @@ export async function refreshPendingPage() {
     const restoreBtn = $("pending-restore-previous");
     if (restoreBtn) restoreBtn.disabled = !p.restore_previous_applied_available;
     renderPendingDiffPanel();
+    pendingPageLoaded = true;
+    markPageLoaded("pending");
   } catch (e) {
-    status.textContent = "";
-    setPendingStatusTone("hidden");
-    state.lastPendingBaseline = "";
-    state.lastPendingNew = "";
-    const discardErr = $("pending-discard");
-    if (discardErr) discardErr.disabled = true;
-    const restoreErr = $("pending-restore-previous");
-    if (restoreErr) restoreErr.disabled = true;
-    panel.innerHTML = "";
+    if (!pendingPageLoaded) {
+      status.textContent = "";
+      setPendingStatusTone("hidden");
+      const discardErr = $("pending-discard");
+      if (discardErr) discardErr.disabled = true;
+      const restoreErr = $("pending-restore-previous");
+      if (restoreErr) restoreErr.disabled = true;
+    }
     setApiStatus(false, String(e.message || e));
     setPendingMsg(String(e.message || e), true);
+  } finally {
+    doneLoading();
   }
 }
 
 /** One-time event wiring for this page (runs once at startup from main.js). */
 export function initPendingPage() {
-  $("pending-refresh").addEventListener("click", refreshPendingPage);
+  $("pending-refresh").addEventListener("click", () => {
+    // Refresh is the operator saying the config may have moved, so the earlier result goes too.
+    invalidateCheck();
+    void refreshPendingPage();
+  });
+  $("pending-changes-list").addEventListener("click", (e) => {
+    const revert = e.target.closest("[data-change-revert]");
+    if (revert) void revertListedChange(+revert.dataset.changeRevert);
+  });
   const pendingModeUnified = $("pending-mode-unified");
   const pendingModeSplit = $("pending-mode-split");
   if (pendingModeUnified) {
@@ -602,72 +657,27 @@ export function initPendingPage() {
     });
   }
   const pendingCheck = $("pending-check-config");
-  if (pendingCheck) pendingCheck.addEventListener("click", () => void runPendingValidate());
-
-  const ackBox = $("pending-lockout-ack");
-  if (ackBox) {
-    // Bind the tick to the warnings currently on screen. Re-validating on Apply
-    // then revokes it automatically if the config moved in the meantime.
-    ackBox.addEventListener("change", () => {
-      state.pendingLockoutAckSig = ackBox.checked ? state.pendingValidateSig : "";
-    });
-  }
-
-  const applyBtn = $("pending-apply");
-  applyBtn.addEventListener("click", async () => {
-    if (applyBtn.disabled) return;
-    applyBtn.disabled = true;
-    try {
-      // Always check immediately before applying. A stored "it passed earlier"
-      // cannot know about a config saved since — in another tab, by the CLI, or
-      // on another page of this one.
-      const res = await runPendingValidate();
-      if (!res) return;
-      if (!res.ok) return;
-      const risks = lockoutRisks(res);
-      if (risks.length) {
-        const ack = $("pending-lockout-ack");
-        const acked = !!ack && ack.checked && state.pendingLockoutAckSig === lockoutSignature(risks);
-        if (!acked) {
-          setPendingMsg(
-            "This config may lock you out. Read the warnings above, then tick the box and apply again.",
-            true
-          );
-          if (ack) ack.focus();
-          return;
-        }
-      }
-      setPendingMsg("…");
-      try {
-        await api("/v1/reload", { method: "POST" });
-        setPendingMsg("Applied to host.");
-        await refreshPendingPage();
-        await refreshPendingBadge();
-        setApiStatus(true);
-      } catch (e) {
-        setPendingMsg(String(e.message || e), true);
-      }
-    } finally {
-      applyBtn.disabled = false;
-    }
-  });
+  if (pendingCheck) pendingCheck.addEventListener("click", () => void checkConfig());
 
   const pendingDiscard = $("pending-discard");
   if (pendingDiscard) {
-    pendingDiscard.addEventListener("click", () => {
+    pendingDiscard.addEventListener("click", async () => {
+      const changes = (await fetchPendingCounts()).discard_change_count;
+      const what = changes ? changeCount(changes) : "pending changes";
       openConfirmModal({
-        title: "Discard pending?",
+        title: "Discard " + what + "?",
         message:
-          "Replace the saved config.yaml with config.yaml.bak (the last applied snapshot). Unsaved edits that differ from that snapshot are lost. The host is not updated until you apply or reload.",
-        confirmLabel: "Discard pending",
+          "Replace the saved config.yaml with config.yaml.bak (the last applied snapshot). Unsaved edits that differ from that snapshot are lost. The host is not updated until you apply.",
+        confirmLabel: "Discard " + what,
         onConfirm: async () => {
           setPendingMsg("…");
           try {
             await api("/v1/config/discard", { method: "POST" });
-            setPendingMsg("Pending changes discarded. Apply or reload when ready.");
+            setPendingMsg("");
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);
+            showToast("Pending changes discarded.");
           } catch (e) {
             setPendingMsg(String(e.message || e), true);
           }
@@ -678,20 +688,23 @@ export function initPendingPage() {
 
   const pendingRestore = $("pending-restore-previous");
   if (pendingRestore) {
-    pendingRestore.addEventListener("click", () => {
+    pendingRestore.addEventListener("click", async () => {
+      const changes = (await fetchPendingCounts()).restore_previous_change_count;
       openConfirmModal({
         title: "Restore previous applied?",
         message:
-          "Replace config.yaml with the first older snapshot in config.yaml.bak.1 … .bak.5 that differs from config.yaml.bak. Any current config.yaml content is overwritten (including edits not yet applied to the host). The host is not updated until you apply or reload.",
-        confirmLabel: "Restore",
+          (changes ? "This changes " + changeCount(changes) + " in the saved config. " : "") +
+          "Replace config.yaml with the first older snapshot in config.yaml.bak.1 … .bak.5 that differs from config.yaml.bak. Any current config.yaml content is overwritten (including edits not yet applied to the host). The host is not updated until you apply.",
+        confirmLabel: "Restore previous config",
         onConfirm: async () => {
           setPendingMsg("…");
           try {
             await api("/v1/config/restore-previous-applied", { method: "POST" });
-            setPendingMsg("Restored previous applied config. Apply or reload when ready.");
+            setPendingMsg("");
             await refreshPendingPage();
             await refreshPendingBadge();
             setApiStatus(true);
+            showToast("Previous applied config restored.");
           } catch (e) {
             setPendingMsg(String(e.message || e), true);
           }

@@ -1,8 +1,13 @@
 .PHONY: all up down dev dev-fresh playwright-deps playwright-visual a11y ui-behavior \
+	visual-check visual-baseline \
 	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
-	check fmt vet test test-race deadcode
+	check fmt vet test test-race deadcode e2e e2e-stress e2e-stats-cost
 
 # Run from the repository root. Requires Go 1.25+, Docker, and `docker compose` (v2).
+
+# docker-compose.dev.yml runs mock-api as this user; shells don't export these on their own.
+export UID := $(shell id -u)
+export GID := $(shell id -g)
 
 # check runs the same gates as CI: formatting, vet, and the full test suite.
 check: fmt vet test
@@ -28,6 +33,19 @@ test-race:
 # deadcode reports unreachable functions (go install golang.org/x/tools/cmd/deadcode@latest).
 deadcode:
 	deadcode ./...
+
+# Real WireGuard and nftables in a throwaway container. Refuses on an EvuProxy host; never run it
+# against production. See devtools/e2e/README.md.
+e2e:
+	./devtools/e2e/run.sh
+
+# The same harness under load, kept out of `make e2e` because it is slower and timing-sensitive.
+e2e-stress:
+	./devtools/e2e/run.sh stress
+
+# What GET /stats costs as the geo set grows. Reports numbers, with no thresholds.
+e2e-stats-cost:
+	./devtools/e2e/run.sh stats_cost
 
 CROWDSEC_DIR := contrib/crowdsec
 
@@ -81,6 +99,26 @@ a11y:
 ui-behavior:
 	$(call require_dev_ui,ui-behavior)
 	cd $(PLAYWRIGHT_DIR) && npm run test:behavior
+
+# Screenshots against the committed baseline, in the Playwright container on a stack of their
+# own. See devtools/playwright-visual/README.md. Recreated so changes to the mock script count;
+# left up in CI, where a later step shows its logs and the runner goes away anyway.
+VISUAL_COMPOSE := docker compose -p evuproxy-visual -f docker-compose.dev.yml -f $(PLAYWRIGHT_DIR)/docker-compose.visual.yml
+
+define visual_run
+	$(VISUAL_COMPOSE) up -d --build --force-recreate evuproxy-ui mock-api
+	status=0; $(VISUAL_COMPOSE) run --rm visual $(1) || status=$$?; \
+	if [ -z "$$CI" ]; then $(VISUAL_COMPOSE) down; fi; \
+	exit $$status
+endef
+
+# Fails on any difference from the baseline, and on any request the replay cache doesn't have.
+visual-check:
+	$(call visual_run,check)
+
+# Refreshes the replay cache and rewrites the baseline images that changed.
+visual-baseline:
+	$(call visual_run,update)
 
 # Optional CrowdSec stack (same host as EvuProxy). See contrib/crowdsec/README.md.
 crowdsec-install:

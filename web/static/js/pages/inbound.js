@@ -4,38 +4,80 @@ import {
   escapeHtml,
   setApiStatus,
   tableDisabledToggleCell,
-  markFieldInvalid,
-  clearFieldInvalid,
+  setEditorMsg,
+  setRowError,
+  clearRowError,
+  rowErrorHtml,
+  restoreRowSwitchFocus,
+  focusTableRow,
+  rowIndexAfterRemoval,
+  fadeOutRow,
 } from "../core/dom.js";
+import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
-import { openModal, closeModal, openConfirmModal } from "../core/modal.js";
+import { markPageLoaded } from "../core/connection.js";
+import { showToast } from "../core/toast.js";
+import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
+import { saveConfigEdit, findConfigRow, resolveListIndex, ConfigMergeError } from "../core/config_save.js";
+import { showUndoToast } from "../core/undo.js";
+import { openModal, closeModal, dismissModal, registerModalForm } from "../core/modal.js";
 import { refreshPendingBadge } from "./pending.js";
 
+/** JSON of the rule open in the editor, to detect it changing elsewhere before Save. */
+let inboundEditBase = null;
+
 async function patchInboundDisabled(index, disabled) {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.input_allows || cfg.input_allows[index] === undefined) return;
-  cfg.input_allows[index].disabled = disabled;
+  const cur = state.lastConfig;
+  if (!cur || !cur.input_allows || cur.input_allows[index] === undefined) return;
+  const identity = inboundRuleIdentity(cur.input_allows[index]);
+  // A save can adopt fresh config even when it fails, so the row may have moved or gone.
+  const currentIndex = () => resolveListIndex(state.lastConfig.input_allows, index, identity, inboundRuleIdentity);
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
+    const cfg = await saveConfigEdit((c) => {
+      const i = findConfigRow(c.input_allows, index, identity, inboundRuleIdentity, "inbound rule");
+      c.input_allows[i].disabled = disabled;
+    });
     setInboundMsg("");
     setApiStatus(true);
     refreshPendingBadge();
     renderInboundTable(cfg);
+    const label = (off) => (off ? "Inbound rule disabled" : "Inbound rule enabled");
+    showUndoToast(label(disabled), {
+      page: "inbound",
+      edit: (c) => {
+        c.input_allows[findConfigRow(c.input_allows, index, identity, inboundRuleIdentity, "inbound rule")].disabled = !disabled;
+      },
+      afterSave: (next, focus) => {
+        setInboundMsg("");
+        refreshPendingBadge();
+        renderInboundTable(next);
+        if (focus) restoreRowSwitchFocus($("inbound-table-wrap"), "data-inbound-disabled", currentIndex(), { force: true });
+      },
+      message: () => label(!disabled),
+    });
   } catch (e) {
-    setInboundMsg(String(e.message || e), true);
+    const at = e instanceof ConfigMergeError ? -1 : currentIndex();
+    setInboundMsg("");
+    if (at >= 0) setRowError("data-inbound-disabled", at, String(e.message || e));
+    else setInboundMsg(String(e.message || e), true);
     renderInboundTable(state.lastConfig);
   }
+  const focusAt = currentIndex();
+  restoreRowSwitchFocus($("inbound-table-wrap"), "data-inbound-disabled", focusAt >= 0 ? focusAt : index);
 }
 
 /* ——— Inbound access (input_allows) ——— */
-function setInboundMsg(text, isErr, field) {
+function setInboundMsg(text, isErr) {
   const el = $("inbound-msg");
   if (!el) return;
   el.textContent = text;
   el.classList.toggle("err", !!isErr);
-  if (isErr && field) markFieldInvalid(el, field);
-  else clearFieldInvalid(el);
+  if (!text) clearRowError("data-inbound-disabled");
+}
+
+/** The API stores several ports as an nft set, `{ 80, 443 }`. Operators read `80, 443`. */
+function dportDisplay(dport) {
+  return String(dport || "").replace(/[{}]/g, "").trim();
 }
 
 function renderInboundTable(cfg) {
@@ -50,35 +92,50 @@ function renderInboundTable(cfg) {
     if (addBtn) addBtn.addEventListener("click", () => openInboundEditor(-1));
     return;
   }
-  const rows = rules
-    .map((r, i) => {
+  const rows = sortedRows("inbound", rules, {
+    proto: (r) => String(r.proto || "").toLowerCase(),
+    ports: (r) => dportDisplay(r.dport),
+    note: (r) => r.note,
+    enabled: (r) => (r.disabled ? 0 : 1),
+  })
+    .map(({ item: r, index: i }) => {
       const aria =
         "Enabled: INPUT " +
         String(r.proto || "").toLowerCase() +
         " " +
-        String(r.dport || r.note || "#" + i);
+        (dportDisplay(r.dport) || r.note || "#" + i);
       return (
-        `<tr><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(r.dport || "")}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>`
+        `<tr data-row="${i}" tabindex="-1"${r.disabled ? ' class="is-row-disabled"' : ""}><td class="mono">${escapeHtml(String(r.proto || "").toLowerCase())}</td><td class="mono">${escapeHtml(dportDisplay(r.dport))}</td><td>${escapeHtml(r.note || "—")}</td>${tableDisabledToggleCell("data-inbound-disabled", i, !!r.disabled, aria)}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-inbound-del="${i}">Remove</button></td></tr>` +
+        rowErrorHtml("data-inbound-disabled", i, 5)
       );
     })
     .join("");
-  wrap.innerHTML = `<table class="data"><thead><tr><th scope="col">Proto</th><th scope="col">Port(s)</th><th scope="col">Note</th><th scope="col">Enabled</th><th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`;
+  setTableHtml(
+    wrap,
+    `<table class="data"><thead><tr>${sortHeaderHtml("inbound", "proto", "Proto")}${sortHeaderHtml("inbound", "ports", "Port(s)")}${sortHeaderHtml("inbound", "note", "Note")}${sortHeaderHtml("inbound", "enabled", "Enabled")}<th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`
+  );
+  bindSortHeaders(wrap, "inbound", () => renderInboundTable(cfg));
   wrap.querySelectorAll("[data-inbound-edit]").forEach((b) => {
     b.addEventListener("click", () => openInboundEditor(+b.getAttribute("data-inbound-edit")));
   });
   wrap.querySelectorAll("[data-inbound-del]").forEach((b) => {
-    b.addEventListener("click", () => removeInboundRule(+b.getAttribute("data-inbound-del")));
+    b.addEventListener("click", (ev) => {
+      // The next row slides under the pointer, so a double-click must not remove it too.
+      if (ev.detail <= 1) removeInboundRule(+b.getAttribute("data-inbound-del"));
+    });
   });
   wrap.querySelectorAll("input[data-inbound-disabled]").forEach((inp) => {
     inp.addEventListener("click", (ev) => ev.stopPropagation());
     inp.addEventListener("change", async () => {
       const idx = +inp.getAttribute("data-inbound-disabled");
       const wantEnabled = inp.checked;
+      clearRowError("data-inbound-disabled");
       if (wantEnabled) {
         const r = (state.lastConfig.input_allows || [])[idx];
         if (!r || !String(r.dport || "").trim()) {
-          setInboundMsg("Add a destination port in Edit before enabling this rule.", true);
-          inp.checked = false;
+          setRowError("data-inbound-disabled", idx, "Add a destination port in Edit before enabling this rule.");
+          renderInboundTable(state.lastConfig);
+          restoreRowSwitchFocus(wrap, "data-inbound-disabled", idx);
           return;
         }
       }
@@ -91,6 +148,7 @@ function openInboundEditor(index) {
   const cfg = state.lastConfig;
   if (!cfg) return;
   if (!cfg.input_allows) cfg.input_allows = [];
+  setEditorMsg("inbound-editor-msg", "");
   const protoSel = $("inbound-f-proto");
   const dport = $("inbound-f-dport");
   const note = $("inbound-f-note");
@@ -107,6 +165,7 @@ function openInboundEditor(index) {
   } else {
     const r = cfg.input_allows[index];
     if (!r) return;
+    inboundEditBase = JSON.stringify(r);
     $("inbound-edit-index").value = String(index);
     $("inbound-editor-title").textContent = "Edit rule";
     const p = String(r.proto || "tcp").toLowerCase();
@@ -128,19 +187,17 @@ export function closeInboundEditor() {
 }
 
 async function saveInboundEditor() {
-  const cfg = JSON.parse(JSON.stringify(state.lastConfig));
-  if (!cfg.input_allows) cfg.input_allows = [];
   const proto = ($("inbound-f-proto").value || "tcp").toLowerCase();
   const dport = $("inbound-f-dport").value.trim();
   const note = $("inbound-f-note").value.trim();
   if (proto !== "tcp" && proto !== "udp") {
-    setInboundMsg("Protocol must be tcp or udp.", true, $("inbound-f-proto"));
+    setEditorMsg("inbound-editor-msg", "Protocol must be tcp or udp.", $("inbound-f-proto"));
     return;
   }
   const disEl = $("inbound-f-disabled");
   const enabled = disEl && disEl.checked;
   if (enabled && !dport) {
-    setInboundMsg("Destination port is required.", true, $("inbound-f-dport"));
+    setEditorMsg("inbound-editor-msg", "Destination port is required.", $("inbound-f-dport"));
     return;
   }
   const entry = { proto };
@@ -148,18 +205,31 @@ async function saveInboundEditor() {
   if (note) entry.note = note;
   entry.disabled = !enabled;
   const idxRaw = $("inbound-edit-index").value;
-  if (idxRaw === "") cfg.input_allows.push(entry);
-  else cfg.input_allows[+idxRaw] = entry;
+  setEditorMsg("inbound-editor-msg", "");
+  const base = inboundEditBase;
   try {
-    await api("/v1/config", { method: "PUT", body: JSON.stringify(cfg) });
-    state.lastConfig = cfg;
-    setInboundMsg("Saved. Open Pending changes to review nftables, then Apply to host.");
+    const cfg = await saveConfigEdit((c) => {
+      if (!c.input_allows) c.input_allows = [];
+      if (idxRaw === "") c.input_allows.push(entry);
+      // The form replaces the whole row, so only a row still as it was when opened is safe to overwrite.
+      else c.input_allows[findConfigRow(c.input_allows, +idxRaw, base, JSON.stringify, "inbound rule")] = entry;
+    });
+    setInboundMsg("");
     closeInboundEditor();
     renderInboundTable(cfg);
     setApiStatus(true);
     refreshPendingBadge();
+    showToast(idxRaw === "" ? "Inbound rule added." : "Inbound rule saved.");
   } catch (e) {
-    setInboundMsg(String(e.message || e), true);
+    if (e instanceof ConfigMergeError) {
+      setEditorMsg(
+        "inbound-editor-msg",
+        e.message + " Your values are still in this form: note them, press Cancel, and edit the latest version."
+      );
+      renderInboundTable(state.lastConfig);
+    } else {
+      setEditorMsg("inbound-editor-msg", String(e.message || e));
+    }
   }
 }
 
@@ -173,75 +243,76 @@ function inboundRuleIdentity(r) {
   );
 }
 
-function resolveListIndex(list, openIndex, identity, identityOf) {
-  // Prefer the open-time index when it still matches (handles duplicate keys).
-  if (!list) return -1;
-  if (list[openIndex] != null && identityOf(list[openIndex]) === identity) return openIndex;
-  const matches = [];
-  for (let i = 0; i < list.length; i++) {
-    if (identityOf(list[i]) === identity) matches.push(i);
-  }
-  if (matches.length === 1) return matches[0];
-  if (matches.length === 0) return -1;
-  return -2; // ambiguous after list churn
-}
+/** One removal at a time: a second click on the same row would fail as "removed elsewhere". */
+let inboundRemoveBusy = false;
 
 async function removeInboundRule(index) {
   const cfg = state.lastConfig;
-  if (!cfg || !cfg.input_allows || cfg.input_allows[index] === undefined) return;
-  const rule = cfg.input_allows[index];
-  const identity = inboundRuleIdentity(rule);
-  const openIndex = index;
-  const proto = String(rule.proto || "").toLowerCase() || "—";
-  const dport = String(rule.dport || "—");
-  const note = String(rule.note || "").trim();
-  const label = note ? proto + " " + dport + " (" + note + ")" : proto + " " + dport;
-  openConfirmModal({
-    title: "Remove inbound rule?",
-    message:
-      "Remove " +
-      label +
-      " from the saved config? The host is not updated until you apply on Pending changes.",
-    confirmLabel: "Remove",
-    onConfirm: async () => {
-      // Re-resolve: list may have changed while the dialog was open.
-      const c = JSON.parse(JSON.stringify(state.lastConfig));
-      if (!c.input_allows) return;
-      const i = resolveListIndex(c.input_allows, openIndex, identity, inboundRuleIdentity);
-      if (i === -1) {
-        setInboundMsg("That inbound rule is no longer in the saved config.", true);
-        renderInboundTable(c);
-        return;
-      }
-      if (i === -2) {
-        setInboundMsg("Could not uniquely identify that inbound rule; refresh and try again.", true);
-        renderInboundTable(c);
-        return;
-      }
-      c.input_allows.splice(i, 1);
-      try {
-        await api("/v1/config", { method: "PUT", body: JSON.stringify(c) });
-        state.lastConfig = c;
-        setInboundMsg("Rule removed. Apply on Pending changes when ready.");
-        renderInboundTable(c);
-        setApiStatus(true);
+  if (inboundRemoveBusy || !cfg || !cfg.input_allows || cfg.input_allows[index] === undefined) return;
+  const identity = inboundRuleIdentity(cfg.input_allows[index]);
+  const wrap = $("inbound-table-wrap");
+  const removeBtn = wrap.querySelector(`[data-inbound-del="${index}"]`);
+  const row = removeBtn && removeBtn.closest("tr");
+  inboundRemoveBusy = true;
+  try {
+    let removed = null;
+    let removedAt = index;
+    const c = await saveConfigEdit((draft) => {
+      removedAt = findConfigRow(draft.input_allows, index, identity, inboundRuleIdentity, "inbound rule");
+      [removed] = draft.input_allows.splice(removedAt, 1);
+    });
+    const focusAt = rowIndexAfterRemoval(wrap, row, removedAt);
+    await fadeOutRow(row);
+    setInboundMsg("");
+    renderInboundTable(c);
+    setApiStatus(true);
+    refreshPendingBadge();
+    focusTableRow(wrap, focusAt, $("inbound-add"));
+    const proto = String(removed.proto || "").toLowerCase() || "—";
+    const note = String(removed.note || "").trim();
+    const label = proto + " " + (dportDisplay(removed.dport) || "—") + (note ? " (" + note + ")" : "");
+    const removedJson = JSON.stringify(removed);
+    let restoredAt = removedAt;
+    showUndoToast("Removed inbound rule " + label + ".", {
+      page: "inbound",
+      edit: (draft) => {
+        if (!draft.input_allows) draft.input_allows = [];
+        // Already back (saved elsewhere since): nothing to reverse. Only the whole row counts,
+        // since identity also matches a disabled twin.
+        restoredAt = draft.input_allows.findIndex((r) => JSON.stringify(r) === removedJson);
+        if (restoredAt !== -1) return false;
+        restoredAt = Math.min(removedAt, draft.input_allows.length);
+        draft.input_allows.splice(restoredAt, 0, removed);
+      },
+      afterSave: (next, focus) => {
+        setInboundMsg("");
         refreshPendingBadge();
-      } catch (e) {
-        setInboundMsg(String(e.message || e), true);
-      }
-    },
-  });
+        renderInboundTable(next);
+        if (focus) focusTableRow(wrap, restoredAt, $("inbound-add"), { force: true });
+      },
+      message: () => "Restored inbound rule " + label + ".",
+    });
+  } catch (e) {
+    setInboundMsg(String(e.message || e), true);
+    renderInboundTable(state.lastConfig);
+  } finally {
+    inboundRemoveBusy = false;
+  }
 }
 
 export async function refreshInboundPage() {
   setInboundMsg("");
+  const doneLoading = beginLoading("inbound-table-wrap");
   try {
     state.lastConfig = await api("/v1/config");
     setApiStatus(true);
     renderInboundTable(state.lastConfig);
+    markPageLoaded("inbound");
   } catch (e) {
     setApiStatus(false, String(e.message || e));
     setInboundMsg(String(e.message || e), true);
+  } finally {
+    doneLoading();
   }
 }
 
@@ -253,9 +324,10 @@ export function initInboundPage() {
     else openInboundEditor(-1);
   });
   $("inbound-save").addEventListener("click", saveInboundEditor);
-  $("inbound-cancel").addEventListener("click", closeInboundEditor);
 
   const inboundModal = $("inbound-modal");
+  registerModalForm(inboundModal);
+  $("inbound-cancel").addEventListener("click", () => dismissModal(inboundModal));
   const inboundBackdrop = inboundModal && inboundModal.querySelector(".modal-backdrop");
-  if (inboundBackdrop) inboundBackdrop.addEventListener("click", closeInboundEditor);
+  if (inboundBackdrop) inboundBackdrop.addEventListener("click", () => dismissModal(inboundModal));
 }

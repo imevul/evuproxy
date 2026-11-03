@@ -3,11 +3,13 @@
  *
  * `POST /v1/reload` rewrites nftables and reloads WireGuard, so a bad config can
  * cut the operator off from SSH and from this UI. `POST /v1/validate` reports
- * that risk as `lockout_risk_*` warnings; nothing on the server refuses the
- * reload, so this is the only thing standing between the operator and a
- * self-inflicted lockout. Both Apply (Pending changes) and Reload config
- * (Overview) go through here — a second, ungated apply button is the same hole
- * as having no gate at all.
+ * that risk as `lockout_risk_*` warnings. The server refuses a reload of anything
+ * but the file that was checked, but not one with risks, so on a one-way Apply this
+ * is the only thing standing between the operator and a self-inflicted lockout.
+ * With confirm-or-revert on, the host
+ * undoes a lockout by itself and the risks are only shown. Every Apply button goes
+ * through here, by way of apply_bar.js — a second, ungated apply button is the
+ * same hole as having no gate at all.
  *
  * Two rules the callers depend on:
  *
@@ -34,6 +36,7 @@ function isValidateShape(body) {
   if (typeof body.ok !== "boolean") return false;
   if (body.warnings != null && !Array.isArray(body.warnings)) return false;
   if (body.errors != null && !Array.isArray(body.errors)) return false;
+  if (body.config_hash != null && typeof body.config_hash !== "string") return false;
   return true;
 }
 
@@ -78,9 +81,4 @@ export async function fetchValidateResult() {
     if (isValidateShape(e.body)) return { res: e.body };
     return { error: String(e.message || e) };
   }
-}
-
-/** Human-readable summary of the risks, for the Overview confirm dialog. */
-export function lockoutRiskLines(risks) {
-  return risks.map((w) => "• " + String(w.message || w.code));
 }

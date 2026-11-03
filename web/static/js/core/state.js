@@ -14,6 +14,8 @@ export const contentWidthCssValues = {
 /** Mutable cross-module UI state (formerly module-level `let` variables in the pre-split single-file script). */
 export const state = {
   lastOverview: null,
+  /** What this browser's token may do, from the last GET /v1/overview: "write" or "read". */
+  tokenScope: "write",
   lastConfig: null,
   /** True only after a successful GET /v1/overview with the current token (or unset token → false). */
   apiConnectionOk: false,
@@ -23,7 +25,7 @@ export const state = {
   lastPeerPingByTunnel: null,
   peerOverviewFetchSeq: 0,
   peerOverviewDebounceTimer: null,
-  /** Ignores stale results when multiple refreshOverviewPage runs overlap (navigate + save-token, etc.). */
+  /** Ignores stale results when multiple refreshOverviewPage runs overlap (navigate + token Connect, etc.). */
   overviewRefreshSeq: 0,
 
   /** Parsed firewall log lines from last successful GET /v1/logs (client-side filter/table). */
@@ -51,6 +53,17 @@ export const state = {
   topologyPanY: 0,
   topologyZoomK: 1,
   topologyPanDrag: null,
+  /** Large configs only: the graph groups routes by peer (see TOPO_SCALE_ROUTES). */
+  topologyAtScale: false,
+  /** Peer keys opened by the user. Groups start collapsed. */
+  topologyExpanded: new Set(),
+  /** A filter opens every group that matches; these are the ones closed again since it was typed. */
+  topologyFilterCollapsed: new Set(),
+  topologyFilter: "",
+  /** Height of the drawn graph, to stop scrolling past its end. */
+  topologyContentH: 0,
+  /** Arguments of the last render, so collapse and filter redraw without a fetch. */
+  topologyLastRender: null,
 
   lastUIPrefs: {
     peer_tunnel_subnet_cidr: "",
@@ -75,6 +88,7 @@ export const state = {
   confirmModalCancelCallback: null,
 
   peersPingTimer: null,
+  routesPollTimer: null,
 
   onboardingUnlockPassStored: "",
   onboardingBundleRebuildSeq: 0,
@@ -87,6 +101,8 @@ export const state = {
   /** @type {Map<string, { code: string, name: string }>} */
   geoCountryByCode: new Map(),
   geoSelectedCodes: [],
+  /** False until the form holds this visit's config; a form still loading is not dirty. */
+  geoFormLoaded: false,
   /** @type {Set<string>} */
   geoModalDraft: new Set(),
 };

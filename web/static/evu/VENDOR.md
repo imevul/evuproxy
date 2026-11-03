@@ -29,12 +29,25 @@ chips do — they land between 2.7:1 and 4.1:1 in light mode. The app defines
 overrides the label colour rather than editing the vendored file. If upstream
 ever ships text-safe status tokens, drop the app tokens in favour of those.
 
+### Danger button contrast in dark mode (worked around in app CSS, not patched here)
+
+White on the dark `--destructive` is 4.04:1, under the 4.5:1 that `.evu-btn--danger`
+text needs. The app darkens the fill with `--evuproxy-danger-fill` in
+[`../style/tokens.css`](../style/tokens.css). Drop it if upstream fixes the token.
+
+### Closed drawer's shadow (worked around in app CSS, not patched here)
+
+Below 768px, `layouts.css` gives `.evu-sidebar` its shadow while it is closed too, so the
+shadow bleeds over the left edge of the page. [`../style/mobile.css`](../style/mobile.css)
+applies it only while open. Drop the override if upstream moves the shadow to
+`.is-nav-open`.
+
 ## Sync notes (f3739a5)
 
 - New `--control-border` / `--evu-control-border` token, and motion tokens (`--evu-ease-out`, `--evu-duration-press`, `--evu-duration-fast`, `--evu-duration-enter`).
 - `.evu-btn` scales on press, with reduced motion respected.
 - New `.evu-checkbox`, `.evu-check`, `.evu-check-group`, `.evu-toaster` and `.evu-toast`. Toasts are styles only; each app supplies the timer and behaviour.
-- The app's forms do not use the new checkbox yet. The checkbox rules in [`../style/forms.css`](../style/forms.css) stay until the form migration, and override `.evu-checkbox` by specificity.
+- The app's forms use the theme checkbox. Switches stay on `.evu-switch`.
 
 ## Sync notes (833a0ab)
 

@@ -33,8 +33,8 @@ func NextFreeTunnelIP(cfgPath string, c *config.Config) (string, error) {
 	bcastU := netU | ^binary.BigEndian.Uint32(mask)
 
 	used := map[uint32]struct{}{}
-	if _, n, err := net.ParseCIDR(strings.TrimSpace(c.WireGuard.Address)); err == nil && n != nil {
-		if s := n.IP.To4(); s != nil {
+	if addr, _, err := net.ParseCIDR(strings.TrimSpace(c.WireGuard.Address)); err == nil {
+		if s := addr.To4(); s != nil {
 			used[binary.BigEndian.Uint32(s)] = struct{}{}
 		}
 	}

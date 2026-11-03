@@ -23,25 +23,25 @@ func crowdsecSetName(enabled bool) string {
 
 // writePolicyCrowdsecDrop drops WAN sources in the CrowdSec set. Break-glass CIDRs are exempt.
 // Placed after global/route deny lists and before rate limits / geo on published ports.
-func writePolicyCrowdsecDrop(b *strings.Builder, crowdsecSet, breakGlass, proto, portExpr string) {
+func writePolicyCrowdsecDrop(b *strings.Builder, crowdsecSet, breakGlass, proto, portExpr, counter string) {
 	if crowdsecSet == "" || portExpr == "" {
 		return
 	}
 	if breakGlass != "" {
-		fmt.Fprintf(b, "        ip saddr @%s ip saddr != @%s %s dport %s log prefix %q drop\n", crowdsecSet, breakGlass, proto, portExpr, logPrefixCrowdsec)
+		fmt.Fprintf(b, "        ip saddr @%s ip saddr != @%s %s dport %s %slog prefix %q drop\n", crowdsecSet, breakGlass, proto, portExpr, counter, logPrefixCrowdsec)
 		return
 	}
-	fmt.Fprintf(b, "        ip saddr @%s %s dport %s log prefix %q drop\n", crowdsecSet, proto, portExpr, logPrefixCrowdsec)
+	fmt.Fprintf(b, "        ip saddr @%s %s dport %s %slog prefix %q drop\n", crowdsecSet, proto, portExpr, counter, logPrefixCrowdsec)
 }
 
 // writePolicyCrowdsecForwardDrop drops forwarded WAN→tunnel flows for banned sources.
-func writePolicyCrowdsecForwardDrop(b *strings.Builder, pub, wg, crowdsecSet, breakGlass, proto, portExpr string) {
+func writePolicyCrowdsecForwardDrop(b *strings.Builder, pub, wg, crowdsecSet, breakGlass, proto, portExpr, counter string) {
 	if crowdsecSet == "" || portExpr == "" {
 		return
 	}
 	if breakGlass != "" {
-		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s ip saddr != @%s %s dport %s log prefix %q drop\n", pub, wg, crowdsecSet, breakGlass, proto, portExpr, logPrefixCrowdsec)
+		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s ip saddr != @%s %s dport %s %slog prefix %q drop\n", pub, wg, crowdsecSet, breakGlass, proto, portExpr, counter, logPrefixCrowdsec)
 		return
 	}
-	fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s log prefix %q drop\n", pub, wg, crowdsecSet, proto, portExpr, logPrefixCrowdsec)
+	fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s %slog prefix %q drop\n", pub, wg, crowdsecSet, proto, portExpr, counter, logPrefixCrowdsec)
 }
