@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/imevul/evuproxy/internal/apply"
+	"github.com/imevul/evuproxy/internal/autopause"
 	"github.com/imevul/evuproxy/internal/geoip"
 	"github.com/imevul/evuproxy/internal/metrics"
 	"github.com/imevul/evuproxy/internal/state"
@@ -46,6 +47,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.jsonOK(w, map[string]string{"report": out})
+}
+
+// handleAutoPause reports the routes the auto-pause loop has paused. The state is runtime-only,
+// so it comes from the loop rather than from config.
+func (s *Server) handleAutoPause(w http.ResponseWriter, r *http.Request) {
+	paused := []autopause.PausedRoute{}
+	if s.autoPause != nil {
+		paused = append(paused, s.autoPause.PausedRoutes()...)
+	}
+	s.jsonOK(w, map[string]any{"paused_routes": paused})
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {

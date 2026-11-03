@@ -163,6 +163,7 @@ function rowLists(names) {
         geo_mode: { label: "geo mode" },
         geo_countries: { label: "geo countries" },
         rate_limit: { label: "rate limit", format: null },
+        pause_when_peer_offline: { label: "pause when peer is offline", format: null },
       },
     },
     {

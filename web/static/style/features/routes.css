@@ -36,6 +36,20 @@ table.data .route-target-name {
   line-height: 1.25;
 }
 
+.routes-auto-paused {
+  margin-bottom: 1rem;
+}
+
+.routes-auto-paused__list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
+table.data .route-auto-paused-badge {
+  margin-left: 0.5rem;
+  white-space: nowrap;
+}
+
 .route-editor {
   margin: 0;
   padding: 0;

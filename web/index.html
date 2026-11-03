@@ -686,6 +686,12 @@
         <p class="hint">
           WAN ports mapped to peer tunnel IPs. Toggle <strong>Enabled</strong> to omit forwards from nftables temporarily.
         </p>
+        <div id="routes-auto-paused" class="evu-alert evu-alert--warning routes-auto-paused is-hidden" role="status">
+          <div class="evu-alert__body">
+            <p class="evu-alert__title" id="routes-auto-paused-title"></p>
+            <ul id="routes-auto-paused-list" class="routes-auto-paused__list"></ul>
+          </div>
+        </div>
         <div class="evu-card card">
           <div class="toolbar">
             <button type="button" class="evu-btn evu-btn--primary" id="routes-add">Add route</button>
@@ -780,6 +786,13 @@
                 <div class="field">
                   <label for="route-f-target">Target peer IP</label>
                   <select id="route-f-target"></select>
+                </div>
+                <div class="field">
+                  <label class="evu-check">
+                    <input type="checkbox" id="route-f-pause-offline" class="evu-checkbox" autocomplete="off" />
+                    <span class="evu-check__text"><span>Pause when peer is offline</span></span>
+                  </label>
+                  <span class="meta">Resumes by itself when the peer is back. Takes effect after Apply.</span>
                 </div>
               </div>
               <div id="route-tab-advanced-panel" role="tabpanel" aria-labelledby="route-tab-advanced-btn" hidden>
