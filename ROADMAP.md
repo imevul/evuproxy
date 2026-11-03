@@ -250,7 +250,7 @@ Drop visibility:
 
 - [ ] Build and publish the UI image in CI (today it is only built locally)
 - [ ] Pin the `nginx` base image by digest
-- [ ] Optional `.deb` and RPM packages
+- [x] Optional `.deb` and RPM packages
 - [ ] *Proposed:* an upgrade path for binary-only installs, which `update.sh` doesn't cover
 - [ ] *Proposed:* config migration or upgrade checks, since `update.sh` doesn't migrate or validate `config.yaml`
 - [ ] Log reopen on `SIGHUP` for logrotate

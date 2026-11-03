@@ -34,6 +34,38 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 5. **WireGuard on the backend peer**: use a narrow **`AllowedIPs`** (tunnel subnet only, not `0.0.0.0/0`) so local LAN routing stays direct.
 6. **Peer (client) install (Linux):** [scripts/peer-install.sh](scripts/peer-install.sh) installs `wireguard-tools`, writes `/etc/wireguard/<iface>.conf`, and enables `wg-quick`. The admin UI **Onboarding** tab usually delivers an **encrypted bundle** snippet: **`curl … \| sudo bash`** runs [**`install-peer-tool.sh`**](scripts/install-peer-tool.sh), which installs **`evuproxy-peer-apply`**; that tool decrypts the bundle and fetches **`peer-install.sh`** (see **[Peer onboarding script URLs (optional)](#peer-onboarding-script-urls-optional)** for pinning or replacing URLs). When you download **`scripts/peer-install.sh`** manually instead, save it under a temp name, **`sha256sum`** it, and compare against **SHA256SUMS** on the matching [GitHub Release](https://github.com/imevul/evuproxy/releases) (same tag or commit as the raw URL) before **`sudo`**.
 
+## Install from a package
+
+Each [release](https://github.com/imevul/evuproxy/releases) has optional `.deb` and RPM packages for `amd64` and `arm64`, so a server needs neither a clone nor Go. They hold the binary (in `/usr/bin`), the systemd units and a seed config, and bring in **wireguard-tools**, **nftables** and **iproute2**. `make package-test` tests them on Debian 12, Ubuntu 24.04, AlmaLinux 9 and Fedora 42. They aren't signed and there is no package repository, so download them yourself and compare against **SHA256SUMS**.
+
+```bash
+sudo apt install ./evuproxy_VERSION_amd64.deb      # Debian, Ubuntu
+sudo dnf install ./evuproxy-VERSION-1.x86_64.rpm   # Fedora, RHEL and similar
+```
+
+Installing changes no firewall rules: it enables and starts nothing, and leaves IP forwarding alone. It creates `/etc/evuproxy/config.yaml` from the seed only if that file is missing, and likewise `wg-private.key`, `api.token` and `api-read.token`. When you are ready, do what `install.sh` does for you, then edit and apply as in [Quick start](#quick-start-vps):
+
+```bash
+sudo nano /etc/evuproxy/config.yaml
+echo 'net.ipv4.ip_forward = 1' | sudo tee /etc/sysctl.d/99-evuproxy-forwarding.conf
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo evuproxy reload --config /etc/evuproxy/config.yaml
+sudo systemctl enable nftables.service evuproxy.service evuproxy-geo.timer
+sudo systemctl enable --now evuproxy-api.service   # optional, the HTTP API
+```
+
+`evuproxy-metrics.service` is packaged too, and also off until you enable it.
+
+**Upgrade** by installing the newer package the same way. Your config, keys and tokens stay as they are. A running API or metrics collector restarts, which leaves a [confirm window](docs/config.md#confirm-or-revert-apply) running. `evuproxy.service` does not restart, since that would reload the firewall, so the current rules stay until you run `evuproxy reload` or the host reboots. `scripts/update.sh` is for git installs and doesn't update packages.
+
+**Remove** with `sudo apt remove evuproxy` or `sudo dnf remove evuproxy`. That stops and disables the units and removes the sysctl and systemd-networkd drop-ins, as `scripts/uninstall.sh` does. Confirm or revert any Apply first, because a pending revert needs the binary.
+
+- `/etc/evuproxy` stays. Only `sudo apt purge evuproxy` deletes it, with your WireGuard private key, tokens and logs. On RPM distros, delete it yourself.
+- The **firewall rules and WireGuard interface stay up** until a reboot, or until you remove them with `nft delete table` and `ip link delete`. Generated configs stay under `/etc/wireguard`.
+- `dnf remove` also removes `nftables` and `wireguard-tools` if nothing else needs them. Rules already loaded aren't affected.
+
+**Moving from `install.sh`:** run `./scripts/uninstall.sh` first, without `PURGE`. It keeps `/etc/evuproxy`. Otherwise the old units in `/etc/systemd/system` keep overriding the packaged ones and keep running `/usr/local/bin/evuproxy`. Then install the package and repeat the `systemctl enable` and sysctl steps above; `uninstall.sh` leaves your rules loaded.
+
 ### Peer onboarding script URLs (optional)
 
 By default [**`install-peer-tool.sh`**](scripts/install-peer-tool.sh), the admin UI snippet, and **evuproxy-peer-apply** use **`main`** under `raw.githubusercontent.com/…/main/scripts/` (current scripts, **no semver string to bump in source**). The trade-off: **`main` can change underneath you.** Hard-coded **`vX.Y.Z`** URLs in defaults would lag unless automation updates them every release. Prefer tagged raw URLs plus **SHA256SUMS** discipline for audited production peers (overrides below).
@@ -96,6 +128,7 @@ The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild
 - **`config.yaml` is yours:** the updater does not migrate, merge, or validate configuration. New releases may require new fields, renames, or stricter validation—read [CHANGELOG.md](CHANGELOG.md) and compare with [config/evuproxy.example.yaml](config/evuproxy.example.yaml), then run **`evuproxy reload`** (or fix issues before reloading) so you are not locked out.
 - **Local git changes:** `git pull` fails if you have uncommitted edits in the clone; commit, stash, or discard them first.
 - **Binary-only installs** (prebuilt `evuproxy` copied to `/usr/local/bin` without this repo) are not updated by this script—replace the binary from a [release](https://github.com/imevul/evuproxy/releases) and restart services manually. Also install the release's `templates/evuproxy.service`, or a reboot keeps applying unconfirmed edits with `apply.confirm` on.
+- **Package installs** upgrade through the package manager instead; see [Install from a package](#install-from-a-package).
 - **Peers and other hosts** are unchanged; client WireGuard configs are not updated by `update.sh`.
 
 **Backup and rollback**
@@ -112,7 +145,7 @@ The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild
 PURGE=1 ./scripts/uninstall.sh
 ```
 
-Removes EvuProxy units, the sysctl drop-in, and the systemd-networkd `00-<wireguard.interface>.network` Unmanaged file when present. Leaves `/etc/evuproxy` unless `PURGE=1`.
+Removes EvuProxy units, the sysctl drop-in, and the systemd-networkd `00-<wireguard.interface>.network` Unmanaged file when present. Leaves `/etc/evuproxy` unless `PURGE=1`. For package installs, see [Install from a package](#install-from-a-package).
 
 If forwards suddenly fail with `evuproxy-forward-drop` and `OUT=eth0` while peers still handshake, see [docs/config.md](docs/config.md#wireguard-and-systemd-networkd--netplan) (netplan `e*` matching `evuproxy0`).
 
@@ -130,7 +163,7 @@ go build -ldflags "-X main.version=$(git describe --tags --always 2>/dev/null ||
 
 EvuProxy uses **SemVer** **`0.MINOR.PATCH`** while in beta (`0.x`). **Patch** releases cover fixes and small tweaks; **minor** releases cover new features or larger behavior changes. Breaking changes on the `0.x` line are shipped as a **minor** bump (common practice for unstable `0.x` series).
 
-[Release Please](https://github.com/googleapis/release-please) drives releases from [Conventional Commits](https://www.conventionalcommits.org/) on `main` (for example `feat:` for features, `fix:` for fixes, and `feat!:` or a `BREAKING CHANGE:` footer for breaking changes). It opens a **release pull request** that bumps the version in [.release-please-manifest.json](.release-please-manifest.json), updates [CHANGELOG.md](CHANGELOG.md), and updates the embedded version in [cmd/evuproxy/main.go](cmd/evuproxy/main.go). Merging that PR creates the Git tag and **GitHub Release**. Another workflow then builds **Linux** binaries (`amd64`, `arm64`), a **`git archive`** source ZIP, and **SHA256SUMS**, and uploads them to the release.
+[Release Please](https://github.com/googleapis/release-please) drives releases from [Conventional Commits](https://www.conventionalcommits.org/) on `main` (for example `feat:` for features, `fix:` for fixes, and `feat!:` or a `BREAKING CHANGE:` footer for breaking changes). It opens a **release pull request** that bumps the version in [.release-please-manifest.json](.release-please-manifest.json), updates [CHANGELOG.md](CHANGELOG.md), and updates the embedded version in [cmd/evuproxy/main.go](cmd/evuproxy/main.go). Merging that PR creates the Git tag and **GitHub Release**. Another workflow then builds **Linux** binaries (`amd64`, `arm64`), [`.deb` and RPM packages](#install-from-a-package), a **`git archive`** source ZIP, and **SHA256SUMS**, and uploads them to the release.
 
 The running binary exposes its version via `evuproxy version`, `GET /api/v1/about`, and the admin UI sidebar.
 
