@@ -1,0 +1,34 @@
+# Overlay on docker-compose.dev.yml for the visual baseline (ENG-188). Use it through
+# `make visual-check` and `make visual-baseline`, not directly.
+#
+# The stack has its own project, publishes no port and keeps mock state out of
+# docker/mock-api/state, so it neither collides with `make up` nor picks up local edits.
+
+services:
+  mock-api:
+    environment:
+      MOCK_STATE_FILE: /tmp/mock-config.json
+
+  evuproxy-ui:
+    ports: !reset []
+
+  visual:
+    # The baseline is only valid in this exact image, since other fonts render differently.
+    # After bumping Playwright, update this to match and run `make visual-baseline`.
+    image: mcr.microsoft.com/playwright:v1.60.0-noble
+    # In the UI container's network, so the replay cache's URLs are always
+    # http://127.0.0.1:8080. A hostname wouldn't do: WebCrypto needs a secure context.
+    network_mode: service:evuproxy-ui
+    depends_on:
+      - evuproxy-ui
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /pw
+    volumes:
+      # Relative to the first -f file, so the repository root.
+      - ./devtools/playwright-visual:/pw
+    environment:
+      HOME: /tmp
+      CI: ${CI:-}
+      PWTRACE: ${PWTRACE:-}
+      PW_FREEZE_CSS: ${PW_FREEZE_CSS:-}
+    entrypoint: ["bash", "-c", "npm ci --no-audit --no-fund && exec node visual-baseline.mjs \"$$@\"", "--"]

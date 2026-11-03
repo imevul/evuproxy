@@ -1,4 +1,5 @@
 .PHONY: all up down dev dev-fresh playwright-deps playwright-visual a11y ui-behavior \
+	visual-check visual-baseline \
 	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
 	check fmt vet test test-race deadcode e2e e2e-stress
 
@@ -94,6 +95,26 @@ a11y:
 ui-behavior:
 	$(call require_dev_ui,ui-behavior)
 	cd $(PLAYWRIGHT_DIR) && npm run test:behavior
+
+# Screenshots against the committed baseline, in the Playwright container on a stack of their
+# own. See devtools/playwright-visual/README.md. Recreated so changes to the mock script count;
+# left up in CI, where a later step shows its logs and the runner goes away anyway.
+VISUAL_COMPOSE := docker compose -p evuproxy-visual -f docker-compose.dev.yml -f $(PLAYWRIGHT_DIR)/docker-compose.visual.yml
+
+define visual_run
+	$(VISUAL_COMPOSE) up -d --build --force-recreate evuproxy-ui mock-api
+	status=0; $(VISUAL_COMPOSE) run --rm visual $(1) || status=$$?; \
+	if [ -z "$$CI" ]; then $(VISUAL_COMPOSE) down; fi; \
+	exit $$status
+endef
+
+# Fails on any difference from the baseline, and on any request the replay cache doesn't have.
+visual-check:
+	$(call visual_run,check)
+
+# Refreshes the replay cache and rewrites the baseline images that changed.
+visual-baseline:
+	$(call visual_run,update)
 
 # Optional CrowdSec stack (same host as EvuProxy). See contrib/crowdsec/README.md.
 crowdsec-install:
