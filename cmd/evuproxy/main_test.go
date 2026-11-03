@@ -204,6 +204,9 @@ func TestServe_safeDefaults(t *testing.T) {
 	if got := flags.Lookup("metrics-listen-insecure").DefValue; got != "false" {
 		t.Fatalf("metrics-listen-insecure default %q", got)
 	}
+	if got := flags.Lookup("metrics-token-file").DefValue; got != "" {
+		t.Fatalf("metrics-token-file default %q", got)
+	}
 	if got := flags.Lookup("cors-origins").DefValue; got != "" {
 		t.Fatalf("cors-origins default %q", got)
 	}
@@ -662,7 +665,7 @@ func TestRestorePreviousApplied_withoutSnapshotFails(t *testing.T) {
 // isolateServeEnv clears serve's environment and restores the loggers it can replace.
 func isolateServeEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"EVUPROXY_LOG_DIR", "EVUPROXY_API_TOKEN", "EVUPROXY_API_READ_TOKEN", "EVUPROXY_METRICS_LISTEN", "EVUPROXY_GEOLITE_MMDB"} {
+	for _, k := range []string{"EVUPROXY_LOG_DIR", "EVUPROXY_API_TOKEN", "EVUPROXY_API_READ_TOKEN", "EVUPROXY_METRICS_LISTEN", "EVUPROXY_METRICS_TOKEN", "EVUPROXY_GEOLITE_MMDB"} {
 		t.Setenv(k, "")
 	}
 	prevDefault, prevWriter, prevFlags := slog.Default(), log.Writer(), log.Flags()
@@ -729,6 +732,151 @@ func TestServe_nonLoopbackMetricsListen(t *testing.T) {
 		err := serveUntilBind(t, "--metrics-listen", exposed, "--metrics-listen-insecure").err
 		wantErrContaining(t, err, bindFailure)
 	})
+}
+
+func writeTokenFile(t *testing.T, content string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "metrics.token")
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// wantStartRefused fails on a bind failure too: that would mean serve got past the token.
+func wantStartRefused(t *testing.T, err error, want string) {
+	t.Helper()
+	if err != nil && strings.Contains(err.Error(), bindFailure) {
+		t.Fatalf("serve reached the listener: %v", err)
+	}
+	wantErrContaining(t, err, want)
+}
+
+func TestServe_metricsTokenFileFailsClosed(t *testing.T) {
+	for name, file := range map[string]func(t *testing.T) string{
+		"missing":   func(t *testing.T) string { return filepath.Join(t.TempDir(), "absent.token") },
+		"directory": func(t *testing.T) string { return t.TempDir() },
+		"empty":     func(t *testing.T) string { return writeTokenFile(t, "") },
+		"blank":     func(t *testing.T) string { return writeTokenFile(t, " \n\t\n") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolateServeEnv(t)
+			// The variable can't rescue a named file: an operator who named one expects it used.
+			t.Setenv("EVUPROXY_METRICS_TOKEN", "from-env")
+			wantStartRefused(t, serveUntilBind(t, "--metrics-token-file", file(t)).err, "metrics token file")
+		})
+	}
+}
+
+func TestServe_metricsTokenFileRefusedWithoutMetricsListener(t *testing.T) {
+	isolateServeEnv(t)
+	// Still refused, or the mistake only shows once someone turns the listener on.
+	wantStartRefused(t, serveUntilBind(t, "--metrics-token-file", writeTokenFile(t, "")).err, "is empty")
+}
+
+func TestServe_blankMetricsTokenVariableRefusesToStart(t *testing.T) {
+	isolateServeEnv(t)
+	t.Setenv("EVUPROXY_METRICS_TOKEN", "  \n")
+	wantStartRefused(t, serveUntilBind(t).err, "EVUPROXY_METRICS_TOKEN")
+}
+
+func TestServe_metricsTokenStarts(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
+		isolateServeEnv(t)
+		err := serveUntilBind(t, "--metrics-token-file", writeTokenFile(t, "m\n")).err
+		wantErrContaining(t, err, bindFailure)
+	})
+	t.Run("variable", func(t *testing.T) {
+		isolateServeEnv(t)
+		t.Setenv("EVUPROXY_METRICS_TOKEN", "m")
+		wantErrContaining(t, serveUntilBind(t).err, bindFailure)
+	})
+}
+
+func TestLoadMetricsToken(t *testing.T) {
+	t.Run("nothing set means no token", func(t *testing.T) {
+		isolateServeEnv(t)
+		got, err := loadMetricsToken("")
+		if err != nil || got != "" {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+	t.Run("variable", func(t *testing.T) {
+		isolateServeEnv(t)
+		t.Setenv("EVUPROXY_METRICS_TOKEN", " from-env\n")
+		got, err := loadMetricsToken("")
+		if err != nil || got != "from-env" {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+	t.Run("file wins over variable", func(t *testing.T) {
+		isolateServeEnv(t)
+		t.Setenv("EVUPROXY_METRICS_TOKEN", "from-env")
+		got, err := loadMetricsToken(writeTokenFile(t, "from-file\n"))
+		if err != nil || got != "from-file" {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+}
+
+func TestServe_warnsWhenMetricsTokenIsShared(t *testing.T) {
+	const writeWarning, readWarning = "metrics token is the same as the write token", "metrics token is the same as the read token"
+	for _, tc := range []struct {
+		name, write, read string
+		want, notWant     string
+	}{
+		{name: "write", write: "same", read: "r", want: writeWarning, notWant: readWarning},
+		{name: "read", write: "w", read: "same", want: readWarning, notWant: writeWarning},
+		{name: "own value", write: "w", read: "r", notWant: "metrics token is the same"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateServeEnv(t)
+			dir := filepath.Join(t.TempDir(), "logs")
+			t.Setenv("EVUPROXY_LOG_DIR", dir)
+			t.Setenv("EVUPROXY_API_TOKEN", tc.write)
+			t.Setenv("EVUPROXY_API_READ_TOKEN", tc.read)
+			t.Setenv("EVUPROXY_METRICS_TOKEN", "same")
+
+			wantErrContaining(t, serveUntilBind(t, "--read-token-file", "").err, bindFailure)
+
+			b, err := os.ReadFile(filepath.Join(dir, "evuproxy.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want != "" && !strings.Contains(string(b), tc.want) {
+				t.Fatalf("want %q in log: %s", tc.want, b)
+			}
+			if strings.Contains(string(b), tc.notWant) {
+				t.Fatalf("did not want %q in log: %s", tc.notWant, b)
+			}
+		})
+	}
+}
+
+func TestServe_exposedMetricsListenWarnsOnlyWithoutToken(t *testing.T) {
+	const noToken = "no metrics token is set"
+	for name, token := range map[string]string{"without token": "", "with token": "m"} {
+		t.Run(name, func(t *testing.T) {
+			isolateServeEnv(t)
+			dir := filepath.Join(t.TempDir(), "logs")
+			t.Setenv("EVUPROXY_LOG_DIR", dir)
+			t.Setenv("EVUPROXY_METRICS_TOKEN", token)
+
+			err := serveUntilBind(t, "--metrics-listen", "0.0.0.0:99999", "--metrics-listen-insecure").err
+			wantErrContaining(t, err, bindFailure)
+
+			b, err := os.ReadFile(filepath.Join(dir, "evuproxy.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(b), noToken); got != (token == "") {
+				t.Fatalf("%q in log = %v: %s", noToken, got, b)
+			}
+			if !strings.Contains(string(b), "clear text") {
+				t.Fatalf("want the clear text warning in log: %s", b)
+			}
+		})
+	}
 }
 
 func TestServe_unusableLogDirRefusesToStart(t *testing.T) {

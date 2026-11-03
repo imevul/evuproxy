@@ -222,6 +222,7 @@ Accepted-traffic counters, which depend on the spike:
 - [x] If go: per-route accepted counters in `GET /stats`
 - [x] If go: an **Accepted** column on Routes, with its meaning documented
 - [x] If go, *proposed:* per-route accepted counters in Prometheus
+- [x] *Proposed:* optional bearer token for the Prometheus listener
 
 Auto-pause:
 
