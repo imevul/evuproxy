@@ -305,20 +305,39 @@ function routeAcceptedKey(proto, ports, targetIp) {
   return proto + "\0" + (ports || []).map(String).sort().join(",") + "\0" + String(targetIp || "").trim();
 }
 
-/** The route's rows, one per protocol it has, with null for a protocol without a counter. */
-function routeAcceptedRows(r) {
+/** The route's protocols, each with its routeAcceptedKey. */
+function routeAcceptedParts(r) {
   return routeProtoPlainText(r.proto)
     .split(", ")
-    .map((proto) => ({ proto, row: routeAccepted.get(routeAcceptedKey(proto, r.ports, r.target_ip)) || null }));
+    .map((proto) => ({ proto, key: routeAcceptedKey(proto, r.ports, r.target_ip) }));
 }
 
-function routeAcceptedTotal(r, field) {
-  const rows = routeAcceptedRows(r).filter((x) => x.row);
+/** How many saved routes have each routeAcceptedKey. */
+function routeAcceptedKeyUse(routes) {
+  const use = new Map();
+  routes.forEach((r) => routeAcceptedParts(r).forEach(({ key }) => use.set(key, (use.get(key) || 0) + 1)));
+  return use;
+}
+
+/**
+ * The route's rows, one per protocol it has, with null for a protocol without a counter.
+ * A disabled route's rule stays live until Apply, so it keeps its count, unless another saved
+ * route has the same key: validation skips disabled routes, and the count could be that one's.
+ */
+function routeAcceptedRows(r, keyUse) {
+  return routeAcceptedParts(r).map(({ proto, key }) => ({
+    proto,
+    row: r.disabled && keyUse.get(key) > 1 ? null : routeAccepted.get(key) || null,
+  }));
+}
+
+function routeAcceptedTotal(r, field, keyUse) {
+  const rows = routeAcceptedRows(r, keyUse).filter((x) => x.row);
   return rows.length ? rows.reduce((sum, x) => sum + x.row[field], 0) : null;
 }
 
-function routeAcceptedTitle(r) {
-  const parts = routeAcceptedRows(r);
+function routeAcceptedTitle(r, keyUse) {
+  const parts = routeAcceptedRows(r, keyUse);
   if (parts.every((x) => !x.row)) {
     return "No count for this route: it is disabled, changed since the last Apply, or counters are unavailable.";
   }
@@ -331,17 +350,18 @@ function routeAcceptedTitle(r) {
 /** In place and only on a real change, so a poll can't take focus or a text selection, and nothing moves but the digits. */
 function syncRouteAcceptedCells(cfg) {
   const routes = (cfg && cfg.forwarding && cfg.forwarding.routes) || [];
+  const keyUse = routeAcceptedKeyUse(routes);
   $("routes-table-wrap").querySelectorAll("tr[data-row]").forEach((tr) => {
     const r = routes[+tr.getAttribute("data-row")];
     const cell = tr.querySelector(".route-accepted-cell");
     if (!r || !cell) return;
-    const packets = routeAcceptedTotal(r, "packets");
+    const packets = routeAcceptedTotal(r, "packets", keyUse);
     const count = packets === null ? "—" : formatCount(packets);
-    const unit = packets === null ? "" : "pkts · " + formatBytes(routeAcceptedTotal(r, "bytes"));
+    const unit = packets === null ? "" : "pkts · " + formatBytes(routeAcceptedTotal(r, "bytes", keyUse));
     if (cell.textContent !== (unit ? count + " " + unit : count)) {
       cell.innerHTML = unit ? `${escapeHtml(count)} <span class="meta">${escapeHtml(unit)}</span>` : `<span class="meta">${count}</span>`;
     }
-    cell.title = routeAcceptedTitle(r);
+    cell.title = routeAcceptedTitle(r, keyUse);
   });
 }
 
@@ -392,13 +412,14 @@ function renderRoutesTable(cfg) {
   }
   // No column for a config that names nothing: it would be blank on every row.
   const anyNamed = routes.some(routeName);
+  const keyUse = routeAcceptedKeyUse(routes);
   const rows = sortedRows("routes", routes, {
     name: routeName,
     proto: (r) => routeProtoPlainText(r.proto),
     ports: (r) => (r.ports || []).join(", "),
     target: (r) => peerNameForTargetHost(cfg, r.target_ip) || String(r.target_ip || "").trim(),
     source: (r) => (r.source_allow_cidrs || []).length,
-    accepted: (r) => routeAcceptedTotal(r, "packets"),
+    accepted: (r) => routeAcceptedTotal(r, "packets", keyUse),
     enabled: (r) => (r.disabled ? 0 : 1),
   })
     .map(({ item: r, index: i }) => {

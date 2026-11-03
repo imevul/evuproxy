@@ -48,10 +48,14 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 test.describe("Accepted on Routes", () => {
   /** What GET /stats answers; a test changes it to act as the host. */
   let accepted: unknown;
+  /** What GET /config answers. */
+  let config: unknown;
+
+  const withRoutes = (routes: unknown[]) => ({ ...CONFIG, forwarding: { routes } });
 
   async function open(page: Page, scheme: (typeof SCHEMES)[number] = "light") {
     await seed(page, { scheme });
-    await page.route("**/api/v1/config", (route) => route.fulfill({ json: CONFIG }));
+    await page.route("**/api/v1/config", (route) => route.fulfill({ json: config }));
     await page.route("**/api/v1/stats", (route) => route.fulfill({ json: { route_accepted: accepted } }));
     await gotoRoute(page, origin, "routes");
     await expect(row(page, 0)).toBeVisible();
@@ -59,6 +63,7 @@ test.describe("Accepted on Routes", () => {
 
   test.beforeEach(() => {
     accepted = [GAME, DNS_TCP, DNS_UDP];
+    config = CONFIG;
   });
 
   test("shows readable packets and bytes, with the column in the table", async ({ page }) => {
@@ -135,6 +140,66 @@ test.describe("Accepted on Routes", () => {
     await open(page);
     await expect(cell(page, 0)).toHaveText("—");
     await expect(cell(page, 2)).toHaveText("—");
+  });
+
+  test("a route disabled since the last Apply keeps its count while its rule is live", async ({ page }) => {
+    config = withRoutes([{ proto: "tcp", ports: ["8080"], target_ip: "10.100.0.2", disabled: true }]);
+    accepted = [counter(0, "tcp", ["8080"], 77, 1024)];
+    await open(page);
+    await expect(cell(page, 0)).toHaveText("77 pkts · 1 KiB");
+  });
+
+  const TWIN = { proto: "tcp", ports: ["25565"], target_ip: "10.100.0.2" };
+
+  for (const [name, routes, enabled, disabled] of [
+    ["after", [TWIN, { ...TWIN, disabled: true }], 0, 1],
+    ["before", [{ ...TWIN, disabled: true }, TWIN], 1, 0],
+  ] as const) {
+    test(`a disabled route ${name} its enabled twin doesn't show the twin's count`, async ({ page }) => {
+      config = withRoutes([...routes]);
+      accepted = [counter(0, "tcp", ["25565"], 77, 1024)];
+      await open(page);
+      await expect(cell(page, enabled)).toHaveText("77 pkts · 1 KiB");
+      await expect(cell(page, disabled)).toHaveText("—");
+      await expect(cell(page, disabled)).toHaveAttribute("title", /No count for this route/);
+    });
+  }
+
+  test("a disabled twin sorts as no data", async ({ page }) => {
+    config = withRoutes([
+      { proto: "tcp", ports: ["8080"], target_ip: "10.100.0.2" },
+      { ...TWIN, disabled: true },
+      TWIN,
+    ]);
+    accepted = [counter(0, "tcp", ["8080"], 5, 1), counter(1, "tcp", ["25565"], 77, 1)];
+    await open(page);
+    const sort = page.locator("#routes-table-wrap thead").getByRole("button", { name: "Accepted" });
+    const order = () =>
+      page.locator("#routes-table-wrap tr[data-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-row")));
+    await sort.click();
+    await expect.poll(order).toEqual(["0", "2", "1"]);
+    await sort.click();
+    await expect.poll(order).toEqual(["2", "0", "1"]);
+  });
+
+  test("two disabled twins show no count, since it could be either's", async ({ page }) => {
+    config = withRoutes([
+      { ...TWIN, disabled: true },
+      { ...TWIN, disabled: true },
+    ]);
+    accepted = [counter(0, "tcp", ["25565"], 77, 1024)];
+    await open(page);
+    await expect(cell(page, 0)).toHaveText("—");
+    await expect(cell(page, 1)).toHaveText("—");
+  });
+
+  test("a disabled route with both protocols keeps the one no enabled route shares", async ({ page }) => {
+    config = withRoutes([TWIN, { ...TWIN, proto: "tcp,udp", disabled: true }]);
+    accepted = [counter(0, "tcp", ["25565"], 77, 1024), counter(1, "udp", ["25565"], 5, 1024)];
+    await open(page);
+    await expect(cell(page, 0)).toHaveText("77 pkts · 1 KiB");
+    await expect(cell(page, 1)).toHaveText("5 pkts · 1 KiB");
+    await expect(cell(page, 1)).toHaveAttribute("title", /TCP: no count; UDP: 5 packets, 1 KiB/);
   });
 
   test("sorts by packets as numbers, with no data last either way", async ({ page }) => {
