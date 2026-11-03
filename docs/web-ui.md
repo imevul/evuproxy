@@ -60,6 +60,8 @@ The Settings bar writes up to three separate stores: UI preferences, config (**P
 
 **API token** is stored in this browser by **Connect**, which then reports whether the API accepted it.
 
+**Read-only token:** with the [read token](http-api.md#read-and-write-tokens), a notice above every page says so, and only **Overview**, **Stats**, **Logs** and **API token** open, since the other pages are built on a config the token can't read. A link to one of those pages lands on **Overview**. Apply, Save, Restore, **Update geo lists** and the maintenance switch are disabled, the unapplied-changes bar and confirm-or-revert panel don't show, and **Logs** has no break-glass button. **Stats** shows no peer names, and **Overview** has no setup checklist and says some checks could not run, because both need the config. The API refuses these actions whatever the page shows. The dev mock's read token is **`dev-read`** (`MOCK_API_READ_TOKEN`).
+
 ## Routes page
 
 **Accepted** shows the traffic the firewall accepted for a route since the last Apply, as packets and bytes, from `route_accepted` in **`GET /api/v1/stats`**. A route with both protocols shows their sum, and hovering a cell splits it by protocol.

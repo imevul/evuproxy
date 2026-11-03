@@ -31,7 +31,9 @@ type Server struct {
 	MetricsListen         string // optional loopback-only Prometheus scrape (GET /metrics), no auth
 	MetricsListenInsecure bool   // allow non-loopback MetricsListen (explicit opt-in)
 	Token                 string
-	Config                string
+	// ReadToken is an optional second token, limited to the read routes in apiRoutes.
+	ReadToken string
+	Config    string
 	MetricsDB             string
 	Logger                *slog.Logger
 	Version               string
@@ -85,18 +87,108 @@ func (s *Server) tryMutatingLock(w http.ResponseWriter) bool {
 	return true
 }
 
-func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
+// tokenScope is what a route needs, or what a token grants. Write is the zero value, so
+// a route nobody classified needs the write token.
+type tokenScope int
+
+const (
+	scopeWrite tokenScope = iota
+	scopeRead
+)
+
+func (sc tokenScope) String() string {
+	if sc == scopeRead {
+		return "read"
+	}
+	return "write"
+}
+
+// insufficientScopeCode is the error_code of a 403 from a read token on a write route.
+const insufficientScopeCode = "insufficient_scope"
+
+// scopeOf returns what a token grants. ok is false for a token that is neither of ours.
+func (s *Server) scopeOf(tok string) (scope tokenScope, ok bool) {
+	// Both compared every time, so the answer's timing doesn't say which one nearly matched.
+	write := tokenMatch(tok, s.Token)
+	read := tokenMatch(tok, s.ReadToken)
+	switch {
+	case write:
+		return scopeWrite, true
+	case read:
+		return scopeRead, true
+	}
+	return scopeWrite, false
+}
+
+func (s *Server) auth(scope tokenScope, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.Token == "" {
+		if s.Token == "" && s.ReadToken == "" {
 			s.jsonErr(w, http.StatusServiceUnavailable, "API token not configured")
 			return
 		}
-		tok := bearerTokenFromRequest(r)
-		if !tokenMatch(tok, s.Token) {
+		granted, ok := s.scopeOf(bearerTokenFromRequest(r))
+		if !ok {
 			s.jsonErr(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
+		if scope == scopeWrite && granted != scopeWrite {
+			s.jsonAPIError(w, http.StatusForbidden, "this route needs the write token", insufficientScopeCode)
+			return
+		}
 		next(w, r)
+	}
+}
+
+type apiRoute struct {
+	pattern string
+	scope   tokenScope
+	handler http.HandlerFunc
+}
+
+// apiRoutes lists every /api/v1 route. Leave out scope and a route needs the write token.
+// Read is for what a monitoring token may see: status, overview, stats, logs, events and
+// metrics. Anything that shows the config, even as a GET, stays on write. See docs/http-api.md.
+func (s *Server) apiRoutes() []apiRoute {
+	return []apiRoute{
+		{pattern: "POST /api/v1/reload", handler: s.handleReload},
+		{pattern: "GET /api/v1/reload/progress", handler: s.handleReloadProgress},
+		{pattern: "GET /api/v1/apply/session", handler: s.handleApplySession},
+		{pattern: "POST /api/v1/apply/confirm", handler: s.handleApplyConfirm},
+		{pattern: "POST /api/v1/apply/revert", handler: s.handleApplyRevert},
+		{pattern: "POST /api/v1/apply/reverted/restore", handler: s.handleApplyRevertedRestore},
+		{pattern: "POST /api/v1/apply/reverted/dismiss", handler: s.handleApplyRevertedDismiss},
+		{pattern: "POST /api/v1/update-geo", handler: s.handleUpdateGeo},
+		{pattern: "GET /api/v1/status", scope: scopeRead, handler: s.handleStatus},
+		{pattern: "GET /api/v1/metrics", scope: scopeRead, handler: s.handleMetrics},
+		{pattern: "GET /api/v1/overview", scope: scopeRead, handler: s.handleOverview},
+		{pattern: "GET /api/v1/events", scope: scopeRead, handler: s.handleEventsGet},
+		{pattern: "GET /api/v1/auto-pause", handler: s.handleAutoPause},
+		{pattern: "GET /api/v1/geo/summary", handler: s.handleGeoSummary},
+		{pattern: "POST /api/v1/geo/check-ip", handler: s.handleGeoCheckIP},
+		{pattern: "GET /api/v1/config.yaml", handler: s.handleConfigYAMLGet},
+		{pattern: "GET /api/v1/config", handler: s.handleConfigGet},
+		{pattern: "POST /api/v1/routes/test", handler: s.handleRouteTest},
+		{pattern: "PUT /api/v1/config", handler: s.handleConfigPut},
+		{pattern: "POST /api/v1/config/discard", handler: s.handleConfigDiscard},
+		{pattern: "POST /api/v1/config/restore-previous-applied", handler: s.handleConfigRestorePreviousApplied},
+		{pattern: "GET /api/v1/pending", handler: s.handlePending},
+		{pattern: "POST /api/v1/validate", handler: s.handleValidate},
+		{pattern: "GET /api/v1/client-ip", handler: s.handleClientIP},
+		{pattern: "POST /api/v1/peers/{index}/qr.png", handler: s.handlePeerQR},
+		{pattern: "POST /api/v1/peers/generate-keypair", handler: s.handlePeerGenerateKeypair},
+		{pattern: "POST /api/v1/peers/onboard-bundle", handler: s.handlePeerOnboardBundle},
+		{pattern: "GET /api/v1/preferences", handler: s.handlePreferencesGet},
+		{pattern: "PUT /api/v1/preferences", handler: s.handlePreferencesPut},
+		{pattern: "GET /api/v1/config/notes", handler: s.handleConfigNotesGet},
+		{pattern: "PUT /api/v1/config/notes", handler: s.handleConfigNotesPut},
+		{pattern: "GET /api/v1/metrics/peers", scope: scopeRead, handler: s.handleMetricsPeers},
+		{pattern: "GET /api/v1/stats", scope: scopeRead, handler: s.handleStats},
+		{pattern: "GET /api/v1/about", handler: s.handleAbout},
+		{pattern: "GET /api/v1/logs", scope: scopeRead, handler: s.handleLogs},
+		{pattern: "GET /api/v1/diagnostics.md", handler: s.handleDiagnosticsMD},
+		{pattern: "POST /api/v1/backup", handler: s.handleBackup},
+		{pattern: "GET /api/v1/backup/info", handler: s.handleBackupInfo},
+		{pattern: "POST /api/v1/restore", handler: s.handleRestore},
 	}
 }
 
@@ -118,45 +210,9 @@ func (s *Server) Routes() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("POST /api/v1/reload", s.auth(s.handleReload))
-	mux.HandleFunc("GET /api/v1/reload/progress", s.auth(s.handleReloadProgress))
-	mux.HandleFunc("GET /api/v1/apply/session", s.auth(s.handleApplySession))
-	mux.HandleFunc("POST /api/v1/apply/confirm", s.auth(s.handleApplyConfirm))
-	mux.HandleFunc("POST /api/v1/apply/revert", s.auth(s.handleApplyRevert))
-	mux.HandleFunc("POST /api/v1/apply/reverted/restore", s.auth(s.handleApplyRevertedRestore))
-	mux.HandleFunc("POST /api/v1/apply/reverted/dismiss", s.auth(s.handleApplyRevertedDismiss))
-	mux.HandleFunc("POST /api/v1/update-geo", s.auth(s.handleUpdateGeo))
-	mux.HandleFunc("GET /api/v1/status", s.auth(s.handleStatus))
-	mux.HandleFunc("GET /api/v1/metrics", s.auth(s.handleMetrics))
-	mux.HandleFunc("GET /api/v1/overview", s.auth(s.handleOverview))
-	mux.HandleFunc("GET /api/v1/events", s.auth(s.handleEventsGet))
-	mux.HandleFunc("GET /api/v1/auto-pause", s.auth(s.handleAutoPause))
-	mux.HandleFunc("GET /api/v1/geo/summary", s.auth(s.handleGeoSummary))
-	mux.HandleFunc("POST /api/v1/geo/check-ip", s.auth(s.handleGeoCheckIP))
-	mux.HandleFunc("GET /api/v1/config.yaml", s.auth(s.handleConfigYAMLGet))
-	mux.HandleFunc("GET /api/v1/config", s.auth(s.handleConfigGet))
-	mux.HandleFunc("POST /api/v1/routes/test", s.auth(s.handleRouteTest))
-	mux.HandleFunc("PUT /api/v1/config", s.auth(s.handleConfigPut))
-	mux.HandleFunc("POST /api/v1/config/discard", s.auth(s.handleConfigDiscard))
-	mux.HandleFunc("POST /api/v1/config/restore-previous-applied", s.auth(s.handleConfigRestorePreviousApplied))
-	mux.HandleFunc("GET /api/v1/pending", s.auth(s.handlePending))
-	mux.HandleFunc("POST /api/v1/validate", s.auth(s.handleValidate))
-	mux.HandleFunc("GET /api/v1/client-ip", s.auth(s.handleClientIP))
-	mux.HandleFunc("POST /api/v1/peers/{index}/qr.png", s.auth(s.handlePeerQR))
-	mux.HandleFunc("POST /api/v1/peers/generate-keypair", s.auth(s.handlePeerGenerateKeypair))
-	mux.HandleFunc("POST /api/v1/peers/onboard-bundle", s.auth(s.handlePeerOnboardBundle))
-	mux.HandleFunc("GET /api/v1/preferences", s.auth(s.handlePreferencesGet))
-	mux.HandleFunc("PUT /api/v1/preferences", s.auth(s.handlePreferencesPut))
-	mux.HandleFunc("GET /api/v1/config/notes", s.auth(s.handleConfigNotesGet))
-	mux.HandleFunc("PUT /api/v1/config/notes", s.auth(s.handleConfigNotesPut))
-	mux.HandleFunc("GET /api/v1/metrics/peers", s.auth(s.handleMetricsPeers))
-	mux.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
-	mux.HandleFunc("GET /api/v1/about", s.auth(s.handleAbout))
-	mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleLogs))
-	mux.HandleFunc("GET /api/v1/diagnostics.md", s.auth(s.handleDiagnosticsMD))
-	mux.HandleFunc("POST /api/v1/backup", s.auth(s.handleBackup))
-	mux.HandleFunc("GET /api/v1/backup/info", s.auth(s.handleBackupInfo))
-	mux.HandleFunc("POST /api/v1/restore", s.auth(s.handleRestore))
+	for _, route := range s.apiRoutes() {
+		mux.HandleFunc(route.pattern, s.auth(route.scope, route.handler))
+	}
 	return mux
 }
 
@@ -213,6 +269,9 @@ func (s *Server) Run() error {
 	}
 	if err := state.EnsureApplyStateFromDisk(s.Config); err != nil {
 		s.Logger.Warn("apply state bootstrap", "err", err)
+	}
+	if s.ReadToken != "" && s.ReadToken == s.Token {
+		s.Logger.Warn("the read token is the same as the write token, so it has full access; give it its own value")
 	}
 	if el, err := eventlog.New(filepath.Dir(s.Config), eventlog.MaxBytesFromEnv()); err != nil {
 		s.Logger.Warn("event log disabled", "err", err)

@@ -68,6 +68,12 @@ if [[ ! -f "$CONFIG_DIR/api.token" ]]; then
   chmod 600 "$CONFIG_DIR/api.token"
 fi
 
+if [[ ! -f "$CONFIG_DIR/api-read.token" ]]; then
+  umask 077
+  head -c 32 /dev/urandom | base64 | tr -d '\n' >"$CONFIG_DIR/api-read.token"
+  chmod 600 "$CONFIG_DIR/api-read.token"
+fi
+
 for unit in evuproxy.service evuproxy-geo.service evuproxy-geo.timer evuproxy-api.service; do
   install -m 0644 "$REPO_ROOT/templates/$unit" "/etc/systemd/system/$unit"
 done
@@ -110,7 +116,7 @@ fi
 echo "Installed EvuProxy tooling."
 echo "Edit $CONFIG_DIR/config.yaml, add peer keys, then: evuproxy reload --config $CONFIG_DIR/config.yaml"
 if [[ "$INSTALL_API" -eq 1 ]]; then
-  echo "HTTP API: enabled at boot (token in $CONFIG_DIR/api.token). Start now: systemctl start evuproxy-api.service"
+  echo "HTTP API: enabled at boot (token in $CONFIG_DIR/api.token, read-only token in $CONFIG_DIR/api-read.token). Start now: systemctl start evuproxy-api.service"
 else
   echo "HTTP API: unit installed but not enabled. Enable later: systemctl enable --now evuproxy-api.service (token in $CONFIG_DIR/api.token; see docs/http-api.md)"
 fi

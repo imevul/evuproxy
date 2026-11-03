@@ -66,7 +66,11 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		s.jsonErr(w, http.StatusInternalServerError, "could not load overview")
 		return
 	}
-	s.jsonOK(w, o)
+	granted, _ := s.scopeOf(bearerTokenFromRequest(r))
+	s.jsonOK(w, struct {
+		*apply.Overview
+		Scope string `json:"scope"`
+	}{o, granted.String()})
 }
 
 func (s *Server) metricsDBPath() string {

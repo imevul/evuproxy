@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -216,7 +217,7 @@ func cmdDiagnostics() *cobra.Command {
 }
 
 func cmdServe() *cobra.Command {
-	var listen, tokenFile, corsOrigins, metricsDB, metricsListen string
+	var listen, tokenFile, readTokenFile, corsOrigins, metricsDB, metricsListen string
 	var metricsListenInsecure bool
 	c := &cobra.Command{
 		Use:   "serve",
@@ -237,6 +238,20 @@ func cmdServe() *cobra.Command {
 				}
 				tok = strings.TrimSpace(string(b))
 			}
+			readTok := strings.TrimSpace(os.Getenv("EVUPROXY_API_READ_TOKEN"))
+			if readTokenFile != "" {
+				b, err := os.ReadFile(readTokenFile)
+				switch {
+				case err == nil:
+					readTok = strings.TrimSpace(string(b))
+				case cmd.Flags().Changed("read-token-file"):
+					return err
+				case !errors.Is(err, fs.ErrNotExist):
+					// The read token is optional, and a file this process can't read (an
+					// unprivileged service user, say) must not stop an upgraded API from starting.
+					slog.Warn("read token file ignored", "err", err)
+				}
+			}
 			ml := strings.TrimSpace(metricsListen)
 			if ml == "" {
 				ml = strings.TrimSpace(os.Getenv("EVUPROXY_METRICS_LISTEN"))
@@ -254,6 +269,7 @@ func cmdServe() *cobra.Command {
 				MetricsListen:         ml,
 				MetricsListenInsecure: metricsListenInsecure,
 				Token:                 tok,
+				ReadToken:             readTok,
 				Config:                cfgPath,
 				MetricsDB:             strings.TrimSpace(metricsDB),
 				Logger:                slog.Default(),
@@ -278,7 +294,8 @@ func cmdServe() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&listen, "listen", "127.0.0.1:9847", "listen address")
-	c.Flags().StringVar(&tokenFile, "token-file", "/etc/evuproxy/api.token", "file containing API bearer token")
+	c.Flags().StringVar(&tokenFile, "token-file", "/etc/evuproxy/api.token", "file containing API bearer token (full access)")
+	c.Flags().StringVar(&readTokenFile, "read-token-file", "/etc/evuproxy/api-read.token", "file containing an optional read-only API token; also EVUPROXY_API_READ_TOKEN (the default path may be absent)")
 	c.Flags().StringVar(&corsOrigins, "cors-origins", "", "comma-separated allowed Origin values for cross-origin browser UIs; avoid * except local dev (token auth still required)")
 	c.Flags().StringVar(&metricsDB, "metrics-db", "", "peer metrics SQLite path (default: metrics.sqlite beside --config)")
 	c.Flags().StringVar(&metricsListen, "metrics-listen", "", "optional loopback Prometheus scrape address (e.g. 127.0.0.1:9848); also EVUPROXY_METRICS_LISTEN")

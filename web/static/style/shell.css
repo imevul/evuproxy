@@ -371,7 +371,8 @@ body:has(#apply-bar:not([hidden])) #pending-apply {
 }
 
 .apply-session,
-.connection-banner {
+.connection-banner,
+.read-only-notice {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -386,7 +387,8 @@ body:has(#apply-bar:not([hidden])) #pending-apply {
 .apply-session[hidden],
 .apply-session [hidden],
 .connection-banner[hidden],
-.connection-banner [hidden] {
+.connection-banner [hidden],
+.read-only-notice[hidden] {
   display: none;
 }
 

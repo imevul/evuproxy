@@ -19,6 +19,17 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Set from MOCK_API_TOKEN in __main__ before serve_forever (required non-empty).
 TOKEN = ""
+# From MOCK_API_READ_TOKEN; empty means no read token.
+READ_TOKEN = ""
+READ_SCOPE_PATHS = {
+    "/api/v1/status",
+    "/api/v1/overview",
+    "/api/v1/stats",
+    "/api/v1/logs",
+    "/api/v1/events",
+    "/api/v1/metrics",
+    "/api/v1/metrics/peers",
+}
 PORT = int(os.environ.get("PORT", "9847"))
 MAX_JSON_PUT = 2 << 20
 MAX_JSON_SMALL = 1 << 14
@@ -1210,14 +1221,28 @@ def _geo_check_ip_mock(ip: str, cfg: dict, from_draft: bool) -> dict:
     return out
 
 
-def _auth_ok(handler: BaseHTTPRequestHandler) -> bool:
+def _token_scope(handler: BaseHTTPRequestHandler) -> str | None:
     auth = handler.headers.get("Authorization", "")
     tok = ""
     if auth.lower().startswith("bearer "):
         tok = auth[7:].strip()
     if not tok:
         tok = handler.headers.get("X-API-Token", "").strip()
-    return tok == TOKEN
+    if tok == TOKEN:
+        return "write"
+    if READ_TOKEN and tok == READ_TOKEN:
+        return "read"
+    return None
+
+
+def _auth_error(handler: BaseHTTPRequestHandler, path: str) -> tuple[int, dict] | None:
+    """The refusal for this request, if any. Same classification as apiRoutes in server.go."""
+    scope = _token_scope(handler)
+    if scope is None:
+        return 401, {"error": "unauthorized"}
+    if scope == "read" and not (handler.command == "GET" and path in READ_SCOPE_PATHS):
+        return 403, {"error": "this route needs the write token", "error_code": "insufficient_scope"}
+    return None
 
 
 def _content_len(handler: BaseHTTPRequestHandler) -> int:
@@ -1286,15 +1311,16 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"ok")
             return
-        if not _auth_ok(self):
-            return self._send_json(401, {"error": "unauthorized"})
+        refused = _auth_error(self, path)
+        if refused:
+            return self._send_json(*refused)
         if path == "/api/v1/status":
             return self._send_json(
                 200,
                 {"report": "mock: WireGuard + nftables status would appear here."},
             )
         if path == "/api/v1/overview":
-            return self._send_json(200, _overview_from_config(MOCK_CONFIG))
+            return self._send_json(200, {**_overview_from_config(MOCK_CONFIG), "scope": _token_scope(self)})
         if path == "/api/v1/config":
             return self._send_json(
                 200,
@@ -1454,8 +1480,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         path = self.path.split("?", 1)[0]
-        if not _auth_ok(self):
-            return self._send_json(401, {"error": "unauthorized"})
+        refused = _auth_error(self, path)
+        if refused:
+            return self._send_json(*refused)
         if path == "/api/v1/preferences":
             if _content_len(self) > MAX_JSON_SMALL:
                 return self._send_json(413, {"error": "request body too large"})
@@ -1540,8 +1567,9 @@ class Handler(BaseHTTPRequestHandler):
         global MOCK_CONFIG, MOCK_APPLIED_SHA, MOCK_CONFIG_BASELINE, MOCK_EVENTS
         global MOCK_SESSION, MOCK_REVERTED_CONFIG, MOCK_LAST_REVERT
         path = self.path.split("?", 1)[0]
-        if not _auth_ok(self):
-            return self._send_json(401, {"error": "unauthorized"})
+        refused = _auth_error(self, path)
+        if refused:
+            return self._send_json(*refused)
         if path == "/api/v1/validate":
             cfg = copy.deepcopy(MOCK_CONFIG)
             body = self._read_json_body(MAX_JSON_PUT) if _content_len(self) else None
@@ -1881,6 +1909,7 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     TOKEN = tok
+    READ_TOKEN = (os.environ.get("MOCK_API_READ_TOKEN") or "").strip()
     _load_mock_config_from_disk()
     metrics_listen = (os.environ.get("MOCK_METRICS_LISTEN") or "").strip()
     if metrics_listen:

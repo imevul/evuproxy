@@ -20,6 +20,7 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
     environment:
       MOCK_API_TOKEN: ${MOCK_API_TOKEN:-dev}
+      MOCK_API_READ_TOKEN: ${MOCK_API_READ_TOKEN:-dev-read}
       MOCK_STATE_FILE: /data/mock-config.json
     volumes:
       - ./docker/mock-api/mock_server.py:/app/mock_server.py:ro

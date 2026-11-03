@@ -52,12 +52,40 @@ export function headersDownload() {
   return h;
 }
 
+/* All a read token can open. The other pages are built on GET /v1/config, which needs the write token. */
+const readOnlyPages = ["overview", "stats", "logs", "token"];
+
+/** Whether the API said this browser's token is the read token. See `scope` on GET /v1/overview. */
+export function isReadOnlyToken() {
+  return state.tokenScope === "read";
+}
+
+export function pageNeedsWriteToken(route) {
+  return isReadOnlyToken() && !readOnlyPages.includes(route);
+}
+
+/** Only undoes its own disabling, because other code disables some of these too. */
+function applyTokenScope() {
+  const readOnly = isReadOnlyToken();
+  $("read-only-notice").hidden = !readOnly;
+  document.querySelectorAll("[data-needs-write]").forEach((el) => {
+    if (readOnly && !el.disabled) {
+      el.disabled = true;
+      el.dataset.readOnlyDisabled = "1";
+    } else if (!readOnly && el.dataset.readOnlyDisabled) {
+      el.disabled = false;
+      delete el.dataset.readOnlyDisabled;
+    }
+  });
+}
+
 export function applyNavRestriction() {
+  applyTokenScope();
   const restricted = !state.apiConnectionOk;
   document.querySelectorAll(".nav-link").forEach((a) => {
     const route = a.getAttribute("data-route");
     const allowed = route === "overview" || route === "token";
-    const dis = restricted && !allowed;
+    const dis = (restricted && !allowed) || pageNeedsWriteToken(route);
     a.classList.toggle("nav-disabled", dis);
     if (dis) {
       a.setAttribute("aria-disabled", "true");
@@ -175,6 +203,8 @@ export async function api(path, { unobserved, ...opts } = {}) {
     throw ex;
   }
   report("answered");
+  // An older API sends no scope, and its one token can do everything.
+  if (path === "/v1/overview") state.tokenScope = body.scope || "write";
   const etag = r.headers.get("ETag");
   if (etag && body && typeof body === "object") responseEtags.set(body, etag);
   return body;

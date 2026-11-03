@@ -662,7 +662,7 @@ func TestRestorePreviousApplied_withoutSnapshotFails(t *testing.T) {
 // isolateServeEnv clears serve's environment and restores the loggers it can replace.
 func isolateServeEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"EVUPROXY_LOG_DIR", "EVUPROXY_API_TOKEN", "EVUPROXY_METRICS_LISTEN", "EVUPROXY_GEOLITE_MMDB"} {
+	for _, k := range []string{"EVUPROXY_LOG_DIR", "EVUPROXY_API_TOKEN", "EVUPROXY_API_READ_TOKEN", "EVUPROXY_METRICS_LISTEN", "EVUPROXY_GEOLITE_MMDB"} {
 		t.Setenv(k, "")
 	}
 	prevDefault, prevWriter, prevFlags := slog.Default(), log.Writer(), log.Flags()
@@ -693,6 +693,23 @@ func TestServe_missingTokenFileRefusesToStart(t *testing.T) {
 	isolateServeEnv(t)
 	err := serveUntilBind(t, "--token-file", filepath.Join(t.TempDir(), "absent.token")).err
 	wantErrContaining(t, err, "absent.token")
+}
+
+func TestServe_namedReadTokenFileMustExist(t *testing.T) {
+	isolateServeEnv(t)
+	err := serveUntilBind(t, "--read-token-file", filepath.Join(t.TempDir(), "absent.token")).err
+	wantErrContaining(t, err, "absent.token")
+}
+
+func TestServe_readTokenFileIsOptional(t *testing.T) {
+	isolateServeEnv(t)
+	dir := t.TempDir()
+	present := filepath.Join(dir, "read.token")
+	if err := os.WriteFile(present, []byte("r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantErrContaining(t, serveUntilBind(t, "--read-token-file", present).err, bindFailure)
+	wantErrContaining(t, serveUntilBind(t, "--read-token-file", "").err, bindFailure)
 }
 
 func TestServe_nonLoopbackMetricsListen(t *testing.T) {

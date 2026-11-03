@@ -13,7 +13,9 @@ Operational notes for operating EvuProxy safely. The HTTP API reference is in [L
 
 ## Security roadmap (scoped access)
 
-**Deferred:** separate read vs write API tokens, CSRF hardening beyond bearer tokens, and a strict **Content-Security-Policy** for the static UI are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost. **`evuproxy serve` warns** when the API bind is not loopback and `--cors-origins` is `*`.
+**Read and write tokens:** an optional read token limits a leaked monitoring or dashboard token to status, overview, stats, logs, events and metrics. It can't change anything or reach a private key, but it does see the network's layout. It doesn't make script access to the UI origin safe, because an admin's browser still holds the write token. See [Read and write tokens](http-api.md#read-and-write-tokens).
+
+**Deferred:** CSRF hardening beyond bearer tokens and a strict **Content-Security-Policy** for the static UI are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost. **`evuproxy serve` warns** when the API bind is not loopback and `--cors-origins` is `*`.
 
 ## Operational security notes
 
