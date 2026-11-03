@@ -3,6 +3,7 @@ package autopause
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -78,6 +79,102 @@ func newLoop(c *config.Config, p Prober) *Loop {
 func tickN(l *Loop, n int) {
 	for range n {
 		l.Tick(context.Background())
+	}
+}
+
+// recordSync sets SyncRules to record the paused set of each call, against c.
+func recordSync(l *Loop, c *config.Config, err error) *[][]int {
+	calls := &[][]int{}
+	l.SyncRules = func(_ context.Context, paused func(*config.Config) []int) error {
+		*calls = append(*calls, paused(c))
+		return err
+	}
+	return calls
+}
+
+func TestSyncRules_followsPauseAndResume(t *testing.T) {
+	c := testConfig()
+	c.Forwarding.Routes = append([]config.ForwardRoute{
+		{Proto: "udp", Ports: []string{"27015"}, TargetIP: ipB},
+	}, c.Forwarding.Routes...)
+	p := newFakeProber()
+	l := newLoop(c, p)
+	calls := recordSync(l, c, nil)
+
+	p.offline(keyA)
+	tickN(l, 3)
+	if got := *calls; len(got) != 3 || len(got[0]) != 0 || !slices.Equal(got[2], []int{1}) {
+		t.Fatalf("sync calls = %v, want route 1 paused on the third", got)
+	}
+	if got := l.PausedRoutes(); got[0].Index != 1 {
+		t.Fatalf("paused index = %d", got[0].Index)
+	}
+
+	p.online(keyA)
+	tickN(l, 2)
+	if got := *calls; len(got) != 5 || len(got[4]) != 0 {
+		t.Fatalf("sync calls = %v, want none paused on the fifth", got)
+	}
+}
+
+// An Apply can put the DNAT back while the set stays the same, so every tick syncs.
+func TestSyncRules_runsWithNoChangeToThePausedSet(t *testing.T) {
+	c := testConfig()
+	p := newFakeProber()
+	l := newLoop(c, p)
+	changes := 0
+	l.OnChange = func([]PausedRoute) { changes++ }
+	calls := recordSync(l, c, nil)
+
+	p.offline(keyA)
+	tickN(l, 6)
+	if len(*calls) != 6 || changes != 1 {
+		t.Fatalf("sync calls = %d, OnChange calls = %d", len(*calls), changes)
+	}
+	for _, got := range (*calls)[2:] {
+		if !slices.Equal(got, []int{0}) {
+			t.Fatalf("sync calls = %v", *calls)
+		}
+	}
+}
+
+// After a restart nothing is paused yet, and the first tick says so, which is what restores a
+// route the previous process closed.
+func TestSyncRules_firstTickAfterRestartIsEmpty(t *testing.T) {
+	c := testConfig()
+	p := newFakeProber()
+	p.offline(keyA)
+	l := newLoop(c, p)
+	calls := recordSync(l, c, nil)
+
+	tickN(l, 1)
+	if got := *calls; len(got) != 1 || len(got[0]) != 0 {
+		t.Fatalf("sync calls = %v", got)
+	}
+}
+
+func TestSyncRules_notCalledWithoutAWatchedPeer(t *testing.T) {
+	c := testConfig()
+	c.Forwarding.Routes[0].PauseWhenPeerOffline = false
+	l := newLoop(c, newFakeProber())
+	calls := recordSync(l, c, nil)
+
+	tickN(l, 3)
+	if len(*calls) != 0 {
+		t.Fatalf("sync calls = %v", *calls)
+	}
+}
+
+func TestSyncRules_errorKeepsTheLoopGoing(t *testing.T) {
+	c := testConfig()
+	p := newFakeProber()
+	p.offline(keyA)
+	l := newLoop(c, p)
+	calls := recordSync(l, c, errors.New("nft failed"))
+
+	tickN(l, 4)
+	if len(*calls) != 4 || len(l.PausedRoutes()) != 1 {
+		t.Fatalf("sync calls = %v, paused = %v", *calls, l.PausedRoutes())
 	}
 }
 
