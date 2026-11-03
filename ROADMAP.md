@@ -225,8 +225,8 @@ Accepted-traffic counters, which depend on the spike:
 
 Auto-pause:
 
-- [ ] Decide between a runtime-only pause and changing `disabled` in YAML, and set the hysteresis (for example, 3 failures to pause and 2 successes to resume)
-- [ ] Pause loop and a per-route `pause_when_peer_offline` setting
+- [x] Decide between a runtime-only pause and changing `disabled` in YAML, and set the hysteresis (runtime-only; 3 failures to pause and 2 successes to resume, every 15 seconds)
+- [x] Pause loop and a per-route `pause_when_peer_offline` setting
 - [ ] Omit DNAT for paused routes, without a full reload if possible
 - [ ] Routes checkbox and an **Auto-paused** banner
 

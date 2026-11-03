@@ -90,6 +90,16 @@ func PeersPing(ctx context.Context, cfgPath string) ([]PeerPingResult, error) {
 	return out, nil
 }
 
+// PingTunnelIP sends one ICMP echo to a peer tunnel IPv4 and returns an error when there is no reply.
+func PingTunnelIP(ctx context.Context, ip string) error {
+	pingBin, err := exec.LookPath("ping")
+	if err != nil {
+		return err
+	}
+	_, err = pingOnce(ctx, pingBin, ip)
+	return err
+}
+
 func pingOnce(ctx context.Context, pingBin, ip string) (int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()

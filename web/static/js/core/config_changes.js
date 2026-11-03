@@ -289,6 +289,10 @@ const SETTING_LABELS = {
   "crowdsec.enabled": "CrowdSec",
   "apply.confirm": "revert Apply unless confirmed",
   "apply.confirm_timeout_seconds": "seconds to confirm an Apply",
+  "auto_pause.failures_to_pause": "failures to auto-pause",
+  "auto_pause.successes_to_resume": "successes to auto-resume",
+  "auto_pause.interval": "auto-pause interval",
+  "auto_pause.icmp_fallback": "auto-pause ICMP fallback",
 };
 
 function settingLabel(path) {

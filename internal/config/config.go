@@ -15,6 +15,7 @@ type Config struct {
 	WireGuard   WireGuard   `yaml:"wireguard" json:"wireguard"`
 	Network     Network     `yaml:"network" json:"network"`
 	Forwarding  Forwarding  `yaml:"forwarding" json:"forwarding"`
+	AutoPause   AutoPause   `yaml:"auto_pause,omitempty" json:"auto_pause,omitzero"`
 	Geo         Geo         `yaml:"geo" json:"geo"`
 	CrowdSec    CrowdSec    `yaml:"crowdsec,omitempty" json:"crowdsec,omitempty"`
 	Stats       StatsConfig `yaml:"stats,omitempty" json:"stats,omitempty"`
@@ -99,6 +100,8 @@ type ForwardRoute struct {
 	GeoCountries []string `yaml:"geo_countries,omitempty" json:"geo_countries,omitempty"`
 	// RateLimit optional per-route overrides (Advanced); merges with forwarding.rate_limit.
 	RateLimit RateLimit `yaml:"rate_limit,omitempty" json:"rate_limit,omitempty"`
+	// PauseWhenPeerOffline lets the auto-pause loop pause this route while its target peer is offline.
+	PauseWhenPeerOffline bool `yaml:"pause_when_peer_offline,omitempty" json:"pause_when_peer_offline,omitempty"`
 }
 
 type Geo struct {
@@ -297,6 +300,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.validateForwardingRoutes(); err != nil {
+		return err
+	}
+	if err := ValidateAutoPause(c.AutoPause); err != nil {
 		return err
 	}
 	if err := ValidateBreakGlassCIDRs(c.Geo.BreakGlassCIDRs); err != nil {

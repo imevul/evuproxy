@@ -13,6 +13,7 @@ An annotated example lives at [`config/evuproxy.example.yaml`](../config/evuprox
 | `wireguard` | object | yes | Server WireGuard interface parameters. |
 | `network` | object | yes | Host networking (public-facing NIC). |
 | `forwarding` | object | yes | Port forwarding from the public side into peer tunnel IPs. |
+| `auto_pause` | object | no | Global settings for routes with `pause_when_peer_offline`. |
 | `geo` | object | yes | Country allow/block lists for forwarded traffic (optional behavior via `enabled`; see `mode`). |
 | `crowdsec` | object | no | CrowdSec nftables-bouncer integration (drop banned sources). |
 | `input_allows` | list | no | Extra `nftables` input accept rules (SSH, HTTP, etc.). |
@@ -143,6 +144,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | `geo_mode` | string (optional) | `inherit` (default), `off` (skip global geo for this route), or `custom` (use `geo_countries`). |
 | `geo_countries` | list of strings | Required when `geo_mode` is `custom` (same country codes as global `geo.countries`). |
 | `rate_limit` | object (optional) | Per-route overrides; merges with `forwarding.rate_limit`. |
+| `pause_when_peer_offline` | bool (optional) | Default `false`. If `true`, the route is auto-paused while its target peer is offline. See [`auto_pause`](#auto_pause). |
 
 ### `rate_limit` (global or per-route)
 
@@ -175,6 +177,36 @@ Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel path), n
 - `forwarding.routes` may be empty until you add peers and port forwards.
 - Each **enabled** route must have a non-empty `proto`, at least one non-empty port string, and a valid IPv4 `target_ip`.
 - `target_ip` must equal the IPv4 derived from some peer’s `tunnel_ip` (peers whose `tunnel_ip` is not valid IPv4 CIDR/host are ignored for this check). **Disabled** routes skip these checks.
+
+---
+
+## `auto_pause`
+
+Auto-pause is optional and off by default. Only routes with `pause_when_peer_offline: true` take part; `evuproxy serve` runs the probe loop, and with no such route it probes nothing. All fields below are optional and global.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `failures_to_pause` | int | `3` | Consecutive offline probes before the peer’s routes pause (1–100). |
+| `successes_to_resume` | int | `2` | Consecutive online probes before they resume (1–100). |
+| `interval` | string | `15s` | Time between probes, as a Go duration (`5s` to `1h`). |
+| `icmp_fallback` | bool | `false` | If `true`, ping the peer over the tunnel when its WireGuard handshake is stale. Turn on when peers can be quiet for long periods. |
+
+**Current effect:** a pause is recorded in the `serve` log and the event log (`route_auto_paused`, `route_auto_resumed`). It does **not** remove forwarding rules yet, so traffic still reaches the route; omitting DNAT for paused routes is separate roadmap work.
+
+**Each probe** gives one result per peer:
+
+1. A handshake within the last 180 seconds (the same threshold as the Peers page) counts as online, with no ping.
+2. A stale or missing handshake counts as offline, unless `icmp_fallback` is on. Then a ping reply counts as online and no reply as offline. A peer that blocks ICMP behaves the same as with the fallback off.
+3. If `wg show` can’t be read at all, the round isn’t counted either way, so a paused route stays paused and a running route keeps running.
+
+**Timing:** the failure count only starts once the handshake is stale, so with the defaults a route pauses about 45 seconds after that, up to about 3 minutes 45 seconds after the peer’s last handshake. It resumes about 30 seconds after the peer returns. A result of the other kind resets the count, so a flapping peer doesn’t change state.
+
+**Pause state is runtime-only:**
+
+- It is tracked per peer and never written to `config.yaml`. `disabled` stays your setting: a disabled route is never reported as paused and never re-enabled.
+- After `serve` restarts, every route starts as not paused, and the first probe runs one interval later.
+- Turning `pause_when_peer_offline` off, or disabling the route, clears its pause.
+- Changes take effect after **Apply**, because the loop reads the last applied config (**`config.yaml.bak`**) rather than pending edits. With [confirm mode](#confirm-or-revert-apply) on, that means once the Apply is confirmed. With no usable **`config.yaml.bak`**, it reads **`config.yaml`**. Thresholds and `interval` are picked up without a restart.
 
 ---
 
