@@ -117,6 +117,12 @@
     <div class="evu-main">
       <main class="evu-main__inner content" id="main-content" tabindex="-1">
       <div id="apply-region" class="apply-region">
+        <div id="read-only-notice" class="evu-alert read-only-notice" role="status" hidden>
+          <div class="evu-alert__body">
+            <p class="evu-alert__title">Read-only token</p>
+            <p>You can see Overview, Stats and Logs. To change anything, connect with the write token on the <a href="#/token">API token</a> page.</p>
+          </div>
+        </div>
         <div id="connection-banner" class="evu-alert evu-alert--danger connection-banner" role="alert" hidden>
           <div class="evu-alert__body">
             <p class="evu-alert__title" id="connection-banner-title"></p>
@@ -133,7 +139,7 @@
           <span id="apply-bar-text" class="apply-bar__text" aria-live="polite"></span>
           <div class="apply-bar__actions">
             <a id="apply-bar-review" class="evu-btn evu-btn--outline evu-btn--sm" href="#/pending">Review</a>
-            <button type="button" id="apply-bar-apply" class="evu-btn evu-btn--primary evu-btn--sm">Apply</button>
+            <button type="button" id="apply-bar-apply" class="evu-btn evu-btn--primary evu-btn--sm" data-needs-write>Apply</button>
           </div>
         </div>
         <div id="apply-session" class="evu-alert apply-session" role="group" aria-labelledby="apply-session-title" hidden>
@@ -194,14 +200,14 @@
               <div class="toggle-switch-row">
                 <span class="toggle-switch-text" id="overview-maintenance-desc">Maintenance mode</span>
                 <label class="evu-switch toggle-switch">
-                  <input type="checkbox" id="overview-maintenance-toggle" class="evu-switch__input toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" />
+                  <input type="checkbox" id="overview-maintenance-toggle" class="evu-switch__input toggle-switch-input" autocomplete="off" aria-labelledby="overview-maintenance-desc" data-needs-write />
                   <span class="evu-switch__track toggle-switch-track" aria-hidden="true"></span>
                 </label>
               </div>
               <p class="meta">When on, public forwards are omitted until you turn this off and Apply.</p>
             </div>
             <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--outline" id="btn-geo">Update geo lists</button>
+              <button type="button" class="evu-btn evu-btn--outline" id="btn-geo" data-needs-write>Update geo lists</button>
             </div>
             <p id="overview-action-msg" class="msg" aria-live="polite"></p>
           </div>
@@ -352,14 +358,14 @@
               <input type="text" id="backup-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
             </div>
             <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="btn-backup-run">Create backup</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="btn-backup-run" data-needs-write>Create backup</button>
             </div>
             <div class="field stack-gap">
               <label for="restore-path-input">Restore from archive</label>
               <input type="text" id="restore-path-input" spellcheck="false" autocomplete="off" placeholder="/var/backups/evuproxy-config.tgz" />
             </div>
             <div class="btn-row">
-              <button type="button" class="evu-btn evu-btn--primary" id="btn-restore-run">Restore</button>
+              <button type="button" class="evu-btn evu-btn--primary" id="btn-restore-run" data-needs-write>Restore</button>
             </div>
             <p id="backup-restore-msg" class="msg" aria-live="polite"></p>
           </div>
@@ -444,7 +450,7 @@
         <div class="evu-card card">
           <div class="field">
             <label for="token">API token</label>
-            <p class="hint meta hint--tight">Matches <code class="inline">/etc/evuproxy/api.token</code> on the host (mock dev: <code class="inline">dev</code>).</p>
+            <p class="hint meta hint--tight">Use <code class="inline">/etc/evuproxy/api.token</code> from the host for full access, or <code class="inline">/etc/evuproxy/api-read.token</code> to only view Overview, Stats and Logs (mock dev: <code class="inline">dev</code> or <code class="inline">dev-read</code>).</p>
             <input type="password" id="token" placeholder="Paste API token" autocomplete="off" />
           </div>
           <div class="field stack-gap">
@@ -541,7 +547,7 @@
                 </div>
                 <p id="peer-editor-msg" class="msg err editor-msg" role="alert"></p>
                 <div class="btn-row">
-                  <button type="button" class="evu-btn evu-btn--primary" id="peer-save">Save</button>
+                  <button type="button" class="evu-btn evu-btn--primary" id="peer-save" data-needs-write>Save</button>
                   <button type="button" class="evu-btn evu-btn--outline" id="peer-cancel">Cancel</button>
                 </div>
               </div>
@@ -895,7 +901,7 @@
               <div class="route-editor-actions">
                 <p id="route-editor-msg" class="msg err editor-msg" role="alert"></p>
                 <div class="btn-row">
-                  <button type="button" class="evu-btn evu-btn--primary" id="route-save">Save</button>
+                  <button type="button" class="evu-btn evu-btn--primary" id="route-save" data-needs-write>Save</button>
                   <button type="button" class="evu-btn evu-btn--outline" id="route-cancel">Cancel</button>
                 </div>
               </div>
@@ -1022,7 +1028,7 @@
               </div>
               <p id="inbound-editor-msg" class="msg err editor-msg" role="alert"></p>
               <div class="btn-row">
-                <button type="button" class="evu-btn evu-btn--primary" id="inbound-save">Save</button>
+                <button type="button" class="evu-btn evu-btn--primary" id="inbound-save" data-needs-write>Save</button>
                 <button type="button" class="evu-btn evu-btn--outline" id="inbound-cancel">Cancel</button>
               </div>
             </div>
@@ -1344,7 +1350,7 @@
           </div>
           <div class="toolbar pending-toolbar">
             <button type="button" class="evu-btn evu-btn--outline" id="pending-check-config">Check config</button>
-            <button type="button" class="evu-btn evu-btn--primary" id="pending-apply">Apply</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="pending-apply" data-needs-write>Apply</button>
             <button type="button" class="evu-btn evu-btn--outline" id="pending-discard" disabled>Discard pending</button>
             <button type="button" class="evu-btn evu-btn--danger-outline" id="pending-restore-previous" disabled>Restore previous applied</button>
             <button type="button" class="evu-btn evu-btn--outline" id="pending-refresh">Refresh</button>
@@ -1583,7 +1589,7 @@
             </div>
           </div>
           <div class="btn-row">
-            <button type="button" class="evu-btn evu-btn--primary" id="config-upload-apply">Save</button>
+            <button type="button" class="evu-btn evu-btn--primary" id="config-upload-apply" data-needs-write>Save</button>
             <button type="button" class="evu-btn evu-btn--outline" id="config-upload-cancel">Cancel</button>
           </div>
           <p id="config-upload-apply-msg" class="msg" aria-live="polite"></p>
@@ -1689,6 +1695,9 @@
         <p>
           On the host it is the contents of <code class="inline">/etc/evuproxy/api.token</code>. Rotate it there and the UI will report an API error until you paste the
           new value here.
+        </p>
+        <p>
+          <code class="inline">/etc/evuproxy/api-read.token</code>, if the host has one, is a read-only token for monitoring. It opens Overview, Stats and Logs and can't change anything.
         </p>
       </div>
     </template>

@@ -1,7 +1,7 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, trunc, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
-import { api } from "../core/api.js";
+import { api, isReadOnlyToken } from "../core/api.js";
 import { markPageLoaded } from "../core/connection.js";
 import { reportBesideControl } from "../core/toast.js";
 import { saveConfigEdit } from "../core/config_save.js";
@@ -193,7 +193,7 @@ function logsIpCell(ip, cc, opts) {
     ? '<span class="logs-ip-flag" aria-hidden="true" title="' + title + '">' + flag + "</span> "
     : "";
   let action = "";
-  if (opts && opts.offerBreakGlass && raw && ipv4ToInt(raw) !== null) {
+  if (opts && opts.offerBreakGlass && !isReadOnlyToken() && raw && ipv4ToInt(raw) !== null) {
     if (!ipv4CoveredByCIDRList(raw, breakGlassCIDRsFromConfig())) {
       const label = "Add " + raw + " to break-glass list";
       action =

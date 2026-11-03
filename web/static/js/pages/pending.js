@@ -1,7 +1,7 @@
 import { state } from "../core/state.js";
 import { $, escapeHtml, setApiStatus } from "../core/dom.js";
 import { beginLoading } from "../core/loading.js";
-import { api, responseEtag } from "../core/api.js";
+import { api, isReadOnlyToken, responseEtag } from "../core/api.js";
 import { markPageLoaded } from "../core/connection.js";
 import { showToast } from "../core/toast.js";
 import { openConfirmModal } from "../core/modal.js";
@@ -559,6 +559,10 @@ let pendingBadgeSeq = 0;
 
 export async function refreshPendingBadge() {
   const seq = ++pendingBadgeSeq;
+  if (isReadOnlyToken()) {
+    showUnappliedCount(0);
+    return;
+  }
   try {
     const p = await api("/v1/pending");
     const cfg = p.pending && p.applied_config ? await savedConfig(p) : null;

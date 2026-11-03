@@ -1,6 +1,6 @@
 import { state } from "./state.js";
 import { $, setApiNotConnected, setApiStatus } from "./dom.js";
-import { ensureApiGate, applyNavRestriction, token } from "./api.js";
+import { ensureApiGate, applyNavRestriction, pageNeedsWriteToken, token } from "./api.js";
 import { renderConnectionState } from "./connection.js";
 import { setGeoEditorTab } from "./advanced.js";
 import { beginLoading } from "./loading.js";
@@ -151,6 +151,7 @@ export async function navigate(name, opts) {
   // No token means the gate cannot pass and needs no request to say so. Every
   // page would be a dead end, so the one page that can fix it comes first.
   if (name !== "token" && !token().trim()) name = "token";
+  if (pageNeedsWriteToken(name)) name = "overview";
   if (!keepView) closeConfirmModal();
   if (name !== "routes") {
     stopRoutesPolling();
@@ -187,6 +188,11 @@ export async function navigate(name, opts) {
       if (seq !== navSeq) return;
       // Stay here: what this page last loaded is still on screen, and it reloads on recovery.
       if (!ok) return;
+      // A link straight to this page: the gate is the first the page hears of the token's scope.
+      if (pageNeedsWriteToken(name)) {
+        void navigate("overview");
+        return;
+      }
     }
     applyNavRestriction();
     await ensureUIPrefs();

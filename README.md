@@ -57,7 +57,7 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 | `evuproxy update-geo`             | Refresh IPDeny country files and reload nftables geo **in both** inet and ip tables. With `apply.confirm` on, this loads the last applied config's sets ([details](docs/config.md#confirm-or-revert-apply)) |
 | `evuproxy status`                 | `wg show` + `nft list table inet evuproxy`                                                               |
 | `evuproxy diagnostics [-o PATH]`  | Markdown host support bundle (WG, routes, logs, networkd, sanitized config); also **Settings → Diagnostics** / `GET /api/v1/diagnostics.md` |
-| `evuproxy serve`                  | Local HTTP API on `127.0.0.1:9847` (token in `/etc/evuproxy/api.token`)                                  |
+| `evuproxy serve`                  | Local HTTP API on `127.0.0.1:9847` (token in `/etc/evuproxy/api.token`, optional read-only token in `/etc/evuproxy/api-read.token`) |
 | `evuproxy metrics`                | Background peer ICMP metrics collector into SQLite (respects `metrics_collection_enabled` in UI preferences) |
 | `evuproxy version`                | Print the binary version                                                                                 |
 | `evuproxy backup --dest PATH`     | Tarball of `/etc/evuproxy`; `PATH` must be under the backup allowlist dir (default `/var/backups`, override with `EVUPROXY_BACKUP_DIR`) |

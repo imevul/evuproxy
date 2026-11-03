@@ -14,6 +14,8 @@ export const contentWidthCssValues = {
 /** Mutable cross-module UI state (formerly module-level `let` variables in the pre-split single-file script). */
 export const state = {
   lastOverview: null,
+  /** What this browser's token may do, from the last GET /v1/overview: "write" or "read". */
+  tokenScope: "write",
   lastConfig: null,
   /** True only after a successful GET /v1/overview with the current token (or unset token → false). */
   apiConnectionOk: false,

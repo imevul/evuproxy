@@ -154,12 +154,15 @@ function adopt(next) {
   if (hadSession && !session) void onSettled();
 }
 
-/** Reads the session. Throws on anything but a clear answer; an API without this route gives null. */
+/**
+ * Reads the session. Throws on anything but a clear answer; an API without this route gives null,
+ * and so does a read token, which can't decide a session anyway.
+ */
 async function fetchStatus() {
   try {
     return await api("/v1/apply/session", { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch (e) {
-    if (e.status === 404) return null;
+    if (e.status === 404 || e.status === 403) return null;
     throw e;
   }
 }

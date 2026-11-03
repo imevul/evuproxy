@@ -1,9 +1,10 @@
 import { state } from "../core/state.js";
 import { $, setApiStatus } from "../core/dom.js";
-import { api, applyNavRestriction, tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
+import { api, applyNavRestriction, isReadOnlyToken, tokenKey, apiBaseKey, normalizeApiBase } from "../core/api.js";
 import { invalidateUIPrefsCache } from "../core/prefs.js";
 import { createFormTrackerByIds, registerPageForm } from "../core/dirty.js";
 import { refreshOverviewPage } from "./overview.js";
+import { refreshPendingBadge } from "./pending.js";
 
 const tokenForm = createFormTrackerByIds(["token", "api-base"]);
 
@@ -71,7 +72,11 @@ export function initTokenPage() {
       state.lastOverview = await api("/v1/overview");
       state.apiConnectionOk = true;
       setApiStatus(true);
-      setAuthMsg("Connected. The token is saved in this browser.");
+      setAuthMsg(
+        isReadOnlyToken()
+          ? "Connected with the read-only token, which is saved in this browser. Overview, Stats and Logs are available, and nothing can be changed."
+          : "Connected. The token is saved in this browser."
+      );
     } catch (e) {
       state.apiConnectionOk = false;
       setApiStatus(false, String(e.message || e));
@@ -81,6 +86,7 @@ export function initTokenPage() {
     setNotConnectedNotice(false);
     const connected = state.apiConnectionOk;
     void refreshOverviewPage();
+    if (connected) void refreshPendingBadge();
     // First connection: the setup checklist on Overview is the next step.
     if (connected && !wasConnected) location.hash = "#/overview";
   });
