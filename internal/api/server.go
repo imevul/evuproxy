@@ -157,7 +157,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/backup", s.auth(s.handleBackup))
 	mux.HandleFunc("GET /api/v1/backup/info", s.auth(s.handleBackupInfo))
 	mux.HandleFunc("POST /api/v1/restore", s.auth(s.handleRestore))
-	return mux
+	return s.crossOriginGuard(mux)
 }
 
 func eventDetail(s string) string {
@@ -233,6 +233,9 @@ func (s *Server) Run() error {
 	if cors := parseCORSOrigins(s.CORSOrigins); cors != nil {
 		if cors.allowAll && !isLoopbackListen(s.Listen) {
 			s.Logger.Warn("API listen is not loopback and --cors-origins allows any origin; use an explicit origin list when the API is reachable beyond localhost")
+		}
+		if cors.allowAll {
+			s.Logger.Warn("--cors-origins allows any origin, so cross-origin refusal of state-changing requests is off")
 		}
 		handler = cors.wrap(handler)
 	}
