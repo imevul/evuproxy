@@ -294,10 +294,10 @@ async function refreshAutoPaused() {
 
 /* ——— Accepted traffic: counters from the API, for the routes as last applied ——— */
 
-/** Last GET /stats route_accepted rows, by routeAcceptedKey. */
+/** Last GET /stats/route-accepted rows, by routeAcceptedKey. */
 let routeAccepted = new Map();
 
-/** False until GET /stats first answers, so a cell can say it is waiting rather than that there is no count. */
+/** False until GET /stats/route-accepted first answers, so a cell can say it is waiting rather than that there is no count. */
 let routeAcceptedSettled = false;
 
 /**
@@ -373,7 +373,7 @@ function syncRouteAcceptedCells(cfg) {
 async function refreshRouteAccepted() {
   let res = null;
   try {
-    res = await api("/v1/stats");
+    res = await api("/v1/stats/route-accepted");
   } catch {
     if (routeAcceptedSettled) return;
   }
@@ -824,7 +824,7 @@ async function removeRoute(index) {
 export async function refreshRoutesPage() {
   setRoutesMsg("");
   const doneLoading = beginLoading("routes-table-wrap");
-  // Not awaited: with large geo sets GET /stats can take seconds, and only one column needs it.
+  // Not awaited: only one column needs it, and the rows shouldn't wait on nft.
   const accepted = refreshRouteAccepted();
   try {
     const [cfg] = await Promise.all([api("/v1/config"), refreshAutoPaused()]);

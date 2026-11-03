@@ -51,6 +51,52 @@ peers: []
 	}
 }
 
+// A scrape has no use for the whole-table listings, which load the geo sets on older nft. nft here
+// is a script on PATH that notes its arguments, because PrometheusText runs the real commands.
+func TestPrometheusText_listsNoWholeTable(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	body := `wireguard:
+  interface: wg0
+  listen_port: 51830
+  private_key_file: ` + filepath.Join(dir, "wg.key") + `
+  address: 10.100.0.1/24
+network:
+  public_interface: eth0
+geo:
+  enabled: false
+forwarding:
+  routes: []
+peers: []
+`
+	for _, p := range []string{cfgPath, state.ConfigYAMLBackupPath(cfgPath)} {
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "wg.key"), []byte("dGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXktdGVzdC1rZXk=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls")
+	script := "#!/bin/sh\necho \"$*\" >>" + calls + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "nft"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if _, err := PrometheusText(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "list table") || !strings.Contains(string(got), "list chain inet evuproxy_accepted route_accepted") {
+		t.Fatalf("nft calls:\n%s", got)
+	}
+}
+
 func TestWriteRouteAccepted(t *testing.T) {
 	var b strings.Builder
 	writeRouteAccepted(&b, []apply.RouteAcceptedCounter{

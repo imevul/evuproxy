@@ -106,6 +106,31 @@ func TestNFTables_routeAccepted_runsAfterEveryDrop(t *testing.T) {
 	}
 }
 
+// Reading the counters only stays cheap while their table has no sets for nft to load.
+func TestNFTables_routeAccepted_tableHasNoSets(t *testing.T) {
+	c := acceptedTestConfig()
+	c.CrowdSec.Enabled = true
+	c.Geo = config.Geo{Enabled: true, Mode: "allow", SetName: "geo_v4", Countries: []string{"no"}, ZoneDir: "/z"}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, table, ok := strings.Cut(s, "table inet "+RouteAcceptedTable+" {")
+	if !ok {
+		t.Fatalf("no table %s in:\n%s", RouteAcceptedTable, s)
+	}
+	for _, unwanted := range []string{"set ", "map ", "@"} {
+		if strings.Contains(table, unwanted) {
+			t.Errorf("found %q in:\n%s", unwanted, table)
+		}
+	}
+	_, filter, _ := strings.Cut(s, "table inet evuproxy {")
+	filter, _, _ = strings.Cut(filter, "\nadd table ip evuproxy")
+	if strings.Contains(filter, RouteAcceptedChain) {
+		t.Errorf("the chain must only be in its own table:\n%s", filter)
+	}
+}
+
 func TestNFTables_routeAccepted_noChainWithoutRoutes(t *testing.T) {
 	c := baseNFTConfig()
 	s, err := NFTables(c)
@@ -115,6 +140,12 @@ func TestNFTables_routeAccepted_noChainWithoutRoutes(t *testing.T) {
 	if strings.Contains(s, RouteAcceptedChain) {
 		t.Fatalf("no routes need no chain:\n%s", s)
 	}
+	// An Apply that leaves no routes still has to remove the rules of the last one.
+	replace := "add table inet " + RouteAcceptedTable + "\ndelete table inet " + RouteAcceptedTable + "\n"
+	if !strings.Contains(s, replace) {
+		t.Fatalf("missing %q in:\n%s", replace, s)
+	}
+	nftCheck(t, c)
 
 	c = acceptedTestConfig()
 	c.Forwarding.MaintenanceMode = true
@@ -141,7 +172,7 @@ func TestNATPreroutingUpdate_leavesRouteAcceptedAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(update, RouteAcceptedChain) || strings.Contains(update, "inet evuproxy") {
+	if strings.Contains(update, RouteAcceptedChain) || strings.Contains(update, RouteAcceptedTable) || strings.Contains(update, "inet evuproxy") {
 		t.Fatalf("pause update must not touch the filter table:\n%s", update)
 	}
 }

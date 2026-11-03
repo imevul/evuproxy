@@ -62,7 +62,7 @@ The Settings bar writes up to three separate stores: UI preferences, config (**P
 
 ## Routes page
 
-**Accepted** shows the traffic the firewall accepted for a route since the last Apply, as packets and bytes, from `route_accepted` in **`GET /api/v1/stats`**. A route with both protocols shows their sum, and hovering a cell splits it by protocol.
+**Accepted** shows the traffic the firewall accepted for a route since the last Apply, as packets and bytes, from **`GET /api/v1/stats/route-accepted`**. A route with both protocols shows their sum, and hovering a cell splits it by protocol.
 
 **This is accepted traffic. It does not mean players or legitimate clients.** A source that passes the route's filters counts even if the backend never replies, so a scanner in an allowed country adds to it, and so does traffic to a backend that is down. Anything dropped by a deny list, geo, CrowdSec, a rate limit or the forward catch-all stays out. Bytes are the more exact figure, because a burst of TCP packets the kernel has merged can count as one packet.
 

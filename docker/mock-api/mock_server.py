@@ -1311,6 +1311,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/v1/stats":
             return self._send_json(200, _mock_stats_response())
+        if path == "/api/v1/stats/route-accepted":
+            return self._send_json(200, {"route_accepted": _mock_route_accepted()})
         if path == "/api/v1/auto-pause":
             return self._send_json(200, {"paused_routes": _mock_auto_paused_routes()})
         if path == "/api/v1/client-ip":
