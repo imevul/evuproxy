@@ -95,14 +95,37 @@ The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild
 
 - **`config.yaml` is yours:** the updater does not migrate, merge, or validate configuration. New releases may require new fields, renames, or stricter validation—read [CHANGELOG.md](CHANGELOG.md) and compare with [config/evuproxy.example.yaml](config/evuproxy.example.yaml), then run **`evuproxy reload`** (or fix issues before reloading) so you are not locked out.
 - **Local git changes:** `git pull` fails if you have uncommitted edits in the clone; commit, stash, or discard them first.
-- **Binary-only installs** (prebuilt `evuproxy` copied to `/usr/local/bin` without this repo) are not updated by this script—replace the binary from a [release](https://github.com/imevul/evuproxy/releases) and restart services manually. Also install the release's `templates/evuproxy.service`, or a reboot keeps applying unconfirmed edits with `apply.confirm` on.
+- **Binary-only installs** (prebuilt `evuproxy` copied to `/usr/local/bin` without this repo) are not updated by this script; see [Binary-only installs](#binary-only-installs).
 - **Peers and other hosts** are unchanged; client WireGuard configs are not updated by `update.sh`.
 
-**Backup and rollback**
+### Binary-only installs
+
+[scripts/upgrade-binary.sh](scripts/upgrade-binary.sh) needs no clone and no Go, only **curl**. Download it, read it, and run it as root:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/imevul/evuproxy/main/scripts/upgrade-binary.sh
+sudo bash upgrade-binary.sh                   # the latest release
+sudo bash upgrade-binary.sh --version 0.18.0  # that release, which may be older
+sudo bash upgrade-binary.sh --rollback        # back to the binary the last run replaced
+```
+
+It downloads the [release](https://github.com/imevul/evuproxy/releases) binary for this machine into a temporary directory beside the current one, compares it against the release's **SHA256SUMS**, and runs it to check its version. Then it keeps the current binary as **`evuproxy.previous`**, swaps in the new one, restarts **active** `evuproxy.service`, `evuproxy-api.service` and `evuproxy-metrics.service`, and refreshes the networkd drop-in as `update.sh` does. **`PREFIX`** (default `/usr/local`) says where the binary is.
+
+- **A failed download changes nothing.** Neither does a checksum mismatch, a binary that doesn't run, or any refusal below. The script says so and exits non-zero.
+- **It refuses before the swap** if an Apply is waiting for confirmation or failed to revert, if the new binary rejects `config.yaml`, or if `evuproxy.service` runs `reload --boot` and the new binary doesn't know that flag.
+- **Restarting `evuproxy.service` reloads the firewall.** With [confirm mode](docs/config.md#confirm-or-revert-apply) off, any unapplied edits in `config.yaml` go live, as they do with `update.sh`.
+- **It doesn't install units.** If `evuproxy.service` has no `--boot`, the script warns and doesn't restart that unit, because restarting or rebooting would apply unconfirmed edits. Install the release's `templates/evuproxy.service` and run `systemctl daemon-reload`. A unit that runs a binary other than `PREFIX/bin/evuproxy` isn't restarted either.
+- **If a service fails to restart,** the new binary stays in place and the script names the service and exits non-zero. `--rollback` swaps the two binaries and restarts again, so running it twice returns to the new one. Only one old binary is kept.
+- **SHA256SUMS comes from the same release as the binary.** It catches a corrupt download, not a compromised release, and releases aren't signed.
+- **Other things stay as they are:** `config.yaml` isn't migrated, and the Docker UI is separate ([published image](docs/web-ui.md#published-image)). Package installs upgrade through their package manager.
+
+`make upgrade-test` tests this under real systemd in a throwaway container, including failed downloads ([details](devtools/upgrade-test/README.md)).
+
+### Backup and rollback
 
 - Before updating, take a **config backup**: `evuproxy backup --dest /var/backups/evuproxy-pre-update.tgz` (or use the HTTP API—see [docs/http-api.md](docs/http-api.md) for path allowlisting), and/or copy `/etc/evuproxy/config.yaml` somewhere safe.
 - If something goes wrong after upgrade, **stop** the services, **restore** the archive with `evuproxy restore --archive …` (then `reload`), or put back the saved `config.yaml` and reinstall the **previous** binary (e.g. from an older GitHub release or `git checkout <tag>` + `sudo ./scripts/rebuild.sh --install`). Going back past the release that added **`reload --boot`**? Install that release's `templates/evuproxy.service` too and run `systemctl daemon-reload`: older binaries reject the flag, and `evuproxy.service` would fail at the next boot, leaving the host without its firewall.
-- Keeping a copy of the old **`evuproxy` binary** under another name makes rollback faster than rebuilding from git history.
+- Keeping a copy of the old **`evuproxy` binary** under another name makes rollback faster than rebuilding from git history. `upgrade-binary.sh` does this for you.
 
 ## Uninstall
 

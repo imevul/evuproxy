@@ -28,7 +28,7 @@ rm -f /etc/systemd/system/evuproxy.service \
  /etc/systemd/system/evuproxy-geo.timer
 systemctl daemon-reload
 
-rm -f /usr/local/bin/evuproxy
+rm -f /usr/local/bin/evuproxy /usr/local/bin/evuproxy.previous
 
 rm -f /etc/sysctl.d/99-evuproxy-forwarding.conf
 
