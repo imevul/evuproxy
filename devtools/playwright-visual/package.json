@@ -10,6 +10,6 @@
   "scripts": {
     "test": "playwright test smoke-visual",
     "test:a11y": "playwright test a11y.spec",
-    "test:behavior": "playwright test modal-stack discard-guard drawer-tabs a11y-markup apply-gate config-conflict loading-states connection-lost.spec toast.spec remove-confirm hierarchy-first-run save-model logs-breakglass vocabulary at-scale pending-changes apply-bar apply-confirm geo-update mobile route-pause-setting.spec route-auto-paused.spec"
+    "test:behavior": "playwright test modal-stack discard-guard drawer-tabs a11y-markup apply-gate config-conflict loading-states connection-lost.spec toast.spec remove-confirm hierarchy-first-run save-model logs-breakglass vocabulary at-scale pending-changes apply-bar apply-confirm geo-update mobile route-pause-setting.spec route-auto-paused.spec route-accepted.spec"
   }
 }

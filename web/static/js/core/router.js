@@ -25,8 +25,8 @@ import {
   refreshRoutesPage,
   closeRouteEditor,
   closeRouteProbeModal,
-  restartAutoPausePolling,
-  stopAutoPausePolling,
+  restartRoutesPolling,
+  stopRoutesPolling,
 } from "../pages/routes.js";
 import { refreshTopologyPage, stopTopologyPolling } from "../pages/topology.js";
 import { refreshInboundPage, closeInboundEditor } from "../pages/inbound.js";
@@ -153,7 +153,7 @@ export async function navigate(name, opts) {
   if (name !== "token" && !token().trim()) name = "token";
   if (!keepView) closeConfirmModal();
   if (name !== "routes") {
-    stopAutoPausePolling();
+    stopRoutesPolling();
     closeRouteProbeModal();
     closeRouteEditor();
   }
@@ -213,7 +213,7 @@ export async function navigate(name, opts) {
       await refreshRoutesPage();
       if (seq !== navSeq) return;
       applyHashPeerRouteHighlight();
-      restartAutoPausePolling();
+      restartRoutesPolling();
     }
     if (name === "topology") {
       state.topologyPrevPeerBytes = new Map();

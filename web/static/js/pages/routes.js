@@ -22,6 +22,7 @@ import { beginLoading } from "../core/loading.js";
 import { api } from "../core/api.js";
 import { markPageLoaded } from "../core/connection.js";
 import { showToast } from "../core/toast.js";
+import { formatBytes, formatCount } from "../core/format.js";
 import { sortedRows, sortHeaderHtml, bindSortHeaders, setTableHtml } from "../core/table_sort.js";
 import { saveConfigEdit, findConfigRow, resolveListIndex, routeIdentity, ConfigMergeError } from "../core/config_save.js";
 import { showUndoToast } from "../core/undo.js";
@@ -217,8 +218,9 @@ function routeName(r) {
   return String(r.name || "").trim();
 }
 
+const ROUTES_POLL_MS = 15000;
+
 /* ——— Auto-pause: runtime state from the API, never part of the config ——— */
-const AUTO_PAUSE_POLL_MS = 15000;
 
 /** What the API last reported, from the applied config, so it can differ from the rows. */
 let autoPausedRoutes = [];
@@ -290,16 +292,106 @@ async function refreshAutoPaused() {
   syncAutoPausedRows(state.lastConfig);
 }
 
-export function stopAutoPausePolling() {
-  if (state.routesAutoPauseTimer) {
-    clearInterval(state.routesAutoPauseTimer);
-    state.routesAutoPauseTimer = null;
+/* ——— Accepted traffic: counters from the API, for the routes as last applied ——— */
+
+/** Last GET /stats route_accepted rows, by routeAcceptedKey. */
+let routeAccepted = new Map();
+
+/**
+ * By what the route is, not route_index: that is a position in the applied config, and the rows
+ * come from the saved one. A route changed since the last Apply has no counter yet.
+ */
+function routeAcceptedKey(proto, ports, targetIp) {
+  return proto + "\0" + (ports || []).map(String).sort().join(",") + "\0" + String(targetIp || "").trim();
+}
+
+/** The route's protocols, each with its routeAcceptedKey. */
+function routeAcceptedParts(r) {
+  return routeProtoPlainText(r.proto)
+    .split(", ")
+    .map((proto) => ({ proto, key: routeAcceptedKey(proto, r.ports, r.target_ip) }));
+}
+
+/** How many saved routes have each routeAcceptedKey. */
+function routeAcceptedKeyUse(routes) {
+  const use = new Map();
+  routes.forEach((r) => routeAcceptedParts(r).forEach(({ key }) => use.set(key, (use.get(key) || 0) + 1)));
+  return use;
+}
+
+/**
+ * The route's rows, one per protocol it has, with null for a protocol without a counter.
+ * A disabled route's rule stays live until Apply, so it keeps its count, unless another saved
+ * route has the same key: validation skips disabled routes, and the count could be that one's.
+ */
+function routeAcceptedRows(r, keyUse) {
+  return routeAcceptedParts(r).map(({ proto, key }) => ({
+    proto,
+    row: r.disabled && keyUse.get(key) > 1 ? null : routeAccepted.get(key) || null,
+  }));
+}
+
+function routeAcceptedTotal(r, field, keyUse) {
+  const rows = routeAcceptedRows(r, keyUse).filter((x) => x.row);
+  return rows.length ? rows.reduce((sum, x) => sum + x.row[field], 0) : null;
+}
+
+function routeAcceptedTitle(r, keyUse) {
+  const parts = routeAcceptedRows(r, keyUse);
+  if (parts.every((x) => !x.row)) {
+    return "No count for this route: it is disabled, changed since the last Apply, or counters are unavailable.";
+  }
+  const detail = parts.map((x) =>
+    x.proto.toUpperCase() + ": " + (x.row ? formatCount(x.row.packets) + " packets, " + formatBytes(x.row.bytes) : "no count")
+  );
+  return "Accepted traffic since the last Apply, not players or legitimate clients. " + detail.join("; ");
+}
+
+/** In place and only on a real change, so a poll can't take focus or a text selection, and nothing moves but the digits. */
+function syncRouteAcceptedCells(cfg) {
+  const routes = (cfg && cfg.forwarding && cfg.forwarding.routes) || [];
+  const keyUse = routeAcceptedKeyUse(routes);
+  $("routes-table-wrap").querySelectorAll("tr[data-row]").forEach((tr) => {
+    const r = routes[+tr.getAttribute("data-row")];
+    const cell = tr.querySelector(".route-accepted-cell");
+    if (!r || !cell) return;
+    const packets = routeAcceptedTotal(r, "packets", keyUse);
+    const count = packets === null ? "—" : formatCount(packets);
+    const unit = packets === null ? "" : "pkts · " + formatBytes(routeAcceptedTotal(r, "bytes", keyUse));
+    if (cell.textContent !== (unit ? count + " " + unit : count)) {
+      cell.innerHTML = unit ? `${escapeHtml(count)} <span class="meta">${escapeHtml(unit)}</span>` : `<span class="meta">${count}</span>`;
+    }
+    cell.title = routeAcceptedTitle(r, keyUse);
+  });
+}
+
+/** Never rejects: on failure what is on screen stays, and the connection state covers an outage. */
+async function refreshRouteAccepted() {
+  let res;
+  try {
+    res = await api("/v1/stats");
+  } catch {
+    return;
+  }
+  routeAccepted = new Map((res.route_accepted || []).map((x) => [routeAcceptedKey(x.proto, x.ports, x.target_ip), x]));
+  syncRouteAcceptedCells(state.lastConfig);
+}
+
+function pollRoutesRuntime() {
+  void refreshAutoPaused();
+  void refreshRouteAccepted();
+}
+
+export function stopRoutesPolling() {
+  if (state.routesPollTimer) {
+    clearInterval(state.routesPollTimer);
+    state.routesPollTimer = null;
   }
 }
 
-export function restartAutoPausePolling() {
-  stopAutoPausePolling();
-  state.routesAutoPauseTimer = setInterval(refreshAutoPaused, AUTO_PAUSE_POLL_MS);
+export function restartRoutesPolling() {
+  stopRoutesPolling();
+  state.routesPollTimer = setInterval(pollRoutesRuntime, ROUTES_POLL_MS);
 }
 
 function renderRoutesTable(cfg) {
@@ -320,12 +412,14 @@ function renderRoutesTable(cfg) {
   }
   // No column for a config that names nothing: it would be blank on every row.
   const anyNamed = routes.some(routeName);
+  const keyUse = routeAcceptedKeyUse(routes);
   const rows = sortedRows("routes", routes, {
     name: routeName,
     proto: (r) => routeProtoPlainText(r.proto),
     ports: (r) => (r.ports || []).join(", "),
     target: (r) => peerNameForTargetHost(cfg, r.target_ip) || String(r.target_ip || "").trim(),
     source: (r) => (r.source_allow_cidrs || []).length,
+    accepted: (r) => routeAcceptedTotal(r, "packets", keyUse),
     enabled: (r) => (r.disabled ? 0 : 1),
   })
     .map(({ item: r, index: i }) => {
@@ -346,15 +440,15 @@ function renderRoutesTable(cfg) {
       return (
         `<tr data-row="${i}" tabindex="-1" data-filter="${escapeHtml(f)}"${r.disabled ? ' class="is-row-disabled"' : ""}>${nameCell}<td>${formatRouteProtoCell(r.proto)}</td><td class="mono">${escapeHtml((r.ports || []).join(", "))}</td>` +
         monoIpCopyCellHtml(r.target_ip, targetPeerName) +
-        `${srcCell}${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, name ? "Enabled: " + name : "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-test="${i}">Test</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-del="${i}">Remove</button></td></tr>` +
-        rowErrorHtml("data-route-disabled", i, anyNamed ? 7 : 6)
+        `${srcCell}<td class="route-accepted-cell"></td>${tableDisabledToggleCell("data-route-disabled", i, !!r.disabled, name ? "Enabled: " + name : "Enabled: route to " + String(r.target_ip || ""))}<td class="row-actions"><button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-test="${i}">Test</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-edit="${i}">Edit</button> <button type="button" class="evu-btn evu-btn--outline evu-btn--sm" data-route-del="${i}">Remove</button></td></tr>` +
+        rowErrorHtml("data-route-disabled", i, anyNamed ? 8 : 7)
       );
     })
     .join("");
   const nameHead = anyNamed ? sortHeaderHtml("routes", "name", "Name") : "";
   setTableHtml(
     wrap,
-    `<table class="data"><thead><tr>${nameHead}${sortHeaderHtml("routes", "proto", "Proto")}${sortHeaderHtml("routes", "ports", "Ports")}${sortHeaderHtml("routes", "target", "Target")}${sortHeaderHtml("routes", "source", "Source")}${sortHeaderHtml("routes", "enabled", "Enabled")}<th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`
+    `<table class="data"><thead><tr>${nameHead}${sortHeaderHtml("routes", "proto", "Proto")}${sortHeaderHtml("routes", "ports", "Ports")}${sortHeaderHtml("routes", "target", "Target")}${sortHeaderHtml("routes", "source", "Source")}${sortHeaderHtml("routes", "accepted", "Accepted")}${sortHeaderHtml("routes", "enabled", "Enabled")}<th scope=\"col\"><span class=\"evu-sr-only\">Actions</span></th></tr></thead><tbody>${rows}</tbody></table>`
   );
   bindSortHeaders(wrap, "routes", () => renderRoutesTable(cfg));
   bindTunnelIpCopyButtons(wrap, setRoutesMsg);
@@ -379,6 +473,7 @@ function renderRoutesTable(cfg) {
     });
   });
   syncAutoPausedRows(cfg);
+  syncRouteAcceptedCells(cfg);
   applyTableFilter("routes-table-wrap");
 }
 
@@ -725,7 +820,7 @@ export async function refreshRoutesPage() {
   setRoutesMsg("");
   const doneLoading = beginLoading("routes-table-wrap");
   try {
-    const [cfg] = await Promise.all([api("/v1/config"), refreshAutoPaused()]);
+    const [cfg] = await Promise.all([api("/v1/config"), refreshAutoPaused(), refreshRouteAccepted()]);
     state.lastConfig = cfg;
     setApiStatus(true);
     renderRoutesTable(state.lastConfig);
