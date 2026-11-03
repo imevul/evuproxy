@@ -373,8 +373,28 @@ These rules are always generated, whatever `stats.drop_counters` says, and they 
 Host metrics are exposed on a **separate HTTP listener** from the JSON API. **Disabled by default.**
 
 - Enable: `evuproxy serve --metrics-listen 127.0.0.1:9848` or environment variable **`EVUPROXY_METRICS_LISTEN`**.
-- Endpoint: **`GET /metrics`** (Prometheus text exposition). **No authentication** — must bind to loopback (`127.0.0.1`, `::1`, or `localhost`). Non-loopback addresses are **rejected** unless you also pass **`--metrics-listen-insecure`** (not recommended).
+- Endpoint: **`GET /metrics`** (Prometheus text exposition). **Open unless you set a [metrics token](#metrics-token)**. Must bind to loopback (`127.0.0.1`, `::1`, or `localhost`). Non-loopback addresses are **rejected** unless you also pass **`--metrics-listen-insecure`** (not recommended), with or without a token.
 - Metrics include: `evuproxy_apply_success_total`, `evuproxy_apply_failure_total`, `evuproxy_geo_last_success_timestamp_seconds`, `evuproxy_peers_online`, `evuproxy_maintenance_mode`, and the [route accepted metrics](#route-accepted-metrics).
+
+### Metrics token
+
+For hosts scraped from another machine. A host scraped on loopback can ignore this, and nothing changes on upgrade: there is no default path and the installer doesn't create a file.
+
+- **Setting it:** **`evuproxy serve --metrics-token-file`** or **`EVUPROXY_METRICS_TOKEN`**. A file wins over the variable. Like the other tokens, it's read at startup, so changing it needs a restart.
+- **Answers:** with a token set, **`GET /metrics`** answers **401** if the token is missing or wrong. Send it as `Authorization: Bearer …`; `X-API-Token` works too, as it does on the API. With no token set, the endpoint is open.
+- **A bad file stops the API:** unlike the read token, a file you name that can't be read or is empty makes **`evuproxy serve`** refuse to start, even if the variable is set, because an empty token here would mean no authentication. So does a variable holding only whitespace. The file must be readable by the user the API runs as.
+- **Use its own value:** the metrics token opens only this endpoint, while the read token also opens logs, events and stats, and shows the network's layout. **`evuproxy serve`** logs a warning if the metrics token equals the write or read token.
+- **Backups:** a token file under **`/etc/evuproxy`** goes into [backup archives](#routes-that-need-the-write-token-only-to-read), like the other token files.
+
+**The token doesn't encrypt anything.** The listener is plain HTTP, so the token and the metrics cross the network in clear text, and anyone who can see the traffic can read and reuse the token. That's why **`--metrics-listen-insecure`** is still required for non-loopback addresses. The listener has no TLS, and **`--mtls-listen`** doesn't cover it, so use the token together with a firewall rule, and carry remote scrapes over WireGuard or an SSH tunnel.
+
+To add a token:
+
+```bash
+(umask 077; head -c 32 /dev/urandom | base64 | tr -d '\n' >/etc/evuproxy/metrics.token)
+```
+
+Add `--metrics-token-file /etc/evuproxy/metrics.token` to the `evuproxy serve` command in the service unit, restart the API, and copy the file to the Prometheus host.
 
 ### Route accepted metrics
 
@@ -403,6 +423,18 @@ scrape_configs:
   - job_name: evuproxy
     static_configs:
       - targets: ["127.0.0.1:9848"]
+```
+
+With a [metrics token](#metrics-token), scraping over a WireGuard tunnel (the file must be readable by the Prometheus user):
+
+```yaml
+scrape_configs:
+  - job_name: evuproxy
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/evuproxy-metrics.token
+    static_configs:
+      - targets: ["10.100.0.1:9848"]
 ```
 
 ## File logging (`evuproxy serve`)

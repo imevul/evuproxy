@@ -217,7 +217,7 @@ func cmdDiagnostics() *cobra.Command {
 }
 
 func cmdServe() *cobra.Command {
-	var listen, tokenFile, readTokenFile, corsOrigins, metricsDB, metricsListen string
+	var listen, tokenFile, readTokenFile, corsOrigins, metricsDB, metricsListen, metricsTokenFile string
 	var mtlsListen, mtlsCert, mtlsKey, mtlsClientCA string
 	var metricsListenInsecure bool
 	c := &cobra.Command{
@@ -253,6 +253,10 @@ func cmdServe() *cobra.Command {
 					slog.Warn("read token file ignored", "err", err)
 				}
 			}
+			metricsTok, err := loadMetricsToken(metricsTokenFile)
+			if err != nil {
+				return err
+			}
 			ml := strings.TrimSpace(metricsListen)
 			if ml == "" {
 				ml = strings.TrimSpace(os.Getenv("EVUPROXY_METRICS_LISTEN"))
@@ -269,6 +273,7 @@ func cmdServe() *cobra.Command {
 				Listen:                listen,
 				MetricsListen:         ml,
 				MetricsListenInsecure: metricsListenInsecure,
+				MetricsToken:          metricsTok,
 				Token:                 tok,
 				ReadToken:             readTok,
 				Config:                cfgPath,
@@ -308,8 +313,32 @@ func cmdServe() *cobra.Command {
 	c.Flags().StringVar(&corsOrigins, "cors-origins", "", "comma-separated allowed Origin values for cross-origin browser UIs; avoid * except local dev (token auth still required)")
 	c.Flags().StringVar(&metricsDB, "metrics-db", "", "peer metrics SQLite path (default: metrics.sqlite beside --config)")
 	c.Flags().StringVar(&metricsListen, "metrics-listen", "", "optional loopback Prometheus scrape address (e.g. 127.0.0.1:9848); also EVUPROXY_METRICS_LISTEN")
-	c.Flags().BoolVar(&metricsListenInsecure, "metrics-listen-insecure", false, "allow --metrics-listen on non-loopback addresses (unauthenticated /metrics)")
+	c.Flags().StringVar(&metricsTokenFile, "metrics-token-file", "", "file containing a bearer token to require on /metrics; also EVUPROXY_METRICS_TOKEN (an unreadable or empty file refuses to start)")
+	c.Flags().BoolVar(&metricsListenInsecure, "metrics-listen-insecure", false, "allow --metrics-listen on non-loopback addresses (plain HTTP, so metrics and any metrics token are sent in clear text; /metrics is open without a metrics token)")
 	return c
+}
+
+// loadMetricsToken returns the token /metrics requires, empty for none. Unlike the API tokens,
+// an empty value here means no auth, so a token someone tried to set and that came out empty
+// is an error and not an open listener.
+func loadMetricsToken(file string) (string, error) {
+	if file != "" {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("metrics token file: %w", err)
+		}
+		tok := strings.TrimSpace(string(b))
+		if tok == "" {
+			return "", fmt.Errorf("metrics token file %s is empty", file)
+		}
+		return tok, nil
+	}
+	env := os.Getenv("EVUPROXY_METRICS_TOKEN")
+	tok := strings.TrimSpace(env)
+	if tok == "" && env != "" {
+		return "", errors.New("EVUPROXY_METRICS_TOKEN contains only whitespace")
+	}
+	return tok, nil
 }
 
 func cmdBackup() *cobra.Command {
