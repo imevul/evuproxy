@@ -27,6 +27,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 		globalDeny = ""
 	}
 	crowdsecSet := crowdsecSetName(c.CrowdSec.Enabled)
+	counter := dropCounter(c)
 
 	var routes []routePolicy
 	uniqTargets := map[string]struct{}{}
@@ -83,6 +84,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 					crowdsecSet:  crowdsecSet,
 					breakGlass:   breakGlass,
 					globalDeny:   globalDeny,
+					counter:      counter,
 				})
 				uniqTargets[target] = struct{}{}
 			}
@@ -119,7 +121,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 			return "", fmt.Errorf("input_allows: %w", err)
 		}
 		if applyGeoInput {
-			writeGeoProtoPortInputRules(&b, true, blockListed, geoSet, breakGlass, proto, dport, "")
+			writeGeoProtoPortInputRules(&b, true, blockListed, geoSet, breakGlass, proto, dport, "", counter)
 		} else {
 			fmt.Fprintf(&b, "        %s dport %s accept\n", proto, dport)
 		}
@@ -164,7 +166,7 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	}
 
 	fmt.Fprintf(&b, "        iifname %q oifname %q ct state established,related accept\n", wg, pub)
-	fmt.Fprintf(&b, "        limit rate 3/minute burst 5 packets log prefix \"evuproxy-forward-drop: \" drop\n")
+	fmt.Fprintf(&b, "        %slimit rate 3/minute burst 5 packets log prefix \"evuproxy-forward-drop: \" drop\n", counter)
 	fmt.Fprintf(&b, `    }
 }
 
@@ -231,6 +233,17 @@ func emitTableSets(b *strings.Builder, c *config.Config, geoSet, crowdsecSet str
 		writeRateLimitSets(b, rateLimitSetNeedsFor(c))
 	}
 	return nil
+}
+
+// dropCounter returns the statement inserted into drop rules when stats.drop_counters
+// is on, or "" so the rendered rules are unchanged when it is off. The forward catch-all
+// counts before its log limit: limit stops matching above its rate, and those packets
+// still reach the chain's policy drop, so a counter after it would miss them.
+func dropCounter(c *config.Config) string {
+	if c.Stats.DropCounters {
+		return "counter "
+	}
+	return ""
 }
 
 func routeSrcSetName(routeIndex int) string {
@@ -329,7 +342,7 @@ func writeGeoSet(b *strings.Builder, geoSet string) {
 // writeGeoProtoPortInputRules emits INPUT accepts for published service ports (and geo filtering when enabled).
 // routeSrcSet limits sources to an ipv4_addr set; empty = any source (subject to geo when enabled).
 // breakGlass names the set that skips geo; empty = none.
-func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed bool, geoSet, breakGlass, proto, portExpr, routeSrcSet string) {
+func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed bool, geoSet, breakGlass, proto, portExpr, routeSrcSet, counter string) {
 	if portExpr == "" {
 		return
 	}
@@ -342,7 +355,7 @@ func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed boo
 		return
 	}
 	if blockListed {
-		writePolicyGeoBlockDropLogged(b, geoSet, breakGlass, proto, portExpr)
+		writePolicyGeoBlockDropLogged(b, geoSet, breakGlass, proto, portExpr, counter)
 		if routeSrcSet != "" {
 			fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", routeSrcSet, proto, portExpr)
 			return
@@ -358,7 +371,7 @@ func writeGeoProtoPortInputRules(b *strings.Builder, geoEnabled, blockListed boo
 	if breakGlass != "" {
 		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", breakGlass, proto, portExpr)
 	}
-	writeGeoLogDrop(b, fmt.Sprintf("%s dport %s ip saddr != @%s", proto, portExpr, geoSet))
+	writeGeoLogDrop(b, fmt.Sprintf("%s dport %s ip saddr != @%s", proto, portExpr, geoSet), counter)
 }
 
 func inputAllowProtoPort(a config.AllowRule) (proto, dport string, err error) {

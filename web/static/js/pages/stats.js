@@ -76,7 +76,7 @@ export async function refreshStatsPage() {
       prepareTableCards(nftW);
     } else {
       nftW.innerHTML =
-        "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No counters to show</p><p>The generated ruleset has no counter lines, or <code>nft</code> is unavailable on this host.</p></div>";
+        "<div class=\"evu-empty\"><p class=\"evu-empty__title\">No counters to show</p><p>Set <code>stats.drop_counters: true</code> in the config and apply to count drops here. If it is already on, <code>nft</code> is unavailable on this host.</p></div>";
     }
     markPageLoaded("stats");
   } catch (e) {

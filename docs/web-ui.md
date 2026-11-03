@@ -62,11 +62,9 @@ The Settings bar writes up to three separate stores: UI preferences, config (**P
 
 ## Stats page
 
-**WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft list table … -a`).
+**WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft -a list table …`).
 
-Generated EvuProxy enforcement drops (geoblock, rate limits, CrowdSec, forward catch-all) use **`log prefix`** and **`drop`** — not **`counter`** — so hit counts show up on the **Logs** page (journal/dmesg), not in the Stats nftables table, even when those features are enabled and dropping traffic. Geoblock **SRC** cells offer a break-glass add control when that IPv4 is not already covered by **`geo.break_glass_cidrs`**.
-
-**Deferred:** add optional **`counter`** on selected drop rules (or dedicated summary rules) so rate-limit and CrowdSec packet counts could also appear on Stats, in addition to log lines on Logs.
+By default, generated EvuProxy drop rules (deny lists, geoblock, rate limits, CrowdSec, forward catch-all) have no **`counter`**, so this table is empty and hit counts only show up on the **Logs** page (journal/dmesg). Set **[`stats.drop_counters`](config.md#stats)** to `true` to list those rules here with their packet and byte counts. Geoblock **SRC** cells on **Logs** offer a break-glass add control when that IPv4 is not already covered by **`geo.break_glass_cidrs`**.
 
 **Advanced mode** (Settings) **disables** the **Advanced** tab on **Routes** and **Geoblocking** in this browser (`localStorage`) until turned on — the tab stays visible with a hint linking to Settings. It does not gate **Apply geoblocking to inbound allow rules** — that control stays on the Geoblocking default tab. The **CrowdSec integration** toggle lives on the Geoblocking **Advanced** tab. When only one tab is actionable, the tab control uses subdued styling so the active segment reads as a section label, not a lone button.
 

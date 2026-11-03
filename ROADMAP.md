@@ -232,7 +232,7 @@ Auto-pause:
 
 Drop visibility:
 
-- [ ] Optional `counter` on selected drop rules. Generated rules have none today, so the Stats nftables table is empty on a standard install and drop counts only appear in Logs
+- [x] Optional `counter` on drop rules (`stats.drop_counters`), so drop counts can appear in the Stats nftables table as well as in Logs
 
 ### Phase 10 — API security
 

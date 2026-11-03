@@ -95,6 +95,12 @@ A refusal on its own could just mean a dead service, so each one sits next to a 
 - **Route geo:** `inherit`, `off` and `custom` each pass and refuse the right country, under global allow and block.
 - **Maintenance mode:** forwards are refused while the peer's services stay up, the tunnel and `input_allows` keep working, other proxy ports stay closed, and forwards come back afterwards.
 
+## What `drop_counters` shows
+
+- **Off:** with `stats.drop_counters` unset, the ruleset has no counters, even while traffic is being dropped.
+- **On:** geo allow, geo block, the global deny list, CrowdSec, UDP rate limits and the forward catch-all each count the packets they refuse, read the way **Stats** reads them, and a client that passes isn't counted. The catch-all counts past its log limit.
+- **Reload:** a reload starts the counts from zero.
+
 `devtools/rollback-vm` covers what this can't, because it needs systemd and reboots: confirm-or-revert. The container has no `systemd-run`, so this harness never turns on `apply.confirm`.
 
 ## Stress test

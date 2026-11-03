@@ -45,6 +45,10 @@ forwarding:
 # crowdsec:
 #   enabled: false
 
+# Optional nft counters on generated drop rules, listed on the Stats page (off by default).
+# stats:
+#   drop_counters: true
+
 geo:
   enabled: false
   mode: allow # allow = only listed countries may reach public ports; block = listed countries are denied

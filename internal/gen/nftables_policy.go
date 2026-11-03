@@ -45,6 +45,7 @@ type routePolicy struct {
 	crowdsecSet string
 	breakGlass  string
 	globalDeny  string
+	counter     string // dropCounter statement, "" = stats.drop_counters off
 }
 
 func buildRouteDNATLines(r config.ForwardRoute) ([]routeDNATLine, error) {
@@ -185,10 +186,10 @@ func writePolicyDnatLine(b *strings.Builder, r routePolicy, line routeDNATLine) 
 		return
 	}
 	if r.globalDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.globalDeny, r.proto, line.publicDport)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.globalDeny, r.proto, line.publicDport, r.counter)
 	}
 	if r.srcDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.srcDeny, r.proto, line.publicDport)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.srcDeny, r.proto, line.publicDport, r.counter)
 	}
 	dnatVerdict := "dnat to " + line.dnatTo
 	if !r.geo.enabled {
@@ -196,7 +197,7 @@ func writePolicyDnatLine(b *strings.Builder, r routePolicy, line routeDNATLine) 
 		return
 	}
 	if r.geo.blockListed {
-		writePolicyGeoBlockDrop(b, r.geo.setName, r.breakGlass, r.proto, line.publicDport)
+		writePolicyGeoBlockDrop(b, r.geo.setName, r.breakGlass, r.proto, line.publicDport, r.counter)
 		writePolicyAllow(b, r.proto, line.publicDport, r.srcAllow, "", dnatVerdict)
 		return
 	}
@@ -223,12 +224,12 @@ func writePolicyAllow(b *strings.Builder, proto, portExpr, srcAllow, geoSet, ver
 	}
 }
 
-func writePolicyGeoBlockDrop(b *strings.Builder, geoSet, breakGlass, proto, portExpr string) {
+func writePolicyGeoBlockDrop(b *strings.Builder, geoSet, breakGlass, proto, portExpr, counter string) {
 	if breakGlass != "" {
-		fmt.Fprintf(b, "        ip saddr @%s ip saddr != @%s %s dport %s drop\n", geoSet, breakGlass, proto, portExpr)
+		fmt.Fprintf(b, "        ip saddr @%s ip saddr != @%s %s dport %s %sdrop\n", geoSet, breakGlass, proto, portExpr, counter)
 		return
 	}
-	fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", geoSet, proto, portExpr)
+	fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", geoSet, proto, portExpr, counter)
 }
 
 func writePolicyInputPort(b *strings.Builder, r routePolicy) {
@@ -236,19 +237,19 @@ func writePolicyInputPort(b *strings.Builder, r routePolicy) {
 		return
 	}
 	if r.globalDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.globalDeny, r.proto, r.portExpr)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.globalDeny, r.proto, r.portExpr, r.counter)
 	}
 	if r.srcDeny != "" {
-		fmt.Fprintf(b, "        ip saddr @%s %s dport %s drop\n", r.srcDeny, r.proto, r.portExpr)
+		fmt.Fprintf(b, "        ip saddr @%s %s dport %s %sdrop\n", r.srcDeny, r.proto, r.portExpr, r.counter)
 	}
-	writePolicyCrowdsecDrop(b, r.crowdsecSet, r.breakGlass, r.proto, r.portExpr)
-	writePolicyRateLimit(b, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.breakGlass)
+	writePolicyCrowdsecDrop(b, r.crowdsecSet, r.breakGlass, r.proto, r.portExpr, r.counter)
+	writePolicyRateLimit(b, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.portExpr, r.breakGlass, r.counter)
 	if !r.geo.enabled {
 		writePolicyAllow(b, r.proto, r.portExpr, r.srcAllow, "", "accept")
 		return
 	}
 	if r.geo.blockListed {
-		writePolicyGeoBlockDropLogged(b, r.geo.setName, r.breakGlass, r.proto, r.portExpr)
+		writePolicyGeoBlockDropLogged(b, r.geo.setName, r.breakGlass, r.proto, r.portExpr, r.counter)
 		writePolicyAllow(b, r.proto, r.portExpr, r.srcAllow, "", "accept")
 		return
 	}
@@ -257,21 +258,21 @@ func writePolicyInputPort(b *strings.Builder, r routePolicy) {
 		fmt.Fprintf(b, "        ip saddr @%s %s dport %s accept\n", r.breakGlass, r.proto, r.portExpr)
 		return
 	}
-	writeGeoLogDrop(b, fmt.Sprintf("%s dport %s ip saddr != @%s", r.proto, r.portExpr, r.geo.setName))
+	writeGeoLogDrop(b, fmt.Sprintf("%s dport %s ip saddr != @%s", r.proto, r.portExpr, r.geo.setName), r.counter)
 }
 
-func writePolicyGeoBlockDropLogged(b *strings.Builder, geoSet, breakGlass, proto, portExpr string) {
+func writePolicyGeoBlockDropLogged(b *strings.Builder, geoSet, breakGlass, proto, portExpr, counter string) {
 	if breakGlass != "" {
-		writeGeoLogDrop(b, fmt.Sprintf("ip saddr @%s ip saddr != @%s %s dport %s", geoSet, breakGlass, proto, portExpr))
+		writeGeoLogDrop(b, fmt.Sprintf("ip saddr @%s ip saddr != @%s %s dport %s", geoSet, breakGlass, proto, portExpr), counter)
 		return
 	}
-	writeGeoLogDrop(b, fmt.Sprintf("ip saddr @%s %s dport %s", geoSet, proto, portExpr))
+	writeGeoLogDrop(b, fmt.Sprintf("ip saddr @%s %s dport %s", geoSet, proto, portExpr), counter)
 }
 
 // writeGeoLogDrop logs a sample of what match catches and drops all of it. The limit needs a rule
 // of its own: past the limit a limit statement stops the rule matching, and the packet would go
 // on to whatever accept comes next.
-func writeGeoLogDrop(b *strings.Builder, match string) {
+func writeGeoLogDrop(b *strings.Builder, match, counter string) {
 	fmt.Fprintf(b, "        %s limit rate 5/minute burst 20 packets log prefix \"evuproxy-geo-block: \"\n", match)
-	fmt.Fprintf(b, "        %s drop\n", match)
+	fmt.Fprintf(b, "        %s %sdrop\n", match, counter)
 }

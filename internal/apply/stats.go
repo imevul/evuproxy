@@ -30,7 +30,7 @@ type WGPeerDump struct {
 	TransferTX      int64  `json:"transfer_tx"`
 }
 
-// NFTCounterLine is a ruleset line that includes an nft counter.
+// NFTCounterLine is a ruleset line that includes an nft counter (see stats.drop_counters).
 type NFTCounterLine struct {
 	Family  string `json:"family"`
 	Table   string `json:"table"`
@@ -107,12 +107,16 @@ func wgDumpPeers(iface string) ([]WGPeerDump, error) {
 }
 
 func nftCounterLines(family, table string) []NFTCounterLine {
-	out, err := runCmdCombined(context.Background(), "nft", "list", "table", family, table, "-a")
+	out, err := runCmdCombined(context.Background(), "nft", "-a", "list", "table", family, table)
 	if err != nil {
 		return nil
 	}
+	return parseNFTCounterLines(family, table, string(out))
+}
+
+func parseNFTCounterLines(family, table, listing string) []NFTCounterLine {
 	var res []NFTCounterLine
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(listing, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || !strings.Contains(line, "counter") {
 			continue
