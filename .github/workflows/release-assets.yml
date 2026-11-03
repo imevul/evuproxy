@@ -24,9 +24,11 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Build binaries and source archive
+      - name: Build binaries, packages and source archive
         env:
           TAG: ${{ github.event.release.tag_name }}
+          # Static, so the binary and packages don't depend on this runner's glibc.
+          CGO_ENABLED: "0"
         run: |
           set -euo pipefail
           VERSION="${TAG#v}"
@@ -37,6 +39,7 @@ jobs:
             out="dist/evuproxy-${VERSION}-linux-${GOARCH}"
             GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$out" ./cmd/evuproxy
           done
+          ./scripts/build-packages.sh "$VERSION" dist amd64 arm64
           git archive --format=zip --prefix="evuproxy-${VERSION}/" -o "dist/evuproxy-${VERSION}-source.zip" "${TAG}"
           (cd dist && sha256sum ./* > SHA256SUMS)
 
@@ -48,6 +51,8 @@ jobs:
           cd dist
           gh release upload "${{ github.event.release.tag_name }}" \
             evuproxy-*-linux-* \
+            evuproxy*.deb \
+            evuproxy*.rpm \
             evuproxy-*-source.zip \
             SHA256SUMS \
             --clobber

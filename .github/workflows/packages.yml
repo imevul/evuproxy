@@ -1,0 +1,26 @@
+name: Package tests
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  install-upgrade-remove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Load WireGuard
+        # A container can't count on the kernel loading this for it.
+        run: sudo modprobe wireguard
+      - name: Install, upgrade and remove on Debian, Ubuntu, AlmaLinux and Fedora
+        run: make package-test

@@ -53,3 +53,13 @@ jobs:
         with:
           scandir: ./devtools/e2e
           severity: error
+      - name: ShellCheck maintainer scripts
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./packaging
+          severity: error
+      - name: ShellCheck package tests
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./devtools/package-test
+          severity: error

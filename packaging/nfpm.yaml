@@ -1,0 +1,52 @@
+# .deb and RPM definition. Built by scripts/build-packages.sh, which sets the variables.
+#
+# The seed config is not a conffile: dpkg would stop to ask about an existing config.yaml, and
+# fail when nobody can answer, and rpm renames a changed one to .rpmsave on removal.
+# postinstall.sh copies it to /etc/evuproxy/config.yaml only when that file is missing.
+name: evuproxy
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: EvuProxy <https://github.com/imevul/evuproxy/issues>
+homepage: https://github.com/imevul/evuproxy
+license: MIT
+description: |-
+  TCP/UDP exposure on a Linux VPS using WireGuard and nftables.
+  Installing changes no firewall rules and enables no services. See the README.
+
+overrides:
+  deb:
+    depends: [wireguard-tools, nftables, iproute2]
+  rpm:
+    depends: [wireguard-tools, nftables, iproute]
+
+# Relative to the staging directory that scripts/build-packages.sh runs nfpm from.
+contents:
+  # Listed so rpm owns them and removes them with the package.
+  - dst: /usr/share/evuproxy
+    type: dir
+  - dst: /usr/share/doc/evuproxy
+    type: dir
+  - src: ./evuproxy
+    dst: /usr/bin/evuproxy
+    file_info:
+      mode: 0755
+  - src: ./units/*
+    dst: /usr/lib/systemd/system/
+    file_info:
+      mode: 0644
+  - src: ./config.example.yaml
+    dst: /usr/share/evuproxy/config.example.yaml
+    file_info:
+      mode: 0644
+  - src: ./LICENSE
+    dst: /usr/share/doc/evuproxy/LICENSE
+    file_info:
+      mode: 0644
+
+scripts:
+  postinstall: ./postinstall.sh
+  preremove: ./preremove.sh
+  postremove: ./postremove.sh
