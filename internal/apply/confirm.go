@@ -535,6 +535,12 @@ func RecoverConfirmSession(ctx context.Context, cfgPath string) error {
 // same revert target: the last confirmed config. A failure reverts the host straight away
 // and leaves the edits in config.yaml as unapplied changes.
 func ReloadWithConfirm(ctx context.Context, cfgPath string, timeoutSeconds int, progress func(step string)) (*ConfirmSessionView, error) {
+	return ReloadWithConfirmIfMatch(ctx, cfgPath, "", timeoutSeconds, progress)
+}
+
+// ReloadWithConfirmIfMatch is ReloadWithConfirm with ReloadIfMatch's configHash. A mismatch
+// happens before anything is armed, so it starts no session and leaves a running one as it is.
+func ReloadWithConfirmIfMatch(ctx context.Context, cfgPath, configHash string, timeoutSeconds int, progress func(step string)) (*ConfirmSessionView, error) {
 	if timeoutSeconds < config.MinConfirmTimeoutSeconds || timeoutSeconds > config.MaxConfirmTimeoutSeconds {
 		return nil, fmt.Errorf("confirm timeout must be %d to %d seconds", config.MinConfirmTimeoutSeconds, config.MaxConfirmTimeoutSeconds)
 	}
@@ -550,6 +556,9 @@ func ReloadWithConfirm(ctx context.Context, cfgPath string, timeoutSeconds int, 
 	}
 	if s != nil && s.Phase != ConfirmPhaseActive {
 		return nil, fmt.Errorf("%w: %s", ErrRollbackFailed, s.Failure)
+	}
+	if err := checkConfigHash(cfgPath, configHash); err != nil {
+		return nil, err
 	}
 	first := s == nil
 	if first {

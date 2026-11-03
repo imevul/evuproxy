@@ -16,28 +16,39 @@ import (
 	"github.com/imevul/evuproxy/internal/eventlog"
 )
 
-// readConfirmTimeout returns the optional confirm_timeout_seconds in a POST /reload body.
-// Bodies were ignored before this field existed, so one that isn't a JSON object still
-// means a plain reload. A malformed object is an error: guessing would apply one-way
-// what the caller asked to be able to take back.
-func readConfirmTimeout(r *http.Request) (int, error) {
+// The error_code of a POST /reload that has no acknowledgement of what it would apply.
+const configHashRequiredCode = "config_hash_required"
+
+// reloadRequest is a POST /reload body.
+type reloadRequest struct {
+	ConfirmTimeoutSeconds int    `json:"confirm_timeout_seconds"`
+	ConfigHash            string `json:"config_hash"`
+	Force                 bool   `json:"force"`
+}
+
+// readReloadRequest parses a POST /reload body. One that isn't a JSON object carries no
+// fields, so it gets the same answer as no body at all. A malformed object is an error:
+// guessing could apply one-way what the caller asked to be able to take back.
+func readReloadRequest(r *http.Request) (reloadRequest, error) {
+	var body reloadRequest
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<14))
 	if err != nil {
-		return 0, err
+		return body, err
 	}
 	if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) {
-		return 0, nil
-	}
-	var body struct {
-		ConfirmTimeoutSeconds int `json:"confirm_timeout_seconds"`
+		return body, nil
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
-		return 0, err
+		return body, err
 	}
 	if t := body.ConfirmTimeoutSeconds; t != 0 && (t < config.MinConfirmTimeoutSeconds || t > config.MaxConfirmTimeoutSeconds) {
-		return 0, fmt.Errorf("confirm_timeout_seconds must be %d to %d", config.MinConfirmTimeoutSeconds, config.MaxConfirmTimeoutSeconds)
+		return body, fmt.Errorf("confirm_timeout_seconds must be %d to %d", config.MinConfirmTimeoutSeconds, config.MaxConfirmTimeoutSeconds)
 	}
-	return body.ConfirmTimeoutSeconds, nil
+	// They contradict each other, and a client bug must not pass as the unconditional one.
+	if body.Force && body.ConfigHash != "" {
+		return body, errors.New("send config_hash or force, not both")
+	}
+	return body, nil
 }
 
 // confirmErrorCode maps a refusal to its status and stable code. ok is false for any other
@@ -58,12 +69,14 @@ func confirmErrorCode(err error) (status int, code string, ok bool) {
 		return http.StatusConflict, "no_reverted_config", true
 	case errors.Is(err, apply.ErrPendingEditsExist):
 		return http.StatusConflict, "pending_edits", true
+	case errors.Is(err, apply.ErrConfigHashMismatch):
+		return http.StatusConflict, "config_hash_mismatch", true
 	}
 	return 0, "", false
 }
 
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
-	timeout, err := readConfirmTimeout(r)
+	body, err := readReloadRequest(r)
 	if err != nil {
 		s.jsonAPIError(w, http.StatusBadRequest, "invalid reload body: "+err.Error(), "invalid_reload_body")
 		return
@@ -72,9 +85,20 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.applyMu.Unlock()
+	if body.ConfigHash == "" && !body.Force {
+		const msg = "send the config_hash from POST /validate, or force to apply without a check"
+		s.emit(eventlog.Record{Event: "reload_failed", Detail: msg, ErrorCode: configHashRequiredCode})
+		s.jsonAPIError(w, http.StatusConflict, msg, configHashRequiredCode)
+		return
+	}
+	timeout := body.ConfirmTimeoutSeconds
 	detail := "reload"
+	// In the event log, so that an apply nobody checked can be told from one that was.
+	if body.Force {
+		detail += ", forced"
+	}
 	if timeout > 0 {
-		detail = "reload, confirm within " + strconv.Itoa(timeout) + "s"
+		detail += ", confirm within " + strconv.Itoa(timeout) + "s"
 	}
 	s.emit(eventlog.Record{Event: "reload_started", Detail: detail})
 	// Detach from the request context: a client disconnect must not cancel the
@@ -86,9 +110,9 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	progress := func(step string) { s.reloadStep.Store(step) }
 	var session *apply.ConfirmSessionView
 	if timeout > 0 {
-		session, err = apply.ReloadWithConfirm(ctx, s.Config, timeout, progress)
+		session, err = apply.ReloadWithConfirmIfMatch(ctx, s.Config, body.ConfigHash, timeout, progress)
 	} else {
-		err = apply.ReloadWithProgress(ctx, s.Config, progress)
+		err = apply.ReloadIfMatch(ctx, s.Config, body.ConfigHash, progress)
 	}
 	if err != nil {
 		s.logErr("reload", err)

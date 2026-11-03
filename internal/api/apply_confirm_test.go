@@ -68,10 +68,9 @@ func wantStatus(t *testing.T, resp *http.Response, status int, code string) map[
 	return out
 }
 
-func TestReloadBody_plainAndIgnoredBodiesStayOneWay(t *testing.T) {
+func TestReloadBody_withoutTimeoutStaysOneWay(t *testing.T) {
 	ts, cfgPath := newMutationTestServer(t, fakeSystemd())
-	// Bodies used to be ignored, so these must keep meaning a plain reload.
-	for _, body := range []string{"", "{}", "not json", `{"confirm_timeout_seconds":0}`} {
+	for _, body := range []string{forceBody, `{"force":true,"confirm_timeout_seconds":0}`} {
 		out := wantStatus(t, doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", body), http.StatusOK, "")
 		if _, has := out["session"]; has {
 			t.Fatalf("body %q started a session: %v", body, out)
@@ -101,7 +100,7 @@ func TestUpdateGeo_holdsBackUnappliedCountries(t *testing.T) {
 	if err := os.WriteFile(cfgPath, []byte(applied), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	wantStatus(t, doAuthed(t, http.MethodPost, url+"/reload", ""), http.StatusOK, "")
+	wantStatus(t, doAuthed(t, http.MethodPost, url+"/reload", forceBody), http.StatusOK, "")
 
 	updateGeo := func(status int, code string) map[string]any {
 		t.Helper()
@@ -117,7 +116,7 @@ func TestUpdateGeo_holdsBackUnappliedCountries(t *testing.T) {
 	if out := updateGeo(http.StatusOK, ""); out["result"] != "geo_updated" || out["geo_changes_held_back"] != true {
 		t.Fatalf("countries pending: %v", out)
 	}
-	wantStatus(t, doAuthed(t, http.MethodPost, url+"/reload", `{"confirm_timeout_seconds":60}`), http.StatusOK, "")
+	wantStatus(t, doAuthed(t, http.MethodPost, url+"/reload", `{"force":true,"confirm_timeout_seconds":60}`), http.StatusOK, "")
 	updateGeo(http.StatusConflict, "apply_session_active")
 }
 
@@ -132,11 +131,11 @@ func TestApplySessionFlow(t *testing.T) {
 	ts, cfgPath := newMutationTestServer(t, fakeSystemd())
 	url := ts.URL + "/api/v1"
 	post := func(path, body string) *http.Response { return doAuthed(t, http.MethodPost, url+path, body) }
-	const confirmBody = `{"confirm_timeout_seconds":60}`
+	const confirmBody = `{"force":true,"confirm_timeout_seconds":60}`
 
 	// A fresh install has never applied: nothing to go back to.
 	wantStatus(t, post("/reload", confirmBody), http.StatusConflict, "no_baseline")
-	wantStatus(t, post("/reload", ""), http.StatusOK, "")
+	wantStatus(t, post("/reload", forceBody), http.StatusOK, "")
 
 	st := wantStatus(t, doAuthed(t, http.MethodGet, url+"/apply/session", ""), http.StatusOK, "")
 	if st["session"] != nil || st["confirm_enabled"] != false {
@@ -154,7 +153,7 @@ func TestApplySessionFlow(t *testing.T) {
 	if _, leaked := session["token"]; leaked {
 		t.Fatal("the timer token stays on the host")
 	}
-	wantStatus(t, post("/reload", ""), http.StatusConflict, "apply_session_active")
+	wantStatus(t, post("/reload", forceBody), http.StatusConflict, "apply_session_active")
 	wantStatus(t, post("/restore?path=/var/backups/x.tgz", ""), http.StatusConflict, "apply_session_active")
 	wantStatus(t, post("/reload", confirmBody), http.StatusOK, "")
 	wantStatus(t, post("/apply/confirm", ""), http.StatusOK, "")
@@ -197,6 +196,6 @@ func TestConfirmUnavailable_onHostsWithoutSystemd(t *testing.T) {
 		}
 		return nil, nil
 	}})
-	wantStatus(t, doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", ""), http.StatusOK, "")
-	wantStatus(t, doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", `{"confirm_timeout_seconds":60}`), http.StatusConflict, "confirm_unavailable")
+	wantStatus(t, doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", forceBody), http.StatusOK, "")
+	wantStatus(t, doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", `{"force":true,"confirm_timeout_seconds":60}`), http.StatusConflict, "confirm_unavailable")
 }

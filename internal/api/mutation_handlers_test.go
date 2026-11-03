@@ -122,7 +122,7 @@ func TestHandleReload_success(t *testing.T) {
 	}}
 	ts, _ := newMutationTestServer(t, run)
 
-	resp := doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", "")
+	resp := doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", forceBody)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
@@ -143,7 +143,7 @@ func TestHandleReload_nftFailureIs500(t *testing.T) {
 	}}
 	ts, _ := newMutationTestServer(t, run)
 
-	resp := doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", "")
+	resp := doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", forceBody)
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
@@ -193,7 +193,7 @@ func TestHandleReloadProgress_namesEachStageThenClears(t *testing.T) {
 	if step := stepNow(); step != "" {
 		t.Fatalf("step before any reload %q", step)
 	}
-	resp := doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", "")
+	resp := doAuthed(t, http.MethodPost, ts.URL+"/api/v1/reload", forceBody)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}

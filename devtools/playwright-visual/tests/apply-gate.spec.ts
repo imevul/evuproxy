@@ -398,6 +398,230 @@ test.describe("Apply away from Pending changes", () => {
   });
 });
 
+/*
+ * The server side of the gate: /reload applies only the file /validate passed. These
+ * go through the mock's real answers, because a stubbed 409 would prove only that the
+ * stub was called. Nothing here gets as far as applying, apart from the two API tests
+ * that apply inside a session, revert it and restore the config.
+ */
+test.describe("server-side apply gate", () => {
+  const url = (path: string) => `${origin}/api/v1${path}`;
+  const auth = () => ({ Authorization: `Bearer ${token()}` });
+
+  test.beforeEach(async ({ page }) => {
+    await seed(page, { scheme: "light" });
+    await stubPending(page, true);
+  });
+
+  test("Apply sends the hash its check returned, and never force", async ({ page }) => {
+    await stubValidate(page, { ...CLEAN, config_hash: "hash-from-check" });
+    await gotoRoute(page, origin, "overview");
+
+    let sent: unknown;
+    await page.route("**/api/v1/reload", (route) => {
+      sent = route.request().postDataJSON();
+      return route.fulfill({ json: { result: "reloaded" } });
+    });
+
+    await page.locator("#apply-bar-apply").click();
+    await expect.poll(() => sent).toEqual({ config_hash: "hash-from-check" });
+  });
+
+  test("a confirmed Apply sends the hash along with its timeout", async ({ page }) => {
+    await stubValidate(page, { ...CLEAN, config_hash: "hash-from-check" });
+    await page.route("**/api/v1/apply/session", (route) =>
+      route.fulfill({
+        json: { confirm_enabled: true, confirm_timeout_seconds: 60, session: null, last_revert: null },
+      })
+    );
+    await gotoRoute(page, origin, "overview");
+
+    let sent: unknown;
+    await page.route("**/api/v1/reload", (route) => {
+      sent = route.request().postDataJSON();
+      return route.fulfill({ status: 500, json: { error: "reload failed" } });
+    });
+
+    await page.locator("#apply-bar-apply").click();
+    await expect
+      .poll(() => sent)
+      .toEqual({ config_hash: "hash-from-check", confirm_timeout_seconds: 60 });
+  });
+
+  // Each click's hash has to come from that click's check, not from an earlier one.
+  test("Apply sends the hash of the check it just ran", async ({ page }) => {
+    await stubValidate(page, { ...CLEAN, config_hash: "from-the-button" });
+    await gotoRoute(page, origin, "pending");
+    await page.locator("#pending-check-config").click();
+    await expect(page.locator("#pending-validate-panel")).toHaveClass(/evu-alert--success/);
+
+    await stubValidate(page, { ...CLEAN, config_hash: "from-apply" });
+    let sent: unknown;
+    await page.route("**/api/v1/reload", (route) => {
+      sent = route.request().postDataJSON();
+      return route.fulfill({ json: { result: "reloaded" } });
+    });
+
+    await page.locator("#apply-bar-apply").click();
+    await expect.poll(() => sent).toEqual({ config_hash: "from-apply" });
+  });
+
+  test("a config saved after the check stops Apply, says so, and Apply works again", async ({ page }) => {
+    // The mock's real hash, without the geo warning that would stop at the tick first.
+    await page.route("**/api/v1/validate", async (route) => {
+      const res = await route.fetch();
+      await route.fulfill({ response: res, json: { ...(await res.json()), warnings: [] } });
+    });
+    await gotoRoute(page, origin, "pending");
+
+    // The mock's real /validate runs, then a save lands before /reload gets there: the
+    // hash no longer matches. Sending a stale one has the same effect without changing
+    // the config the other specs share.
+    let reloads = 0;
+    const sent: unknown[] = [];
+    await page.route("**/api/v1/reload", async (route) => {
+      reloads += 1;
+      sent.push(route.request().postDataJSON());
+      if (reloads === 1) {
+        await route.continue({
+          postData: JSON.stringify({ config_hash: "0".repeat(64) }),
+          headers: { ...route.request().headers(), "content-type": "application/json" },
+        });
+        return;
+      }
+      await route.fulfill({ json: { result: "reloaded" } });
+    });
+
+    await page.locator("#pending-check-config").click();
+    await expect(page.locator("#pending-validate-panel")).toBeVisible();
+    const pendingRefreshed = page.waitForResponse("**/api/v1/pending");
+    await page.locator("#apply-bar-apply").click();
+
+    const msg = page.locator("#apply-msg");
+    await expect(msg).toContainText(/changed after this check/i);
+    await expect(msg).toContainText(/nothing was applied/i);
+    await expect(msg).toHaveClass(/err/);
+    await expect(page.locator("#apply-progress-status")).toHaveText("Validating failed");
+    await pendingRefreshed;
+    // Still there once the refresh has seen the new revision.
+    await expect(msg).toContainText(/changed after this check/i);
+    await expect(page.getByText("Applied to host")).toHaveCount(0);
+
+    // No retry of its own: the operator looks first, and force is never the way round it.
+    expect(reloads).toBe(1);
+    expect(JSON.stringify(sent)).not.toContain("force");
+
+    await page.locator("#apply-bar-apply").click();
+    await expect.poll(() => reloads).toBe(2);
+    await expect(page.locator("#apply-progress-status")).toHaveText("Done");
+  });
+
+  test("a config saved after the check revokes the acknowledgement", async ({ page }) => {
+    await stubValidate(page, { ...RISKY, config_hash: "checked" });
+    await gotoRoute(page, origin, "overview");
+    await page.route("**/api/v1/reload", (route) =>
+      route.fulfill({
+        status: 409,
+        json: { error: "config.yaml changed", error_code: "config_hash_mismatch" },
+      })
+    );
+
+    await page.locator("#apply-bar-apply").click();
+    await page.locator("#pending-lockout-ack").check();
+    await page.locator("#apply-bar-apply").click();
+
+    await expect(page.locator("#apply-msg")).toContainText(/changed after this check/i);
+    await expect(page.locator("#pending-lockout-ack")).not.toBeChecked();
+    await expect(page.locator("#pending-lockout-ack-wrap")).toHaveClass(/is-hidden/);
+  });
+
+  // Reaches the mock: a UI older than the API sends this, and has to see why it was refused.
+  test("an Apply with no hash is refused with the host's reason", async ({ page }) => {
+    await stubValidate(page, CLEAN);
+    await gotoRoute(page, origin, "overview");
+
+    await page.locator("#apply-bar-apply").click();
+    await expect(page.locator("#apply-msg")).toContainText(/config_hash/);
+    await expect(page.locator("#apply-progress-status")).toHaveText("Applying firewall failed");
+  });
+
+  // A hash of the wrong type is a response we don't understand, like the rest of that rule.
+  test("a config_hash that isn't a string blocks Apply", async ({ page }) => {
+    await stubValidate(page, { ...CLEAN, config_hash: 12345 });
+    await gotoRoute(page, origin, "overview");
+
+    let applied = false;
+    await page.route("**/api/v1/reload", (route) => {
+      applied = true;
+      return route.fulfill({ json: { result: "reloaded" } });
+    });
+
+    await page.locator("#apply-bar-apply").click();
+    await expect(page.locator("#apply-msg")).toContainText(/unexpected response/i);
+    expect(applied).toBe(false);
+  });
+
+  test("the mock answers like the API", async ({ request }) => {
+    const reload = (data?: unknown) =>
+      request.post(url("/reload"), { headers: auth(), ...(data ? { data } : {}) });
+    const check = await request.post(url("/validate"), { headers: auth() });
+    const { config_hash: hash } = await check.json();
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+
+    const etag = (await request.get(url("/config"), { headers: auth() })).headers().etag;
+    expect(etag).toBe(`"${hash}"`);
+
+    const noHash = await reload();
+    expect(noHash.status()).toBe(409);
+    expect((await noHash.json()).error_code).toBe("config_hash_required");
+
+    const notForced = await reload({ force: false });
+    expect(notForced.status()).toBe(409);
+    expect((await notForced.json()).error_code).toBe("config_hash_required");
+
+    const stale = await reload({ config_hash: "0".repeat(64) });
+    expect(stale.status()).toBe(409);
+    expect((await stale.json()).error_code).toBe("config_hash_mismatch");
+
+    const both = await reload({ force: true, config_hash: hash });
+    expect(both.status()).toBe(400);
+    expect((await both.json()).error_code).toBe("invalid_reload_body");
+
+    // A draft isn't what a reload applies, so it gets nothing to acknowledge.
+    const cfg = await (await request.get(url("/config"), { headers: auth() })).json();
+    const draft = await request.post(url("/validate"), { headers: auth(), data: cfg });
+    expect((await draft.json()).config_hash).toBeUndefined();
+  });
+
+  for (const [name, ack] of [
+    ["a matching hash", (hash: string) => ({ config_hash: hash })],
+    ["force", () => ({ force: true })],
+  ] as const) {
+    test(`the mock applies with ${name}`, async ({ request }) => {
+      const getJson = async (path: string) =>
+        (await request.get(url(path), { headers: auth() })).json();
+      const saved = await getJson("/config");
+      const pendingBefore = await getJson("/pending");
+      const check = await request.post(url("/validate"), { headers: auth() });
+      const { config_hash: hash } = await check.json();
+      // In a confirm session, because the mock is shared: reverting restores applied history.
+      const applied = await request.post(url("/reload"), {
+        headers: auth(),
+        data: { ...ack(hash), confirm_timeout_seconds: 600 },
+      });
+      try {
+        expect(applied.status()).toBe(200);
+      } finally {
+        // The revert also puts the config back to the applied one, so restore the saved one.
+        await request.post(url("/apply/revert"), { headers: auth() });
+        await request.post(url("/apply/reverted/dismiss"), { headers: auth() });
+        await request.put(url("/config"), { headers: auth(), data: saved });
+      }
+      expect(await getJson("/pending")).toEqual(pendingBefore);
+    });
+  }
+});
+
 /* With nothing waiting there is no bar, and Pending's own Apply takes its place. */
 test.describe("re-applying with nothing pending", () => {
   test.beforeEach(async ({ page }) => {
