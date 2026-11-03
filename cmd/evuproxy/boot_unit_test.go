@@ -172,8 +172,9 @@ func TestRebuildInstall_refreshesBootUnit(t *testing.T) {
 				systemctl += "exit 1\n"
 			}
 			for shim, body := range map[string]string{
-				"id":        "#!/bin/sh\necho 0\n",
-				"go":        "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && : >\"$2\"; shift; done\n",
+				"id": "#!/bin/sh\necho 0\n",
+				// The "new binary" accepts any config: rebuild.sh validates before installing.
+				"go":        "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = -o ] && printf '#!/bin/sh\\nexit 0\\n' >\"$2\" && chmod +x \"$2\"; shift; done\n",
 				"systemctl": systemctl,
 			} {
 				if err := os.WriteFile(filepath.Join(root, "shims", shim), []byte(body), 0o755); err != nil {
@@ -196,6 +197,7 @@ func TestRebuildInstall_refreshesBootUnit(t *testing.T) {
 				"PATH="+filepath.Join(root, "shims")+string(os.PathListSeparator)+os.Getenv("PATH"),
 				"PREFIX="+installTo,
 				"UNIT_DIR="+filepath.Join(root, "units"),
+				"CONFIG_DIR="+filepath.Join(root, "etc"),
 			)
 			out, err := cmd.CombinedOutput()
 			if (err != nil) != tc.wantErr {

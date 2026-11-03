@@ -91,9 +91,16 @@ cd /path/to/evuproxy   # repository root
 
 The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.25+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/` (`rebuild.sh --install` also replaces an unmodified `evuproxy.service` with the current one, and warns and leaves yours alone if you changed it), restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file. With **`EVUPROXY_UI_IMAGE`** set, it runs **`docker compose pull`** and **`up -d --no-build`** instead, and the version stays what `.env` says until you change it.
 
+**If the new binary rejects your config:** before installing, `rebuild.sh --install` runs the new binary's **`validate`** against `/etc/evuproxy/config.yaml`. If that fails, it prints the cause and the update stops with a non-zero exit, before installing the binary, changing the boot unit, restarting a service or touching the UI. Running services keep the previous version, but the clone is already at the new commit. Fix `config.yaml`, then run the script again.
+
+- The check is the same as **`evuproxy validate`**, so it also stops on what a reload would fail on, such as an unreadable WireGuard key file or `nft` rejecting the generated rules.
+- With EvuProxy systemd units installed, a missing config stops the update too. On a host with neither units nor a config, the check is skipped.
+- Hosts without units don't get the check from `update.sh`: it doesn't install the binary there, so their running version is unchanged. Run the new `./evuproxy validate` yourself before moving to it.
+- It may print a **`lockout_risk_check_unavailable`** warning, which doesn't stop the update. The check has no client address to test.
+
 **Limitations**
 
-- **`config.yaml` is yours:** the updater does not migrate, merge, or validate configuration. New releases may require new fields, renames, or stricter validation—read [CHANGELOG.md](CHANGELOG.md) and compare with [config/evuproxy.example.yaml](config/evuproxy.example.yaml), then run **`evuproxy reload`** (or fix issues before reloading) so you are not locked out.
+- **`config.yaml` is yours:** the updater validates configuration but does not migrate or merge it. Unknown keys are ignored rather than rejected, so a renamed optional field can pass validation and silently stop taking effect. Read [CHANGELOG.md](CHANGELOG.md) and compare with [config/evuproxy.example.yaml](config/evuproxy.example.yaml), then run **`evuproxy reload`** (or fix issues before reloading) so you are not locked out.
 - **Local git changes:** `git pull` fails if you have uncommitted edits in the clone; commit, stash, or discard them first.
 - **Binary-only installs** (prebuilt `evuproxy` copied to `/usr/local/bin` without this repo) are not updated by this script; see [Binary-only installs](#binary-only-installs).
 - **Peers and other hosts** are unchanged; client WireGuard configs are not updated by `update.sh`.
