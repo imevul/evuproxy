@@ -253,7 +253,7 @@ Drop visibility:
 - [x] Pin the `nginx` base image by digest
 - [x] Optional `.deb` and RPM packages
 - [x] [`scripts/upgrade-binary.sh`](scripts/upgrade-binary.sh): an upgrade path for binary-only installs, which `update.sh` doesn't cover
-- [ ] *Proposed:* config migration or upgrade checks, since `update.sh` doesn't migrate or validate `config.yaml`
+- [x] *Proposed:* upgrade checks: `rebuild.sh --install` validates `config.yaml` with the new binary and stops the update before installing or restarting anything. No schema change needs a migration yet
 - [x] Log reopen on `SIGHUP` for logrotate
 
 ### Phase 12 — Policy and UX backlog

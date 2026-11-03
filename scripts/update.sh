@@ -5,9 +5,11 @@ set -euo pipefail
 # From repo root: ./scripts/update.sh
 #
 # - Builds with scripts/rebuild.sh (see that script for PREFIX / OUT).
-# - If EvuProxy systemd units are installed under /etc/systemd/system/, installs
-#   the binary to PREFIX (default /usr/local) and restarts active units. Installing
-#   also refreshes an unmodified evuproxy.service.
+# - If EvuProxy systemd units are installed under UNIT_DIR (default
+#   /etc/systemd/system), installs the binary to PREFIX (default /usr/local) and
+#   restarts active units. Installing also refreshes an unmodified evuproxy.service.
+#   If the new binary rejects the config, rebuild.sh stops before installing, and so
+#   this script stops before restarting anything.
 # - If this repo's default Docker Compose UI stack is running, rebuilds and
 #   recreates those containers, or pulls first when EVUPROXY_UI_IMAGE selects a
 #   published image.
@@ -18,8 +20,9 @@ cd "$REPO_ROOT"
 
 git pull
 
+UNIT_DIR="${UNIT_DIR:-/etc/systemd/system}"
 SYSTEMD_UNITS=0
-if [[ -f /etc/systemd/system/evuproxy-api.service ]] || [[ -f /etc/systemd/system/evuproxy.service ]]; then
+if [[ -f "$UNIT_DIR/evuproxy-api.service" ]] || [[ -f "$UNIT_DIR/evuproxy.service" ]]; then
   SYSTEMD_UNITS=1
 fi
 

@@ -114,6 +114,15 @@ Reads `route_accepted` from the real `GET /api/v1/stats`.
 
 It doesn't send real traffic past a SYN limit or `max_conn_per_ip`. Those drop on the forward chain like the UDP limit, and the Go tests check they stay there.
 
+## What `upgrade_config` shows
+
+Runs the real `scripts/update.sh` and `rebuild.sh` as root, with `evuproxy` and `nft` real on a live proxy. `git`, `go` and `systemctl` are stand-ins.
+
+- **Rejected config:** the update fails and says why. The binary isn't installed, no service is restarted, and forwards keep working.
+- **Fixed config:** the next run validates against the real `nft`, installs and restarts, and forwards keep working.
+
+`scripts/update_test.go` covers the other ways a config can be rejected, and the order of the steps.
+
 ## What `auto_pause` shows
 
 On demand, with `devtools/e2e/run.sh auto_pause`. It takes about 11 minutes, because handshakes take 180 seconds to go stale. It runs the real `evuproxy serve` and reads the event log, the live `prerouting` chain and real traffic.

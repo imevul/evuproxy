@@ -469,6 +469,8 @@ func cmdValidate() *cobra.Command {
 		Use:   "validate",
 		Short: "Validate config and generated nftables (dry-run, no apply)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// A rejected config is not a usage error; help text would bury the cause.
+			cmd.SilenceUsage = true
 			code, err := apply.ValidateConfigFileCLI(cfgPath, jsonOut, apply.ClientIPInfo{Source: apply.ClientIPSourceUnavailable}, nil)
 			if err != nil {
 				return err
