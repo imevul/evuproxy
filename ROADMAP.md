@@ -240,7 +240,7 @@ Drop visibility:
 
 - [ ] Server-side apply gate: `/validate` returns the evaluated config hash, and `/reload` answers 409 without a matching acknowledgement, with an explicit `force` for automation. This closes the gap where another tab, operator or the CLI saves config between the check and the reload
 - [ ] Strict Content-Security-Policy for the static UI
-- [ ] CSRF hardening beyond bearer tokens
+- [x] CSRF hardening beyond bearer tokens: state-changing browser requests from origins not on `--cors-origins` are refused
 - [ ] Separate read and write API tokens (earlier planning deferred this indefinitely, so it needs a decision)
 - [ ] Optional mTLS or stronger API auth
 

@@ -13,7 +13,7 @@ Operational notes for operating EvuProxy safely. The HTTP API reference is in [L
 
 ## Security roadmap (scoped access)
 
-**Deferred:** separate read vs write API tokens and CSRF hardening beyond bearer tokens are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost. **`evuproxy serve` warns** when the API bind is not loopback and `--cors-origins` is `*`.
+**Deferred:** separate read vs write API tokens are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost. **`evuproxy serve` warns** when the API bind is not loopback and `--cors-origins` is `*`.
 
 ## Content-Security-Policy
 
@@ -32,6 +32,31 @@ The UI's nginx sends a **Content-Security-Policy** header on the UI and on proxi
 **Cross-origin API:** if the UI's **API base URL** points at another origin, set **`EVUPROXY_UI_CONNECT_SRC`** to that origin (space-separated exact `http(s)` origins, no wildcards) or the browser blocks the calls. The container refuses to start on any other value. See [Local HTTP API](http-api.md#binding-cors-and-authentication).
 
 **What this does not do:** the policy mainly stops injected markup from running as script. Code that does run on the UI origin can still read the stored token, and it could still send it out by navigating the page elsewhere, which CSP does not restrict, or through `https://api.github.com`, for example by creating a gist with an attacker's credentials. Treat the token as compromised after any suspected script injection.
+
+## Cross-site request forgery (CSRF)
+
+**What the token already covers:** the API reads its token only from the **`Authorization`** or **`X-API-Token`** header, never from a cookie or the query string. A browser does not attach those headers by itself, and another site cannot set them on a request without passing a CORS preflight. On its own, a token-protected API is not open to CSRF.
+
+**What remained:** anything in front of the API that adds credentials automatically brings CSRF back. Examples are a reverse proxy that injects the token behind basic auth, an SSO cookie or a client certificate. A page on another site could then send a plain form or `no-cors` **`POST /api/v1/reload`** through the proxy. It could not read the response, but the reload would run, because the API does not require a JSON `Content-Type`.
+
+**What the API does:** every state-changing request (any method except `GET`, `HEAD` and `OPTIONS`) goes through Go's **`http.CrossOriginProtection`** before routing and token checks. A refused request gets **HTTP 403** with **`error_code: cross_origin_refused`** and a warning in the service log.
+
+| Request | Result |
+| ------- | ------ |
+| Neither **`Sec-Fetch-Site`** nor **`Origin`** (curl, CI, scripts) | Allowed |
+| **`Sec-Fetch-Site: same-origin`** or **`none`** | Allowed |
+| Other **`Sec-Fetch-Site`** value (`same-site`, `cross-site`), or no such header and **`Origin`** host differs from **`Host`** | Refused, unless **`Origin`** is listed in **`--cors-origins`** |
+| Any origin with **`--cors-origins '*'`** | Allowed: the check is off and **`evuproxy serve`** logs a warning |
+
+**Reverse proxies:** browsers send **`Sec-Fetch-Site`** only to HTTPS and localhost addresses, so a UI on plain HTTP elsewhere (for example `http://192.168.1.10:9080`) relies on comparing **`Origin`** with **`Host`**. A proxy in front of the API must then forward the original **`Host`**, including the port. In nginx, use **`proxy_set_header Host $http_host;`**: **`$host`** drops the port, and the default sends the upstream's name. The bundled UI image does this. If you run an older UI image or your own proxy and saves fail with `cross_origin_refused`, fix the header or add the UI origin to **`--cors-origins`**.
+
+**`--cors-origins` values:** entries must be a plain origin such as `https://ui.example`. Anything else, such as a trailing slash, a path or `null`, is ignored for this check and logged as a warning at startup.
+
+**Not covered:**
+
+- **DNS rebinding:** a rebound hostname looks same-origin to this check, because the browser's **`Origin`** matches the **`Host`** it sends. The API token still has to be supplied, so this matters only behind a token-injecting proxy. Such a proxy should accept only its own hostname, for example with an explicit nginx **`server_name`** and a default server that rejects everything else.
+- **Reads:** cross-origin `GET` requests are not refused. They change nothing, and the browser hides the response unless CORS allows that origin.
+- **Stolen tokens and script on the UI origin:** the check only stops browsers from sending requests on another origin's behalf. Anyone holding the token can use it from curl, and script running on the UI origin counts as same-origin. See [Security roadmap](#security-roadmap-scoped-access).
 
 ## Operational security notes
 
