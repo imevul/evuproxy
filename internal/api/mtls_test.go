@@ -54,6 +54,11 @@ func newTestCA(t *testing.T, name string) *testCA {
 // issue returns PEM certificate and key signed by the CA.
 func (ca *testCA) issue(t *testing.T, name string, usage x509.ExtKeyUsage, notAfter time.Time) (certPEM, keyPEM []byte) {
 	t.Helper()
+	return ca.issueWithUsages(t, name, []x509.ExtKeyUsage{usage}, notAfter)
+}
+
+func (ca *testCA) issueWithUsages(t *testing.T, name string, usages []x509.ExtKeyUsage, notAfter time.Time) (certPEM, keyPEM []byte) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +69,7 @@ func (ca *testCA) issue(t *testing.T, name string, usage x509.ExtKeyUsage, notAf
 		NotBefore:    time.Now().Add(-2 * time.Hour),
 		NotAfter:     notAfter,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{usage},
+		ExtKeyUsage:  usages,
 		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, &key.PublicKey, ca.key)
@@ -164,6 +169,20 @@ func TestMTLS_acceptedWithClientCertAndToken(t *testing.T) {
 	}
 	if resp.TLS == nil || resp.TLS.Version != tls.VersionTLS13 {
 		t.Fatalf("expected TLS 1.3, got %+v", resp.TLS)
+	}
+}
+
+// X.509 treats a missing extended key usage as any usage; docs/http-api.md says so.
+func TestMTLS_certWithoutExtKeyUsageAccepted(t *testing.T) {
+	f := newMTLSFixture(t)
+	certPEM, keyPEM := f.clientCA.issueWithUsages(t, "ops", nil, time.Now().Add(time.Hour))
+	resp, err := f.get(f.client(t, certPEM, keyPEM), "/api/v1/config", "secret-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
 	}
 }
 

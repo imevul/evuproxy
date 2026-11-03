@@ -242,7 +242,7 @@ Drop visibility:
 - [ ] Strict Content-Security-Policy for the static UI
 - [ ] CSRF hardening beyond bearer tokens
 - [ ] Separate read and write API tokens (earlier planning deferred this indefinitely, so it needs a decision)
-- [ ] Optional mTLS or stronger API auth
+- [x] Optional mTLS or stronger API auth
 
 ### Phase 11 — Packaging and upgrades
 

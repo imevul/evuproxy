@@ -65,7 +65,9 @@ Off by default. Without the flags below, **`evuproxy serve`** behaves exactly as
 | --- | --- |
 | Valid client certificate and token | Accepted |
 | Valid client certificate, missing or wrong token | **401** |
-| Token only, or a client certificate that is expired, signed by another CA, or lacks the client-auth usage | Refused during the TLS handshake (no HTTP response) |
+| Token only, or a client certificate that is expired, signed by another CA, or has an extended key usage list without **`clientAuth`** | Refused during the TLS handshake (no HTTP response) |
+
+A certificate from the CA with no extended key usage at all is accepted, because X.509 treats that as valid for any purpose. The commands below always set one.
 
 ### Setup
 
@@ -92,11 +94,18 @@ Off by default. Without the flags below, **`evuproxy serve`** behaves exactly as
    ```
 4. **Enable the listener** with **`systemctl edit evuproxy-api.service`**:
    ```ini
+   [Unit]
+   After=evuproxy.service
+   StartLimitIntervalSec=0
+
    [Service]
    ExecStart=
    ExecStart=/usr/local/bin/evuproxy serve --config /etc/evuproxy/config.yaml --listen 127.0.0.1:9847 --token-file /etc/evuproxy/api.token --mtls-listen 10.100.0.1:9848 --mtls-cert /etc/evuproxy/mtls/server.pem --mtls-key /etc/evuproxy/mtls/server.key --mtls-client-ca /etc/evuproxy/mtls/ca.pem
+   RestartSec=5
    ```
-   Then restart the service and allow the port from the clients that need it (**`input_allows`**, see [config](config.md)).
+   **`serve`** exits if it cannot bind **`--mtls-listen`**, and that stops the plain listener and the admin UI too. A WireGuard address does not exist until **`evuproxy.service`** has brought the interface up, so **`After=`** makes the API wait for it at boot. **`RestartSec`** and **`StartLimitIntervalSec=0`** keep systemd retrying if the address appears later, for example after a failed **`reload`** at boot, instead of giving up after five quick failures.
+
+   Then restart the service and add an **`input_allows`** rule for TCP 9848 (see [config](config.md)). These rules have no source filter, so this one opens the port to every source on every interface. The bind address is what limits who can reach the listener, and the certificate and token decide who gets in. It is not a strict boundary: Linux also accepts packets for that address on other interfaces, so a host on a directly connected network can reach a WireGuard address by routing it through this host.
 5. **Call the API** with the certificate and the token:
    ```bash
    curl --cacert ca.pem --cert client.pem --key client.key \
@@ -105,7 +114,7 @@ Off by default. Without the flags below, **`evuproxy serve`** behaves exactly as
 
 ### Behavior
 
-- **Flags:** **`--mtls-listen`**, **`--mtls-cert`**, **`--mtls-key`**, and **`--mtls-client-ca`** must be set together. A partial setup, or an unreadable or invalid file, stops **`serve`** at startup; it never falls back to serving without the check. If the mTLS listener fails later, the process exits so systemd can restart it.
+- **Flags:** **`--mtls-listen`**, **`--mtls-cert`**, **`--mtls-key`**, and **`--mtls-client-ca`** must be set together. A partial setup, or an unreadable or invalid file, stops **`serve`** at startup; it never falls back to serving without the check. If the mTLS listener cannot bind or fails later, the whole process exits, including the plain listener, so systemd can restart it.
 - **Plain listener:** **`--listen`** keeps accepting the token alone. Keep it on loopback, where the admin UI's nginx reaches it. **`serve` logs a warning** if it is not loopback while mTLS is on. If you do not use the UI, **`--listen ""`** turns it off.
 - **Admin UI:** the UI proxies plain HTTP to **`--listen`** and does not use the mTLS listener. Browsers are not a supported mTLS client here. Do not give the UI's proxy a client certificate: anyone who can reach the proxy would then pass the check with its certificate.
 - **`GET /healthz`:** needs no token, but on the mTLS listener it still needs a client certificate. Point unauthenticated probes at the plain listener.

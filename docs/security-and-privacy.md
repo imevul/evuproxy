@@ -24,7 +24,7 @@ What it does not cover:
 - **The plain listener:** **`--listen`** still accepts the token alone, so the token is enough for anything that can reach it. Keep it on loopback, or turn it off with **`--listen ""`** if you do not use the admin UI. The UI and anything else on the host or behind an SSH tunnel to that port are not protected by mTLS.
 - **A compromised client:** an attacker on a machine holding both the client key and the token has everything needed. Keep the token and client key out of shared storage.
 - **Revocation:** there is no CRL or OCSP check. Every unexpired certificate from the CA stays valid, so issue short-lived client certificates. To cut off a lost key sooner, create a new CA, reissue the certificates you still trust, and restart **`serve`**. Rotate the API token too if it may have leaked.
-- **CA choice:** use a private CA for this API only, since **`--mtls-client-ca`** accepts everything that CA signs, and all accepted clients have the same access. Keep the CA key off the server if you can: anyone who has it can issue accepted certificates.
+- **CA choice:** use a private CA for this API only, since **`--mtls-client-ca`** accepts any client certificate that CA signs, and all accepted clients have the same access. Keep the CA key off the server if you can: anyone who has it can issue accepted certificates.
 
 ## Operational security notes
 
