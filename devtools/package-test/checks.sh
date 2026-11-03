@@ -137,6 +137,28 @@ same_file() {
 	[ "$(sha256sum <"$1")" = "$(sha256sum <"$2")" ]
 }
 
+rules_loaded() {
+	nft list table inet evuproxy >/dev/null
+}
+
+# A host can confine /usr/bin/wg-quick by path, and that reaches into a privileged container. Seen
+# on Ubuntu 26.04, where it runs /usr/bin/ip but not AlmaLinux's /usr/sbin/ip. wg-quick looks in
+# its own directory first, so a copy there gets past a limit that belongs to the host, not the
+# package. The note says when this happened.
+work_around_host_wg_quick_confinement() {
+	local out
+	mkdir -p /etc/wireguard
+	printf '[Interface]\nPrivateKey = %s\n' "$(wg genkey)" >/etc/wireguard/pkgprobe.conf
+	chmod 600 /etc/wireguard/pkgprobe.conf
+	out=$(wg-quick up pkgprobe 2>&1)
+	ip link delete pkgprobe 2>/dev/null
+	rm -f /etc/wireguard/pkgprobe.conf
+	if [[ "$out" == *"Permission denied"* ]] && [ ! -e /usr/bin/ip ]; then
+		echo "note: this host confines wg-quick; copying ip to /usr/bin for the rest of this run"
+		install -m 0755 "$(command -v ip)" /usr/bin/ip
+	fi
+}
+
 # Nothing here turns forwarding on, so any change to it comes from the package.
 echo 0 >/proc/sys/net/ipv4/ip_forward || die "set ip_forward"
 
@@ -235,9 +257,11 @@ echo "--- the README's setup steps, for real"
 nft delete table inet evuproxy || die "delete marker rules"
 rm -rf /etc/evuproxy
 check "installs" install_version 0.0.2
-check "forwarding turns on" sysctl -q -w net.ipv4.ip_forward=1
+work_around_host_wg_quick_confinement
+# The README uses sysctl, which minimal images don't have.
+echo 1 >/proc/sys/net/ipv4/ip_forward || die "turn on forwarding"
 check "evuproxy reload applies the seed config" evuproxy reload --config "$config"
-check "rules are loaded" nft list table inet evuproxy
+check "rules are loaded" rules_loaded
 check "tunnel is up" test -e /sys/class/net/evuproxy0
 check "units enable" systemctl enable -q nftables.service evuproxy.service evuproxy-geo.timer
 check "evuproxy.service applies from the packaged unit" systemctl start evuproxy.service
