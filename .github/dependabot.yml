@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # docker/Dockerfile pins its base image as tag@sha256:…; Dependabot updates both.
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
