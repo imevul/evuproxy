@@ -3,7 +3,7 @@
  * whether tables name their columns, and whether a failed validation actually
  * points at the field that failed.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { ROUTES, gotoRoute, seed } from "./helpers";
 

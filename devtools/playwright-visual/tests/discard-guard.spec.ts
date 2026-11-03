@@ -3,7 +3,7 @@
  * backdrop and Cancel, and a dirty page form warns on navigation and tab close.
  * Clean forms keep closing without a prompt.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { gotoRoute, seed } from "./helpers";
 

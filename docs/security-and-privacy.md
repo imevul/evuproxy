@@ -13,7 +13,25 @@ Operational notes for operating EvuProxy safely. The HTTP API reference is in [L
 
 ## Security roadmap (scoped access)
 
-**Deferred:** separate read vs write API tokens, CSRF hardening beyond bearer tokens, and a strict **Content-Security-Policy** for the static UI are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost. **`evuproxy serve` warns** when the API bind is not loopback and `--cors-origins` is `*`.
+**Deferred:** separate read vs write API tokens and CSRF hardening beyond bearer tokens are not implemented yet. The UI stores the API token in **sessionStorage/localStorage** when the operator saves it; anyone with script access to the UI origin can read it. Prefer serving the UI and API only on trusted networks, SSH tunnels, and explicit CORS origins instead of `*` when exposed beyond localhost. **`evuproxy serve` warns** when the API bind is not loopback and `--cors-origins` is `*`.
+
+## Content-Security-Policy
+
+The UI's nginx sends a **Content-Security-Policy** header on the UI and on proxied API responses (`docker/nginx.conf`, with the same policy in `docker/nginx.dev.conf`). If you put another reverse proxy in front, make sure it passes the header through.
+
+| Directive | Value | Why |
+|-----------|-------|-----|
+| `default-src` | `'none'` | Anything not listed below is refused |
+| `script-src` | `'self'` | Only the UI's own files. Injected `<script>` tags, `on*=` attributes and `eval` do not run |
+| `style-src` | `'self' https://fonts.googleapis.com` | The UI's stylesheets and the Google Fonts stylesheet. Inline `<style>` and `style=` attributes are refused |
+| `font-src` | `https://fonts.gstatic.com` | Google Fonts files |
+| `img-src` | `'self' data: blob:` | The favicon, `data:` icons in the stylesheets, and peer QR codes |
+| `connect-src` | `'self' https://api.github.com` plus **`EVUPROXY_UI_CONNECT_SRC`** | The API behind `/api`, and the sidebar's release check |
+| `base-uri`, `form-action`, `frame-ancestors` | `'none'` | No `<base>` rewriting, no form posts to another site, no framing |
+
+**Cross-origin API:** if the UI's **API base URL** points at another origin, set **`EVUPROXY_UI_CONNECT_SRC`** to that origin (space-separated exact `http(s)` origins, no wildcards) or the browser blocks the calls. The container refuses to start on any other value. See [Local HTTP API](http-api.md#binding-cors-and-authentication).
+
+**What this does not do:** the policy mainly stops injected markup from running as script. Code that does run on the UI origin can still read the stored token, and it could still send it out by navigating the page elsewhere, which CSP does not restrict, or through `https://api.github.com`, for example by creating a gist with an attacker's credentials. Treat the token as compromised after any suspected script injection.
 
 ## Operational security notes
 

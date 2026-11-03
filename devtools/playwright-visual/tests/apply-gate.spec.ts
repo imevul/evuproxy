@@ -5,7 +5,7 @@
  * admin UI). The backend reports that as `lockout_risk_*` warnings from
  * POST /validate; these tests cover the UI actually honouring them.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { gotoRoute, seed, token } from "./helpers";
 

@@ -4,7 +4,7 @@
  * Undo is a reversal into fresh config, so these tests also change the config behind
  * the page's back and check that the change survives.
  */
-import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "./fixtures";
 
 import { gotoRoute, seed, token } from "./helpers";
 

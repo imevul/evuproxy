@@ -3,7 +3,7 @@
  * so the lists are at their widest. Touch emulation only: this cannot stand in for a
  * real device, but layout, reachability and target sizes all hold here.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { ROUTES, gotoRoute, largeConfig, seed } from "./helpers";
 

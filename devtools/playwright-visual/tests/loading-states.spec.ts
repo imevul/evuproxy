@@ -3,7 +3,7 @@
  * click before the network does. API responses are held back here, not just slowed,
  * so "before the response arrives" is a fact of the test rather than a timing bet.
  */
-import { expect, test, type Page, type Route as PwRoute } from "@playwright/test";
+import { expect, test, type Page, type Route as PwRoute } from "./fixtures";
 
 import { gotoRoute, seed } from "./helpers";
 

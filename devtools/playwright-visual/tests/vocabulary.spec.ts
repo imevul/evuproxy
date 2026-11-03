@@ -2,7 +2,7 @@
  * One vocabulary: Save writes the draft, Apply changes the host, Refresh re-reads
  * (ENG-139). The API and CLI keep `reload`; the UI text does not.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { gotoRoute, seed } from "./helpers";
 
