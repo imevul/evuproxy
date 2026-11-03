@@ -205,6 +205,7 @@ Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**, 
 - **What doesn't count:** anything dropped by a deny list, geo, CrowdSec, a rate limit or the forward catch-all. See [`stats.drop_counters`](config.md#stats) for those.
 - **Counts can still be lost later.** Counting happens after EvuProxy's forward chain, so a packet can still be lost after it: by a firewall rule at a later priority, or by WireGuard if the peer is gone.
 - **Counters reset on Apply.** `evuproxy reload` replaces the tables, as it does for `stats.drop_counters`, so the counts start from zero after each Apply, revert or reboot. A paused route's counter stays, and **`evuproxy update-geo`** keeps the counts too. After upgrading from a version without these counters, the list stays empty until the next Apply.
+- **A route can have no row.** A failed Apply can leave the live rules and the applied config apart. A rule whose protocol, target or public ports don't match the route it names is left out until the next successful Apply, so one route's traffic isn't shown against another.
 
 These rules are always generated, whatever `stats.drop_counters` says, and they aren't listed in **`nftables_counters`**.
 
