@@ -12,6 +12,7 @@ WAN_SOURCE=192.0.2.2
 TCP_OK="tcp-ok from=$PROXY_TUNNEL_IP"
 UDP_OK="udp-ok from=$PROXY_TUNNEL_IP"
 API=127.0.0.1:19848
+METRICS=127.0.0.1:19849
 R_TCP=0 R_MAPPED=1 R_UDP=2 R_BOTH=3 R_SILENT=4
 
 # $1 other top-level sections, $2 extra lines under forwarding, $3 extra lines for route R_BOTH.
@@ -55,7 +56,7 @@ EOF
 
 # Not in_ns: a backgrounded function is a subshell, and kill would miss serve inside it.
 ip netns exec proxy env EVUPROXY_API_TOKEN=e2e evuproxy --config /etc/evuproxy/config.yaml serve \
-	--listen "$API" --token-file "" </dev/null >/tmp/serve-accepted.log 2>&1 &
+	--listen "$API" --metrics-listen "$METRICS" --token-file "" </dev/null >/tmp/serve-accepted.log 2>&1 &
 serve_pid=$!
 
 stats_json() {
@@ -81,6 +82,20 @@ accepted_at_least() {
 	local got
 	got=$(accepted_packets "$1" "$2")
 	[ "${got:-0}" -ge "$3" ] || { log "  wanted at least $3 packets on route $1 $2, got '$got'"; return 1; }
+}
+metrics_text() {
+	printf 'GET /metrics HTTP/1.0\r\n\r\n' | in_ns proxy socat -t2 - "TCP:$METRICS"
+}
+# $1 route index, $2 protocol. Both metrics carry the numbers GET /stats has for the route.
+metrics_match_stats() {
+	local row text packets bytes
+	row=$(accepted_row "$1" "$2")
+	[[ $row =~ \"packets\":([0-9]+),\"bytes\":([0-9]+) ]] || { log "  no stats row for route $1 $2"; return 1; }
+	packets=${BASH_REMATCH[1]} bytes=${BASH_REMATCH[2]}
+	text=$(metrics_text)$'\n'
+	[[ $text == *"evuproxy_route_accepted_packets_total{route_index=\"$1\",name=\"\",proto=\"$2\"} $packets"$'\n'* ]] &&
+		[[ $text == *"evuproxy_route_accepted_bytes_total{route_index=\"$1\",name=\"\",proto=\"$2\"} $bytes"$'\n'* ]] ||
+		{ log "  wanted $packets packets and $bytes bytes on route $1 $2, got: $text"; return 1; }
 }
 # $1 how many, on one socket, so everything after the first is established traffic.
 one_flow_udp() {
@@ -135,6 +150,8 @@ check "and the unmapped one doesn't move" accepted_is "$R_TCP" tcp "$tcp_count"
 log "=== 2. Established traffic counts ==="
 one_flow_udp 5
 check "all 5 datagrams of one flow are counted" accepted_is "$R_UDP" udp 5
+check "the Prometheus metrics say the same" metrics_match_stats "$R_UDP" udp
+check "for another route too" metrics_match_stats "$R_MAPPED" tcp
 
 log "=== 3. A route with both protocols has a row for each ==="
 check "no traffic yet" accepted_is "$R_BOTH" tcp 0
@@ -218,6 +235,9 @@ log "=== 11. Maintenance mode has no rows ==="
 accepted_config "" "  maintenance_mode: true" | apply_config || die "reload with maintenance mode"
 stats=$(stats_json)
 check "route_accepted is an empty list" eval '[[ $stats == *"\"route_accepted\":[]"* ]]'
+metrics=$(metrics_text)
+check "the Prometheus metrics stay declared" eval '[[ $metrics == *"# TYPE evuproxy_route_accepted_packets_total counter"* ]]'
+check "with no samples" eval '[[ $metrics != *"evuproxy_route_accepted_packets_total{"* ]]'
 
 kill "$serve_pid" 2>/dev/null
 wait "$serve_pid" 2>/dev/null

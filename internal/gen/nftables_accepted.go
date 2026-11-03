@@ -7,7 +7,8 @@ import (
 	"strings"
 )
 
-// RouteAcceptedChain is the count-only chain behind GET /stats route_accepted.
+// RouteAcceptedChain is the count-only chain behind GET /stats route_accepted and the
+// evuproxy_route_accepted_* Prometheus metrics.
 const RouteAcceptedChain = "route_accepted"
 
 const routeAcceptedCommentPrefix = "evuproxy-accepted"

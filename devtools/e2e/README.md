@@ -110,6 +110,7 @@ Reads `route_accepted` from the real `GET /api/v1/stats`.
 - **Accepted, not answered:** a routed port with no listener still counts.
 - **Drops stay out:** global and route deny lists, geo allow and block, CrowdSec and UDP rate limits count nothing they refuse, each beside a client that passes and counts under the same config. A CrowdSec ban stops an established flow counting, and with a rate limit the accepted and dropped counts add up to everything sent.
 - **Reload and saved changes:** a reload starts the counts from zero. Saved changes that aren't applied don't relabel them.
+- **Prometheus:** `GET /metrics` reports the same packets and bytes as `GET /stats`, and has no samples in maintenance mode.
 
 It doesn't send real traffic past a SYN limit or `max_conn_per_ip`. Those drop on the forward chain like the UDP limit, and the Go tests check they stay there.
 
