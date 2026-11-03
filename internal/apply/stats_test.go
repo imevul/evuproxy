@@ -2,12 +2,16 @@ package apply
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/imevul/evuproxy/internal/config"
+	"github.com/imevul/evuproxy/internal/gen"
+	"github.com/imevul/evuproxy/internal/state"
 )
 
 func TestParseNFTCounterLines(t *testing.T) {
@@ -202,9 +206,89 @@ func TestParseNFTCounterLines_leavesOutRouteAccepted(t *testing.T) {
 }
 
 func TestRouteAcceptedCounters_noAppliedConfig(t *testing.T) {
-	got := routeAcceptedCounters(filepath.Join(t.TempDir(), "config.yaml"))
+	got := RouteAcceptedCounters(filepath.Join(t.TempDir(), "config.yaml"))
 	if got == nil || len(got) != 0 {
 		t.Fatalf("want an empty list, not null: %#v", got)
+	}
+}
+
+const statsTestConfig = `wireguard:
+  interface: wg0
+  listen_port: 51830
+  private_key_file: /nonexistent/wg.key
+  address: 10.100.0.1/24
+network:
+  public_interface: eth0
+geo:
+  enabled: false
+forwarding:
+  routes:
+    - proto: tcp
+      ports: ["18080"]
+      target_ip: 10.100.0.2
+peers:
+  - name: a
+    public_key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    tunnel_ip: 10.100.0.2/32
+`
+
+// A config applied, and the calls a stats read makes, with the one route's rule live.
+func statsCalls(t *testing.T, read func(cfgPath string) (*Stats, error)) (*Stats, []string) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	for _, p := range []string{cfgPath, state.ConfigYAMLBackupPath(cfgPath)} {
+		if err := os.WriteFile(p, []byte(statsTestConfig), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := &fakeRunner{handler: func(name string, args []string) ([]byte, error) {
+		if name == "nft" {
+			return []byte(routeAcceptedListing), nil
+		}
+		return nil, errors.New("no wg here")
+	}}
+	prev := runner
+	runner = f
+	t.Cleanup(func() { runner = prev })
+
+	st, err := read(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st, f.calls
+}
+
+// The rules have a table of their own so that reading them doesn't load the geo sets: see
+// gen.RouteAcceptedTable. Listing the chain from any other table would bring the cost back.
+func TestRouteAcceptedCounters_readsItsOwnTable(t *testing.T) {
+	st, calls := statsCalls(t, StatsWithoutDropCounters)
+	if len(st.RouteAccepted) != 1 || st.RouteAccepted[0].Packets != 12 {
+		t.Fatalf("got %+v from calls %v", st.RouteAccepted, calls)
+	}
+	want := "nft list chain inet " + gen.RouteAcceptedTable + " " + gen.RouteAcceptedChain
+	if !slices.Contains(calls, want) {
+		t.Fatalf("want %q in %v", want, calls)
+	}
+}
+
+func TestStatsWithoutDropCounters_listsNoWholeTable(t *testing.T) {
+	st, calls := statsCalls(t, StatsWithoutDropCounters)
+	if st.NFTables != nil {
+		t.Fatalf("got %+v", st.NFTables)
+	}
+	for _, call := range calls {
+		if strings.Contains(call, "list table") {
+			t.Fatalf("whole-table listing in %v", calls)
+		}
+	}
+}
+
+func TestStatsFromHost_stillListsDropCounters(t *testing.T) {
+	_, calls := statsCalls(t, StatsFromHost)
+	for _, want := range []string{"nft -a -t list table inet evuproxy", "nft -a -t list table ip evuproxy"} {
+		if !slices.Contains(calls, want) {
+			t.Fatalf("want %q in %v", want, calls)
+		}
 	}
 }
 

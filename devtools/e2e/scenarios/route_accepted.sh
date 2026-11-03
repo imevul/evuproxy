@@ -152,6 +152,11 @@ one_flow_udp 5
 check "all 5 datagrams of one flow are counted" accepted_is "$R_UDP" udp 5
 check "the Prometheus metrics say the same" metrics_match_stats "$R_UDP" udp
 check "for another route too" metrics_match_stats "$R_MAPPED" tcp
+accepted_only=$(printf 'GET /api/v1/stats/route-accepted HTTP/1.0\r\nAuthorization: Bearer e2e\r\n\r\n' | in_ns proxy socat -t2 - "TCP:$API")
+check "GET /stats/route-accepted has the route's row" eval '[[ $accepted_only == *"\"route_accepted\":[{"* && $accepted_only == *"$(accepted_row "$R_UDP" udp)"* ]]'
+check "and nothing else" eval '[[ $accepted_only != *wireguard_peers* ]]'
+check "the rules are in their own table, with no sets to load" eval '[[ $(in_ns proxy nft list table inet evuproxy_accepted) == *evuproxy-accepted* && $(in_ns proxy nft list table inet evuproxy_accepted) != *"set "* ]]'
+check "and not in the filter table" eval '[[ $(in_ns proxy nft list table inet evuproxy) != *evuproxy-accepted* ]]'
 
 log "=== 3. A route with both protocols has a row for each ==="
 check "no traffic yet" accepted_is "$R_BOTH" tcp 0
@@ -238,6 +243,7 @@ check "route_accepted is an empty list" eval '[[ $stats == *"\"route_accepted\":
 metrics=$(metrics_text)
 check "the Prometheus metrics stay declared" eval '[[ $metrics == *"# TYPE evuproxy_route_accepted_packets_total counter"* ]]'
 check "with no samples" eval '[[ $metrics != *"evuproxy_route_accepted_packets_total{"* ]]'
+check "and the last Apply's rules are gone" eval '[[ $(in_ns proxy nft list table inet evuproxy_accepted 2>&1) != *evuproxy-accepted* ]]'
 
 log "=== 12. A route with several ports keeps its row and counts ==="
 # nft lists a conntrack port set as raw values, unlike a single port, so this needs the real thing.

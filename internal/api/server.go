@@ -157,6 +157,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /api/v1/config/notes", s.auth(s.handleConfigNotesPut))
 	mux.HandleFunc("GET /api/v1/metrics/peers", s.auth(s.handleMetricsPeers))
 	mux.HandleFunc("GET /api/v1/stats", s.auth(s.handleStats))
+	mux.HandleFunc("GET /api/v1/stats/route-accepted", s.auth(s.handleStatsRouteAccepted))
 	mux.HandleFunc("GET /api/v1/about", s.auth(s.handleAbout))
 	mux.HandleFunc("GET /api/v1/logs", s.auth(s.handleLogs))
 	mux.HandleFunc("GET /api/v1/diagnostics.md", s.auth(s.handleDiagnosticsMD))

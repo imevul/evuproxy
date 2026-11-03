@@ -14,6 +14,7 @@ import (
 
 	"github.com/imevul/evuproxy/internal/config"
 	"github.com/imevul/evuproxy/internal/eventlog"
+	"github.com/imevul/evuproxy/internal/gen"
 	"github.com/imevul/evuproxy/internal/state"
 )
 
@@ -227,6 +228,7 @@ func BuildDiagnosticsMarkdown(ctx context.Context, cfgPath string, meta Diagnost
 			last.Output = truncateDiagnostics(last.Output, diagnosticsMaxNFTOut)
 		}
 	}
+	addCmd("nft list table inet "+gen.RouteAcceptedTable, "", "nft", "list", "table", "inet", gen.RouteAcceptedTable)
 
 	for _, unit := range []string{"evuproxy.service", "evuproxy-api.service", "systemd-networkd.service"} {
 		addCmd("systemctl is-active "+unit, "", "systemctl", "is-active", unit)

@@ -20,7 +20,7 @@ func PrometheusText(cfgPath string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, _ := apply.StatsFromHost(cfgPath)
+	st, _ := apply.StatsWithoutDropCounters(cfgPath)
 	geo := state.ReadGeoLastSuccess(cfgPath)
 
 	var b strings.Builder

@@ -51,7 +51,7 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 
 | Command                           | Purpose                                                                                                  |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `evuproxy reload`                 | Regenerate `/etc/wireguard/<iface>.conf`, nftables tables `inet evuproxy` / `ip evuproxy`, load geo sets; refresh systemd-networkd `Unmanaged=yes` drop-in when netplan/networkd is in use |
+| `evuproxy reload`                 | Regenerate `/etc/wireguard/<iface>.conf`, nftables tables `inet evuproxy` / `ip evuproxy` / `inet evuproxy_accepted`, load geo sets; refresh systemd-networkd `Unmanaged=yes` drop-in when netplan/networkd is in use |
 | `evuproxy reload --boot`          | What `evuproxy.service` runs: with `apply.confirm` on in the last applied config, apply that config and leave edits in `config.yaml` unapplied ([details](docs/config.md#confirm-or-revert-apply)) |
 | `evuproxy ensure-wg-networkd`     | Install `/etc/systemd/network/00-<iface>.network` (`Unmanaged=yes`) if networkd/netplan is in use; prints the path (used by install/update) |
 | `evuproxy update-geo`             | Refresh IPDeny country files and reload nftables geo **in both** inet and ip tables. With `apply.confirm` on, this loads the last applied config's sets ([details](docs/config.md#confirm-or-revert-apply)) |

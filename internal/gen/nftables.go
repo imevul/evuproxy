@@ -111,7 +111,6 @@ func nftablesRoutes(c *config.Config) (string, error) {
 	fmt.Fprintf(&b, "        iifname %q oifname %q ct state established,related accept\n", wg, pub)
 	fmt.Fprintf(&b, "        %slimit rate 3/minute burst 5 packets log prefix \"evuproxy-forward-drop: \" drop\n", counter)
 	fmt.Fprintf(&b, "    }\n")
-	writeRouteAcceptedChain(&b, pub, wg, routes)
 	fmt.Fprintf(&b, `}
 
 add table ip evuproxy
@@ -144,6 +143,7 @@ table ip evuproxy {
 	fmt.Fprintf(&b, `    }
 }
 `)
+	writeRouteAcceptedTable(&b, pub, wg, routes)
 
 	return b.String(), nil
 }
