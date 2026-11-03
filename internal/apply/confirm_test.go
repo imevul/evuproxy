@@ -414,6 +414,38 @@ func TestReboot_bootReloadRevertsFirst(t *testing.T) {
 	}
 }
 
+// The revert replaces config.yaml, so the hash has to be compared after it: the file that
+// was checked is not the one a reload would now apply.
+func TestReloadIfMatch_expiredSessionRevertBeforeComparing(t *testing.T) {
+	e := newConfirmEnv(t)
+	rejected := e.edit("change")
+	e.apply()
+	clear(e.timers) // reboot
+	hash := state.ConfigBytesSHA256(rejected)
+
+	err := ReloadIfMatch(context.Background(), e.cfgPath, hash, func(string) {})
+	if !errors.Is(err, ErrConfigHashMismatch) {
+		t.Fatalf("got %v", err)
+	}
+	e.wantFile(e.cfgPath, e.baseline)
+}
+
+func TestReloadWithConfirmIfMatch_mismatchArmsNothing(t *testing.T) {
+	e := newConfirmEnv(t)
+	e.edit("change")
+	e.f.calls = nil
+	_, err := ReloadWithConfirmIfMatch(context.Background(), e.cfgPath, "stale", 60, func(string) {})
+	if !errors.Is(err, ErrConfigHashMismatch) {
+		t.Fatalf("got %v", err)
+	}
+	if len(e.f.calls) != 0 {
+		t.Fatalf("nothing should run: %v", e.f.calls)
+	}
+	if e.session() != nil {
+		t.Fatal("no session should start")
+	}
+}
+
 // newBootEnv is a host whose last applied config has the given confirm setting.
 func newBootEnv(t *testing.T, confirm bool) *confirmEnv {
 	t.Helper()

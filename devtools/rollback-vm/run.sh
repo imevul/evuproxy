@@ -178,7 +178,7 @@ log "=== 1. Timeout with the API stopped: the case the issue asks for ==="
 open_held_shell || die "held shell"
 put_config "$LOCKED_RULES" locked-out
 t0=$(now)
-resp=$(api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":30}')
+resp=$(api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":30}')
 log "POST /reload: $resp"
 check "Apply answered with an active session" test "$(jq -r '.session.phase' <<<"$resp")" = active
 held systemctl list-timers --all --no-pager 'evuproxy-apply-revert-*' | head -3
@@ -211,7 +211,7 @@ check "the API reports the revert after starting again" test "$(jq -r '.last_rev
 log "=== 2. Confirm keeps the change ==="
 reset_host baseline
 put_config "$OPEN_RULES" confirmed
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":15}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":15}' >/dev/null
 check "a session is waiting" test "$(session_phase)" = active
 check "confirm succeeds" test "$(api -X POST "$api_url/apply/confirm" | jq -r .result)" = confirmed
 sleep 20
@@ -221,10 +221,10 @@ check "no session is left" test "$(session_phase)" = none
 log "=== 3. Repeat Apply restarts the wait and keeps the revert target ==="
 reset_host baseline
 put_config "$OPEN_RULES" first-try
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":20}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":20}' >/dev/null
 sleep 12
 put_config "$OPEN_RULES" second-try
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":20}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":20}' >/dev/null
 sleep 12
 check "24s in, the first timer did not revert" test "$(vm tail -1 /etc/evuproxy/config.yaml)" = "# second-try"
 check "the session is still active" test "$(session_phase)" = active
@@ -236,7 +236,7 @@ check "and keeps the latest attempt" test "$(vm tail -1 /etc/evuproxy/config.yam
 log "=== 4. An API restart during the window leaves the session running ==="
 reset_host baseline
 put_config "$OPEN_RULES" across-restart
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":20}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":20}' >/dev/null
 vm systemctl restart evuproxy-api.service
 wait_for_api || die "API did not restart"
 remaining=$(api "$api_url/apply/session" | jq -r '.session.remaining_seconds')
@@ -249,8 +249,8 @@ check "the timer still reverts" test "$(vm tail -1 /etc/evuproxy/config.yaml)" =
 log "=== 5. One-way reload is refused during the window ==="
 reset_host baseline
 put_config "$OPEN_RULES" refused
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":60}' >/dev/null
-check "POST /reload with no body gets 409" test "$(api -o /dev/null -w '%{http_code}' -X POST "$api_url/reload")" = 409
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":60}' >/dev/null
+check "POST /reload with force and no timeout gets 409" test "$(api -o /dev/null -w '%{http_code}' -X POST "$api_url/reload" -d '{"force":true}')" = 409
 vm evuproxy reload 2>/dev/null
 check "evuproxy reload fails" test $? -ne 0
 check "reload-status shows the session" test "$(vm evuproxy reload-status | jq -r .session.phase)" = active
@@ -270,7 +270,7 @@ check "the CLI session kept its config" test "$(vm tail -1 /etc/evuproxy/config.
 log "=== 7. A failed rollback is recorded, then retried ==="
 reset_host baseline
 put_config "$OPEN_RULES" fails-to-revert
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":12}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":12}' >/dev/null
 vm mv /usr/sbin/nft /usr/sbin/nft.off
 log "nft moved away; waiting for the timer and its retries"
 sleep 40
@@ -279,7 +279,7 @@ log "GET /apply/session: $status"
 check "the failure is reported" test "$(jq -r '.session.phase' <<<"$status")" = failed
 check "with the reason" bash -c "jq -e '.session.failure | length > 0' <<<'$status' >/dev/null"
 check "the failure is in the event log" vm grep -q apply_revert_failed /etc/evuproxy/state/events.jsonl
-check "another Apply is refused while it stands" test "$(api -o /dev/null -w '%{http_code}' -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":30}')" = 409
+check "another Apply is refused while it stands" test "$(api -o /dev/null -w '%{http_code}' -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":30}')" = 409
 vm mv /usr/sbin/nft.off /usr/sbin/nft
 check "retry succeeds once nft is back" test "$(api -X POST "$api_url/apply/revert" | jq -r .result)" = reverted
 check "and clears the session" test "$(session_phase)" = none
@@ -288,7 +288,7 @@ log "=== 8. A reboot during the window reverts at boot ==="
 reset_host baseline
 put_config "$LOCKED_RULES" locked-across-reboot
 open_held_shell || die "held shell"
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":600}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":600}' >/dev/null
 check "SSH is cut before the reboot" ssh_cut
 held systemctl reboot || true
 close_held_shell
@@ -317,7 +317,7 @@ put_config "$LOCKED_RULES" failed-apply
 # reload loads the firewall before WireGuard, so this fails the Apply with the new
 # firewall live, and fails every revert attempt the same way after restoring the old one.
 vm mv /usr/bin/wg /usr/bin/wg.off
-code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":600}')
+code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":600}')
 check "the Apply is refused as a failed revert" test "$code" = 409
 check "SSH works: the firewall went back before WireGuard failed" ssh_works
 check "the failure is reported" test "$(vm evuproxy reload-status | jq -r .session.phase)" = failed
@@ -355,7 +355,7 @@ log "=== 10. A revert killed partway offers a retry ==="
 wait_for_api || die "API did not come back"
 reset_host baseline
 put_config "$OPEN_RULES" killed-revert
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":10}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":10}' >/dev/null
 vm mv /usr/sbin/nft /usr/sbin/nft.off
 phase=active
 for ((i = 0; i < 30; i++)); do
@@ -436,7 +436,7 @@ chmod 755 /usr/bin/wg
 EOF
 put_config "$LOCKED_RULES" failed-revert-worked
 vm "echo 1 >/run/wg-failures"
-code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":600}')
+code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":600}')
 log "POST /reload answered $code"
 check "the Apply failed" test "$code" != 200
 check "SSH works: its revert did" ssh_works
@@ -451,7 +451,7 @@ reset_host baseline
 put_config "$LOCKED_RULES" failed-then-retried
 # The Apply, then all three revert attempts.
 vm "echo 4 >/run/wg-failures"
-code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":600}')
+code=$(curl -sS -m 90 -o /dev/null -w '%{http_code}' -H "X-API-Token: $TOKEN" -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":600}')
 check "the Apply is refused as a failed revert" test "$code" = 409
 check "the failure is reported" test "$(vm evuproxy reload-status | jq -r .session.phase)" = failed
 check "Retry revert succeeds" test "$(api -X POST "$api_url/apply/revert" | jq -r .result)" = reverted
@@ -509,7 +509,7 @@ wait_for_api || die "API did not come back"
 reset_host baseline
 use_old_unit || die "old unit"
 put_config "$OPEN_RULES" window-during-refresh
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":20}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":20}' >/dev/null
 check "a session is waiting" test "$(session_phase)" = active
 check "rebuild.sh --install succeeds in the window" vm "cd /root/evuproxy && scripts/rebuild.sh --install"
 check "the unit has --boot" unit_has_boot
@@ -687,7 +687,7 @@ reset_panel_host
 open_held_shell || die "held shell"
 ssh "${SSH_BASE[@]}" -o ControlPath=/vm/held.sock -O forward -L 9081:127.0.0.1:9080 root@127.0.0.1 || die "tunnel"
 tunnel_url=http://127.0.0.1:9081/api/v1
-api -X POST "$tunnel_url/reload" -d '{"confirm_timeout_seconds":60}' >/dev/null
+api -X POST "$tunnel_url/reload" -d '{"force":true,"confirm_timeout_seconds":60}' >/dev/null
 check "new SSH connections are cut" ssh_cut
 check "new connections to the panel are cut" panel_cut
 check "yet Keep through the tunnel still confirms: docs and panel warn about this" test "$(api -X POST "$tunnel_url/apply/confirm" | jq -r .result)" = confirmed
@@ -735,7 +735,7 @@ resp=$(api -X POST "$api_url/update-geo")
 check "nothing is held back now" test "$(jq -r .geo_changes_held_back <<<"$resp")" = false
 
 put_geo_config li saved-li-in-window true
-api -X POST "$api_url/reload" -d '{"confirm_timeout_seconds":20}' >/dev/null
+api -X POST "$api_url/reload" -d '{"force":true,"confirm_timeout_seconds":20}' >/dev/null
 check "a session is waiting" test "$(session_phase)" = active
 in_window=$(live_geo)
 check "POST /update-geo is refused in the window" test "$(api -o /dev/null -w '%{http_code}' -X POST "$api_url/update-geo")" = 409

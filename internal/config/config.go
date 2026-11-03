@@ -154,6 +154,11 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Parse(b)
+}
+
+// Parse is Load for a file already read.
+func Parse(b []byte) (*Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(b, &c); err != nil {
 		return nil, err

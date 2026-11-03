@@ -26,8 +26,13 @@ func ConfigFileSHA256(cfgPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return ConfigBytesSHA256(b), nil
+}
+
+// ConfigBytesSHA256 is ConfigFileSHA256 for a file already read.
+func ConfigBytesSHA256(b []byte) string {
 	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:]), nil
+	return hex.EncodeToString(h[:])
 }
 
 // ReadAppliedHash returns the recorded last-applied config hash ("" when no state file exists).

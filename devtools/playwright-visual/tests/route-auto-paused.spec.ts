@@ -182,7 +182,7 @@ test.describe("mock API auto-pause state", () => {
    * Reverting the session restores that history too.
    */
   const apply = (request: APIRequestContext) =>
-    request.post(url("/reload"), { headers: auth(), data: { confirm_timeout_seconds: 600 } });
+    request.post(url("/reload"), { headers: auth(), data: { force: true, confirm_timeout_seconds: 600 } });
 
   let saved: any;
   let pendingBefore: any;
