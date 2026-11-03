@@ -948,9 +948,7 @@ def _mock_route_accepted() -> list:
     for i, r in enumerate(routes):
         if r.get("disabled"):
             continue
-        for proto in ("tcp", "udp"):
-            if r.get("proto") not in (proto, "both"):
-                continue
+        for proto in _route_protocols(r.get("proto")):
             packets = 8516 * (i + 1) + (0 if proto == "tcp" else 41)
             row = {
                 "route_index": i,

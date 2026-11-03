@@ -1637,6 +1637,12 @@
         <p>
           Geoblocking in <strong>block</strong> mode evaluates country-drop rules before these forwards — a blocked-country source can still be dropped even if allowlisted here.
         </p>
+        <p>
+          <strong>Accepted</strong> is the traffic the firewall accepted for a route since the last Apply, as packets and bytes. It does not mean players or legitimate clients: a source that passes the route's filters counts even if the backend never replies. Dropped traffic stays out. Bytes are the more exact figure, because merged TCP packets can count as one packet.
+        </p>
+        <p>
+          The counts reset on Apply, revert or reboot. A dash means no count for that route: it is disabled, it was added or changed since the last Apply, or the host has no counters yet.
+        </p>
       </div>
     </template>
 

@@ -60,6 +60,18 @@ The Settings bar writes up to three separate stores: UI preferences, config (**P
 
 **API token** is stored in this browser by **Connect**, which then reports whether the API accepted it.
 
+## Routes page
+
+**Accepted** shows the traffic the firewall accepted for a route since the last Apply, as packets and bytes, from `route_accepted` in **`GET /api/v1/stats`**. A route with both protocols shows their sum, and hovering a cell splits it by protocol.
+
+**This is accepted traffic. It does not mean players or legitimate clients.** A source that passes the route's filters counts even if the backend never replies, so a scanner in an allowed country adds to it, and so does traffic to a backend that is down. Anything dropped by a deny list, geo, CrowdSec, a rate limit or the forward catch-all stays out. Bytes are the more exact figure, because a burst of TCP packets the kernel has merged can count as one packet.
+
+- **Reset:** the counts start from zero after each Apply, revert or reboot.
+- **No data:** a dash means there is no count for that route, which is different from `0`. The route is disabled, was added or changed since the last Apply (the count follows its protocol, ports and target), or the host has no counters yet, for example before the first Apply or in maintenance mode. A route with both protocols shows what exists when only one has a count.
+- **Updates:** the column refreshes every 15 seconds while the page is open, with no animation. Sorting by **Accepted** orders rows by packets using the counts at the moment you sort; a refresh changes the numbers but doesn't move rows. Routes with no data sort last.
+
+Full details are in [Route accepted counters](http-api.md#route-accepted-counters).
+
 ## Stats page
 
 **WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft -a list table …`), apart from the per-route [accepted counters](http-api.md#route-accepted-counters), which the API reports separately.
