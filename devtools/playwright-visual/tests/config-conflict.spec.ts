@@ -5,7 +5,7 @@
  * Each test loads a page, then changes the config through the API behind its back,
  * which is what another tab or the CLI would do.
  */
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "./fixtures";
 
 import { gotoRoute, seed, token } from "./helpers";
 

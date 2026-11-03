@@ -4,7 +4,7 @@
  * page has to pass that on. /update-geo is stubbed: the host side is covered by Go tests
  * and devtools/rollback-vm.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { gotoRoute, seed, type Route } from "./helpers";
 

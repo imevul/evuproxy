@@ -3,7 +3,7 @@
  * unusable. The config goes through the mock's real PUT so saves from a sorted table
  * can be checked against what actually landed.
  */
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "./fixtures";
 
 import { gotoRoute, largeConfig, seed, token } from "./helpers";
 

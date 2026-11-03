@@ -2,7 +2,7 @@
  * The unapplied-changes bar, and the one Apply it carries: checks first, shows named
  * steps, and pins the result at the top. The gate itself is in apply-gate.spec.ts.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { ROUTES, gotoRoute, seed } from "./helpers";
 

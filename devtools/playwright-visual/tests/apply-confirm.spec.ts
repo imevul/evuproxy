@@ -4,7 +4,7 @@
  * mode. /apply/* is stubbed, since a session on the shared mock would refuse every other
  * spec's Apply. The host side is covered by Go tests and devtools/rollback-vm.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { gotoRoute, seed } from "./helpers";
 

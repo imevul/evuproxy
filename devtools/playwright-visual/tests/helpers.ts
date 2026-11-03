@@ -60,7 +60,7 @@ export interface SeedOptions {
 }
 
 /**
- * Runs before any page script, so the FOUC guard in index.html already sees the
+ * Runs before any page script, so the FOUC guard (static/js/theme-boot.js) already sees the
  * chosen scheme and no theme flash is captured.
  */
 export async function seed(page: Page, opts: SeedOptions): Promise<void> {

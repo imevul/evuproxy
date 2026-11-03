@@ -1,7 +1,7 @@
 /**
  * Geoblock SRC cells offer a break-glass add control when the IP is not covered.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { gotoRoute, seed, token } from "./helpers";
 
