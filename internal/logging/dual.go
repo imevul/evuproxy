@@ -12,7 +12,8 @@ import (
 
 // SetupFileAndStderr configures slog.Default() to write JSON lines to logDir/evuproxy.jsonl
 // and human-readable text to stderr. logDir must be non-empty. SIGHUP reopens the file, so
-// logrotate can rename it and signal the process; cleanup stops handling the signal.
+// logrotate can rename it and signal the process; cleanup stops handling the signal and is
+// safe to call more than once.
 func SetupFileAndStderr(logDir string) (cleanup func(), err error) {
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
 		return nil, err
@@ -45,11 +46,14 @@ func SetupFileAndStderr(logDir string) (cleanup func(), err error) {
 			}
 		}
 	}()
+	var once sync.Once
 	return func() {
-		signal.Stop(hup)
-		close(stop)
-		<-stopped
-		_ = w.Close()
+		once.Do(func() {
+			signal.Stop(hup)
+			close(stop)
+			<-stopped
+			_ = w.Close()
+		})
 	}, nil
 }
 
@@ -86,9 +90,10 @@ func (w *reopenWriter) Reopen() error {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	old := w.f
+	// The switch has already happened, so a failed close of the old file is not a failed reopen.
+	_ = w.f.Close()
 	w.f = f
-	return old.Close()
+	return nil
 }
 
 func (w *reopenWriter) Close() error {
