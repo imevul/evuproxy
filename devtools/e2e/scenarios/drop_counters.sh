@@ -44,7 +44,14 @@ count_is() {
 	got=$(packets_of "$1" "$2")
 	[ "$got" = "$3" ] || { log "  wanted $3 packets on '$2', got '$got'"; return 1; }
 }
-no_counters() { ! in_ns proxy nft list ruleset | grep -q counter; }
+# Captured first: under pipefail, grep -q can kill nft with SIGPIPE, and ! would turn that into a
+# pass. The count-only rules of route_accepted render whatever this setting says.
+no_counters() {
+	local rules
+	rules=$(in_ns proxy nft list ruleset) || return 1
+	rules=$(grep -v evuproxy-accepted <<<"$rules")
+	[[ $rules != *counter* ]]
+}
 refuse_twice() {
 	check "$2: first probe gets no answer" blocked udp_reply wan "$1" "$PROXY_PUBLIC_IP" "$PORT"
 	check "$2: second probe gets no answer" blocked udp_reply wan "$1" "$PROXY_PUBLIC_IP" "$PORT"

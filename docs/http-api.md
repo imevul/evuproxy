@@ -180,6 +180,34 @@ Validation failures may return **`error_code`** (e.g. **`route_port_overlap`**, 
 
 **`GET /api/v1/overview`** may include **`geo_last_success_utc`** and **`geo_last_success_source`** after a successful geo loader run, and **`host_warnings`** (array of `{code, message}`) when live WireGuard host checks fail — e.g. tunnel address missing after systemd-networkd wipe, or **`wg_endpoint_host_mismatch`** when Settings’ WireGuard server endpoint DNS does not match this host’s public IPs (Cloudflare orange-cloud footgun — see [config.md](config.md#wireguard-server-endpoint-ui-preferences)).
 
+### Route accepted counters
+
+**`GET /stats`** returns **`route_accepted`**, a list with one row per route and protocol. It is always a list, and is empty when no rules are loaded, nothing has been applied yet, or `nft` is unavailable.
+
+```json
+"route_accepted": [
+  { "route_index": 0, "name": "Minecraft", "proto": "tcp", "ports": ["25565"], "target_ip": "10.100.0.10", "packets": 8516, "bytes": 7082475 }
+]
+```
+
+| Field | Meaning |
+|-------|---------|
+| `route_index` | The route's position in `forwarding.routes` of the **applied** config, which may differ from the saved one until the next Apply. |
+| `name` | The route's name. Left out if it has none. |
+| `proto` | `tcp` or `udp`. A route with both protocols has two rows. |
+| `ports` | The route's public ports, as written in the applied config. |
+| `target_ip` | The route's target. |
+| `packets`, `bytes` | Inbound packets the firewall accepted for this route since the last Apply. |
+
+**This is accepted traffic. It does not mean players or legitimate clients.** A source that passes the route's filters counts even if the backend never replies, so a scanner in an allowed country adds to it, and so does traffic to a backend that is down.
+
+- **What counts:** every inbound packet the **forward** chain accepted for the route, including the established packets of a flow, not just the first. Replies from the peer don't count. Neither does traffic the route's rules accept on the **input** chain, which is for a listener on the proxy itself.
+- **What doesn't count:** anything dropped by a deny list, geo, CrowdSec, a rate limit or the forward catch-all. See [`stats.drop_counters`](config.md#stats) for those.
+- **Counts can still be lost later.** Counting happens after EvuProxy's forward chain, so a packet can still be lost after it: by a firewall rule at a later priority, or by WireGuard if the peer is gone.
+- **Counters reset on Apply.** `evuproxy reload` replaces the tables, as it does for `stats.drop_counters`, so the counts start from zero after each Apply, revert or reboot. A paused route's counter stays, and **`evuproxy update-geo`** keeps the counts too. After upgrading from a version without these counters, the list stays empty until the next Apply.
+
+These rules are always generated, whatever `stats.drop_counters` says, and they aren't listed in **`nftables_counters`**.
+
 ### Metrics peers semantics
 
 **`collected_at_utc`** is the newest **`ts_utc`** among **`peer_latest`** rows that parse as RFC3339 (written by the collector). If **`evuproxy metrics`** is idle, stopped, or nothing was written yet, this may be empty or lag behind wall clock.

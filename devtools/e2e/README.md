@@ -97,9 +97,21 @@ A refusal on its own could just mean a dead service, so each one sits next to a 
 
 ## What `drop_counters` shows
 
-- **Off:** with `stats.drop_counters` unset, the ruleset has no counters, even while traffic is being dropped.
+- **Off:** with `stats.drop_counters` unset, the ruleset has no drop counters, even while traffic is being dropped.
 - **On:** geo allow, geo block, the global deny list, CrowdSec, UDP rate limits and the forward catch-all each count the packets they refuse, read the way **Stats** reads them, and a client that passes isn't counted. The catch-all counts past its log limit.
 - **Reload:** a reload starts the counts from zero.
+
+## What `route_accepted` shows
+
+Reads `route_accepted` from the real `GET /api/v1/stats`.
+
+- **Separate routes:** two routes that share a target and an internal port each count only their own traffic, and a route with both protocols has a row for each.
+- **All accepted packets:** TCP counts past the first packet of a connection, and every datagram of one UDP flow counts.
+- **Accepted, not answered:** a routed port with no listener still counts.
+- **Drops stay out:** global and route deny lists, geo allow and block, CrowdSec and UDP rate limits count nothing they refuse, each beside a client that passes and counts under the same config. A CrowdSec ban stops an established flow counting, and with a rate limit the accepted and dropped counts add up to everything sent.
+- **Reload and saved changes:** a reload starts the counts from zero. Saved changes that aren't applied don't relabel them.
+
+It doesn't send real traffic past a SYN limit or `max_conn_per_ip`. Those drop on the forward chain like the UDP limit, and the Go tests check they stay there.
 
 ## What `auto_pause` shows
 
