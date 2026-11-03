@@ -58,6 +58,12 @@ type NFTCounterLine struct {
 
 var nftCounterRE = regexp.MustCompile(`counter\s+packets\s+(\d+)\s+bytes\s+(\d+)`)
 
+var routeAcceptedPublicPortsRE = regexp.MustCompile(`ct original proto-dst (\{[^}]*\}|\S+)`)
+
+// nft 1.0.6 has no type for the elements of a conntrack port set, so it lists them raw:
+// { 0x50 [invalid type], 0x1bb [invalid type] } is { 80, 443 }. nft 1.1.6 lists the numbers.
+var nftRawPortRE = regexp.MustCompile(`0x([0-9a-fA-F]+) \[invalid type\]`)
+
 // StatsFromHost collects wg + nft counter snippets. Commands may fail on a dev machine without wg/nft.
 func StatsFromHost(cfgPath string) (*Stats, error) {
 	c, err := config.Load(cfgPath)
@@ -107,6 +113,9 @@ func parseRouteAccepted(c *config.Config, listing string) []RouteAcceptedCounter
 		if err != nil || !slices.Contains(protos, proto) || !strings.Contains(line, "ip daddr "+target+" ") {
 			continue
 		}
+		if !routeAcceptedPortsFit(line, r.Ports) {
+			continue
+		}
 		m := nftCounterRE.FindStringSubmatch(line)
 		if m == nil {
 			continue
@@ -124,6 +133,28 @@ func parseRouteAccepted(c *config.Config, listing string) []RouteAcceptedCounter
 		})
 	}
 	return res
+}
+
+// routeAcceptedPortsFit compares a rule's public ports with a route's. It reads them from the
+// conntrack match, because the rule's dport is the internal port on a mapped route.
+func routeAcceptedPortsFit(line string, routePorts []string) bool {
+	m := routeAcceptedPublicPortsRE.FindStringSubmatch(line)
+	if m == nil {
+		return false
+	}
+	expr := nftRawPortRE.ReplaceAllStringFunc(m[1], func(raw string) string {
+		p, err := strconv.ParseUint(nftRawPortRE.FindStringSubmatch(raw)[1], 16, 16)
+		if err != nil {
+			return raw
+		}
+		return strconv.FormatUint(p, 10)
+	})
+	live, err := config.ExpandRoutePortNumbers([]string{expr})
+	if err != nil {
+		return false
+	}
+	want, err := config.ExpandRoutePortNumbers(routePorts)
+	return err == nil && slices.Equal(live, want)
 }
 
 // NFTablesChainsForMetrics returns the text of the evuproxy forward and input chains (inet).
@@ -179,7 +210,8 @@ func wgDumpPeers(iface string) ([]WGPeerDump, error) {
 }
 
 func nftCounterLines(family, table string) []NFTCounterLine {
-	out, err := runCmdCombined(context.Background(), "nft", "-a", "list", "table", family, table)
+	// -t leaves out set contents: no counter line needs them, and printing geo sets is costly.
+	out, err := runCmdCombined(context.Background(), "nft", "-a", "-t", "list", "table", family, table)
 	if err != nil {
 		return nil
 	}

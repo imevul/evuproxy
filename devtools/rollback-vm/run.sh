@@ -535,7 +535,7 @@ PANEL_RULES="$OPEN_RULES
 # $1: the nginx config, filled in the way docker/entrypoint.sh does. Log each request's
 # connection, so the log shows which ones reached nginx and how many connections they used.
 install_nginx() {
-	sed -e 's|__API_HOST__|127.0.0.1:9847|g' -e 's|__UI_LISTEN__|0.0.0.0:9080|g' "$1" |
+	sed -e 's|__API_HOST__|127.0.0.1:9847|g' -e 's|__UI_LISTEN__|0.0.0.0:9080|g' -e 's|__UI_CONNECT_SRC__||g' "$1" |
 		vm "cat >/etc/nginx/conf.d/default.conf; rm -f /etc/nginx/sites-enabled/default; printf '%s\n' \"log_format evu '\\\$connection \\\$time_iso8601 \\\$status \\\$remote_addr \\\$request';\" 'access_log /var/log/nginx/evu.log evu;' >/etc/nginx/conf.d/00-log.conf; : >/var/log/nginx/evu.log; nginx -t -q && systemctl restart nginx"
 }
 # The same config with connections kept open, as it shipped before this change.

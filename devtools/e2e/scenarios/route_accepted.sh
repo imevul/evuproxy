@@ -239,5 +239,48 @@ metrics=$(metrics_text)
 check "the Prometheus metrics stay declared" eval '[[ $metrics == *"# TYPE evuproxy_route_accepted_packets_total counter"* ]]'
 check "with no samples" eval '[[ $metrics != *"evuproxy_route_accepted_packets_total{"* ]]'
 
+log "=== 12. A route with several ports keeps its row and counts ==="
+# nft lists a conntrack port set as raw values, unlike a single port, so this needs the real thing.
+PORT_SET_A=15410 PORT_SET_B=15412 PORT_SET_B_END=15413 MAP_SET_A=15420 MAP_SET_B=15422
+R_SET=0 R_MAPPED_SET=1
+apply_config <<EOF || die "reload with port sets"
+forwarding:
+  routes:
+    - proto: tcp
+      ports: ["$PORT_SET_A", "$PORT_SET_B-$PORT_SET_B_END"]
+      target_ip: $PEER_TUNNEL_IP
+    - proto: tcp
+      ports: ["$MAP_SET_A", "$MAP_SET_B"]
+      target_ip: $PEER_TUNNEL_IP
+      port_maps: [{public: "$MAP_SET_A", internal: "$PORT_SET_A"}, {public: "$MAP_SET_B", internal: "$PORT_SET_B"}]
+input_allows: []
+geo:
+  enabled: false
+EOF
+serve_tcp peer "$PEER_TUNNEL_IP" "$PORT_SET_A"
+serve_tcp peer "$PEER_TUNNEL_IP" "$PORT_SET_B"
+check "a route with a set has a row" accepted_is "$R_SET" tcp 0
+check "a mapped route with a set has a row" accepted_is "$R_MAPPED_SET" tcp 0
+check "the first port passes" reaches "$TCP_OK" tcp_reply wan "$CLIENT_IN_ZONE" "$PROXY_PUBLIC_IP" "$PORT_SET_A"
+check "and counts" accepted_at_least "$R_SET" tcp 3
+sleep 0.5
+set_count=$(accepted_packets "$R_SET" tcp)
+check "the range passes" reaches "$TCP_OK" tcp_reply wan "$CLIENT_IN_ZONE" "$PROXY_PUBLIC_IP" "$PORT_SET_B"
+check "and counts on top" accepted_at_least "$R_SET" tcp "$((set_count + 3))"
+check "the mapped route stays at zero" accepted_is "$R_MAPPED_SET" tcp 0
+check "a mapped port passes" reaches "$TCP_OK" tcp_reply wan "$CLIENT_IN_ZONE" "$PROXY_PUBLIC_IP" "$MAP_SET_B"
+check "and counts on its own route" accepted_at_least "$R_MAPPED_SET" tcp 3
+
+log "=== 13. Rules that no longer fit the applied config have no row ==="
+accepted_config | apply_config || die "reload"
+check "both routes start with a row" eval '[ -n "$(accepted_row "$R_UDP" udp)" ] && [ -n "$(accepted_row "$R_SILENT" udp)" ]'
+# What a failed Apply can leave: same target and protocol, but the applied config has them the
+# other way around from the live rules.
+sed -i "s/\"$PORT_UDP\"/\"swap\"/; s/\"$PORT_SILENT\"/\"$PORT_UDP\"/; s/\"swap\"/\"$PORT_SILENT\"/" /etc/evuproxy/config.yaml.bak
+check "reordered routes have no row" eval '[ -z "$(accepted_row "$R_UDP" udp)" ] && [ -z "$(accepted_row "$R_SILENT" udp)" ]'
+metrics=$(metrics_text)
+check "or samples" eval '[[ $metrics != *"route_index=\"$R_UDP\""* && $metrics != *"route_index=\"$R_SILENT\""* ]]'
+check "the others keep theirs" accepted_is "$R_TCP" tcp 0
+
 kill "$serve_pid" 2>/dev/null
 wait "$serve_pid" 2>/dev/null

@@ -25,7 +25,7 @@ Environment (optional):
 
 ## Screenshots (`make playwright-visual`)
 
-Every surface is captured **twice — light and dark** — as `<name>-light.png` / `<name>-dark.png` under `screenshots/$PW_VISUAL_SUBDIR/`. The scheme is seeded into `localStorage` before first paint, so the FOUC guard in `index.html` already sees it and no theme flash is captured.
+Every surface is captured **twice — light and dark** — as `<name>-light.png` / `<name>-dark.png` under `screenshots/$PW_VISUAL_SUBDIR/`. The scheme is seeded into `localStorage` before first paint, so the FOUC guard (`web/static/js/theme-boot.js`) already sees it and no theme flash is captured.
 
 Captures deliberately do **not** live under `test-results/`: Playwright wipes that directory at the start of every run, so a baseline stored there is destroyed the next time any spec runs.
 
@@ -102,6 +102,10 @@ Failure output lists the rule, the offending selectors, and a trimmed HTML snipp
 The same workflow runs `make visual-check` as the `visual baseline` job. It isn't a required check yet: ENG-148 decided it stays non-required for one cycle. When it fails, the actual, expected and diff images are kept with the report and traces as the `playwright-visual-baseline` artifact for 14 days, so a failure can be reviewed without re-running it.
 
 Plain `make playwright-visual` doesn't run in CI, because it uses unfrozen captures and compares nothing.
+
+## Content-Security-Policy
+
+Specs import `test` from `tests/fixtures.ts`, not from `@playwright/test`. It fails a test on any CSP violation in the browser console, so new specs should do the same. `csp.spec` checks the policy itself.
 
 ## Troubleshooting
 

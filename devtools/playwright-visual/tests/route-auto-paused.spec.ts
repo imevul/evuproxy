@@ -3,7 +3,7 @@
  * GET /auto-pause, apart from config, and pausing must never read as the route being disabled.
  */
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "./fixtures";
 
 import { SCHEMES, gotoRoute, seed, token } from "./helpers";
 

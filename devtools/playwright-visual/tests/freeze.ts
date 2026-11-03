@@ -94,10 +94,11 @@ export async function freeze(page: Page): Promise<void> {
   const css = process.env.PW_FREEZE_CSS;
   if (css) {
     await page.addInitScript((rules: string) => {
+      // Constructed, not a <style> element: the Content-Security-Policy refuses those.
       document.addEventListener("DOMContentLoaded", () => {
-        const style = document.createElement("style");
-        style.textContent = rules;
-        document.head.append(style);
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(rules);
+        document.adoptedStyleSheets.push(sheet);
       });
     }, css);
   }

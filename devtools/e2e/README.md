@@ -126,6 +126,16 @@ On demand, with `devtools/e2e/run.sh auto_pause`. It takes about 11 minutes, bec
 
 `devtools/rollback-vm` covers what this can't, because it needs systemd and reboots: confirm-or-revert. The container has no `systemd-run`, so this harness never turns on `apply.confirm`.
 
+## What `GET /stats` costs
+
+```bash
+make e2e-stats-cost
+```
+
+Times `GET /stats`, and each `wg` and `nft` command behind it, as the geo set grows to 150,000 elements. CPU is what the server and its commands used, and peak memory is per command. It takes about three minutes and has no thresholds: it fails only if a request or reload doesn't work, or if `nft -t` changes a counter line. Each number is a `RESULT` line.
+
+The elements are generated `/24`s with gaps between them, so auto-merge can't fold them. Real zones will vary, the numbers depend on this machine and the nftables in the container, and nothing here runs on an EvuProxy host.
+
 ## Stress test
 
 ```bash

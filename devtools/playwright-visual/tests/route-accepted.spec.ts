@@ -3,7 +3,7 @@
  * describes the applied config, while the rows come from the saved one.
  */
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { SCHEMES, gotoRoute, seed } from "./helpers";
 
@@ -59,6 +59,8 @@ test.describe("Accepted on Routes", () => {
     await page.route("**/api/v1/stats", (route) => route.fulfill({ json: { route_accepted: accepted } }));
     await gotoRoute(page, origin, "routes");
     await expect(row(page, 0)).toBeVisible();
+    // The rows don't wait for GET /stats, and these tests start from its answer.
+    await expect(cell(page, 0)).not.toHaveText("…");
   }
 
   test.beforeEach(() => {
@@ -124,6 +126,54 @@ test.describe("Accepted on Routes", () => {
     await expect(row(page, 0)).toBeVisible();
     await expect(cell(page, 0)).toHaveText("—");
     await expect(page.locator("#routes-msg")).toHaveText("");
+  });
+
+  /**
+   * Opens Routes with GET /stats held until the returned function is called with what to answer.
+   * Not gotoRoute: it waits for the network to go idle, which a held request never lets it.
+   */
+  async function openWithStatsHeld(page: Page) {
+    let release: (answer: { status: number; json: unknown }) => void = () => {};
+    const answer = new Promise<{ status: number; json: unknown }>((resolve) => (release = resolve));
+    await seed(page, { scheme: "light" });
+    await page.route("**/api/v1/config", (route) => route.fulfill({ json: CONFIG }));
+    await page.route("**/api/v1/stats", async (route) => route.fulfill(await answer));
+    await page.goto(origin + "/#/routes");
+    return release;
+  }
+
+  test("the rows draw without waiting for GET /stats, and the counts follow", async ({ page }) => {
+    const release = await openWithStatsHeld(page);
+    await expect(row(page, 0)).toBeVisible();
+    await expect(cell(page, 0)).toHaveText("…");
+    await expect(cell(page, 0)).toHaveAttribute("title", /Loading/);
+
+    release({ status: 200, json: { route_accepted: accepted } });
+    await expect(cell(page, 0)).toHaveText(`${fmt(1234567)} pkts · 6.8 MiB`);
+    await expect(cell(page, 2)).toHaveText("—");
+  });
+
+  test("a held GET /stats that fails ends in a dash, not a wait", async ({ page }) => {
+    const release = await openWithStatsHeld(page);
+    await expect(cell(page, 0)).toHaveText("…");
+
+    release({ status: 500, json: { error: "no" } });
+    await expect(cell(page, 0)).toHaveText("—");
+    await expect(cell(page, 0)).toHaveAttribute("title", /No count for this route/);
+  });
+
+  test("sorting by Accepted while the counts load orders the rows once they arrive", async ({ page }) => {
+    accepted = [counter(0, "tcp", ["25565", "25566"], 9, 1), counter(1, "udp", ["53"], 100, 1)];
+    const release = await openWithStatsHeld(page);
+    await expect(cell(page, 0)).toHaveText("…");
+    const sort = page.locator("#routes-table-wrap thead").getByRole("button", { name: "Accepted" });
+    await sort.click();
+    await sort.click();
+
+    release({ status: 200, json: { route_accepted: accepted } });
+    await expect
+      .poll(() => page.locator("#routes-table-wrap tr[data-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-row"))))
+      .toEqual(["1", "0", "2", "3"]);
   });
 
   test("matches by route, not by position in the applied config", async ({ page }) => {

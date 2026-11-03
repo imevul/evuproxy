@@ -1,7 +1,7 @@
 /**
  * Geoblock "Check an IP" panel — dry-run against form rules.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { gotoRoute, seed } from "./helpers";
 

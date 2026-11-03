@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/imevul/evuproxy/internal/config"
@@ -50,6 +51,22 @@ func TestNFTCounterLines_optionsBeforeCommand(t *testing.T) {
 
 	got := nftCounterLines("inet", "evuproxy")
 	if len(got) != 1 || got[0].Packets != 3 {
+		t.Fatalf("got %+v from calls %v", got, f.calls)
+	}
+}
+
+func TestNFTCounterLines_omitsSetContents(t *testing.T) {
+	f := &fakeRunner{handler: func(name string, args []string) ([]byte, error) {
+		if !slices.Contains(args, "-t") {
+			return nil, errors.New("listing would print every geo set element")
+		}
+		return []byte("tcp dport 22 counter packets 3 bytes 180 drop # handle 2\n"), nil
+	}}
+	prev := runner
+	runner = f
+	t.Cleanup(func() { runner = prev })
+
+	if got := nftCounterLines("inet", "evuproxy"); len(got) != 1 {
 		t.Fatalf("got %+v from calls %v", got, f.calls)
 	}
 }
@@ -110,6 +127,63 @@ func TestParseRouteAccepted_skipsRulesThatDontFitTheConfig(t *testing.T) {
 		if r.RouteIndex == 0 {
 			t.Fatalf("prefix of the target matched: %+v", r)
 		}
+	}
+}
+
+// Same target and protocol, so only the ports show that the rules belong to the old order.
+func TestParseRouteAccepted_skipsReorderedRoutes(t *testing.T) {
+	c := routeAcceptedConfig()
+	c.Forwarding.Routes[0], c.Forwarding.Routes[1] = c.Forwarding.Routes[1], c.Forwarding.Routes[0]
+	got := parseRouteAccepted(c, routeAcceptedListing)
+	if len(got) != 2 || got[0].RouteIndex != 3 || got[1].RouteIndex != 3 {
+		t.Fatalf("want only the rows of route 3, whose rules still fit: %+v", got)
+	}
+}
+
+// The shapes are from `nft list` (v1.0.6 and v1.1.6), which merges and sorts the set. A rule that
+// fits has to keep its row, however its ports are listed.
+func TestParseRouteAccepted_portShapes(t *testing.T) {
+	cases := []struct {
+		name  string
+		ports []string
+		live  string
+		fits  bool
+	}{
+		{"single", []string{"18080"}, "18080", true},
+		{"range", []string{"19000-19002"}, "19000-19002", true},
+		{"set", []string{"80", "443"}, "{ 0x50 [invalid type], 0x1bb [invalid type] }", true},
+		{"set in another order", []string{"443", "80"}, "{ 0x50 [invalid type], 0x1bb [invalid type] }", true},
+		{"merged range", []string{"90", "91-95"}, "{ 0x5a [invalid type]-0x5f [invalid type] }", true},
+		{"ranges and a port", []string{"100-105", "200", "300-301"}, "{ 0x64 [invalid type]-0x69 [invalid type], 0xc8 [invalid type], 0x12c [invalid type]-0x12d [invalid type] }", true},
+		{"braced", []string{"{ 22, 53 }", "8080"}, "{ 0x16 [invalid type], 0x35 [invalid type], 0x1f90 [invalid type] }", true},
+		{"set with decimal ports", []string{"80", "443"}, "{ 80, 443 }", true},
+		{"merged range with decimal ports", []string{"90", "91-95"}, "{ 90-95 }", true},
+		{"other port", []string{"18082"}, "18080", false},
+		{"one port of the set", []string{"80"}, "{ 0x50 [invalid type], 0x1bb [invalid type] }", false},
+		{"more ports than the rule", []string{"80", "443"}, "80", false},
+		{"other set", []string{"80", "443"}, "{ 0x50 [invalid type], 0x1bc [invalid type] }", false},
+		{"not a port", []string{"80"}, "http", false},
+		{"raw value out of range", []string{"80"}, "{ 0x10050 [invalid type] }", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &config.Config{Forwarding: config.Forwarding{Routes: []config.ForwardRoute{
+				{Proto: "tcp", Ports: tc.ports, TargetIP: "10.100.0.2"},
+			}}}
+			line := `ip daddr 10.100.0.2 tcp dport 18080 ct original proto-dst ` + tc.live + ` counter packets 1 bytes 2 comment "evuproxy-accepted route=0 proto=tcp"`
+			if got := parseRouteAccepted(c, line); (len(got) == 1) != tc.fits {
+				t.Fatalf("want fits=%v, got %+v", tc.fits, got)
+			}
+		})
+	}
+}
+
+// Nothing to compare, so the rule can't be shown to be this route's.
+func TestParseRouteAccepted_skipsRuleWithoutPublicPorts(t *testing.T) {
+	c := routeAcceptedConfig()
+	line := `ip daddr 10.100.0.2 tcp dport 18080 counter packets 1 bytes 2 comment "evuproxy-accepted route=0 proto=tcp"`
+	if got := parseRouteAccepted(c, line); len(got) != 0 {
+		t.Fatalf("got %+v", got)
 	}
 }
 
