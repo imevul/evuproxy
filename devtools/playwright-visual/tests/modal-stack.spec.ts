@@ -3,7 +3,7 @@
  * focus restore. The peer editor is the only place that stacks two dialogs (the
  * QR code opens on top of it), so it carries the nesting assertions.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./fixtures";
 
 import { gotoRoute, seed } from "./helpers";
 

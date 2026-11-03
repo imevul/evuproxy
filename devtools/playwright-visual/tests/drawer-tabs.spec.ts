@@ -3,7 +3,7 @@
  * Both are things axe cannot see: it checks roles and names, not whether focus
  * actually goes anywhere sensible.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { gotoRoute, seed } from "./helpers";
 

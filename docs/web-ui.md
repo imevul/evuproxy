@@ -70,13 +70,13 @@ The Settings bar writes up to three separate stores: UI preferences, config (**P
 
 - **Reset:** the counts start from zero after each Apply, revert or reboot.
 - **No data:** a dash means there is no count for that route, which is different from `0`. The route is disabled, was added or changed since the last Apply (the count follows its protocol, ports and target), or the host has no counters yet, for example before the first Apply or in maintenance mode. A route with both protocols shows what exists when only one has a count. A route disabled since the last Apply keeps its count until the next Apply, because its rule is still live, unless another saved route has the same protocol, ports and target: that count could be the other route's, so the disabled route shows a dash.
-- **Updates:** the column refreshes every 15 seconds while the page is open, with no animation. Sorting by **Accepted** orders rows by packets using the counts at the moment you sort; a refresh changes the numbers but doesn't move rows. Routes with no data sort last.
+- **Updates:** the rows draw without waiting for the counts, which can take seconds with large geo sets, and a cell shows **…** until they arrive. The column refreshes every 15 seconds while the page is open, with no animation. Sorting by **Accepted** orders rows by packets using the counts at the moment you sort; a refresh changes the numbers but doesn't move rows. Routes with no data sort last.
 
 Full details are in [Route accepted counters](http-api.md#route-accepted-counters).
 
 ## Stats page
 
-**WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft -a list table …`), apart from the per-route [accepted counters](http-api.md#route-accepted-counters), which the API reports separately.
+**WireGuard peers** come from `wg show`. **nftables counters** lists only nft rules that include an explicit **`counter`** keyword (`GET /api/v1/stats` parses `nft -a -t list table …`), apart from the per-route [accepted counters](http-api.md#route-accepted-counters), which the API reports separately.
 
 By default, generated EvuProxy drop rules (deny lists, geoblock, rate limits, CrowdSec, forward catch-all) have no **`counter`**, so this table is empty and hit counts only show up on the **Logs** page (journal/dmesg). Set **[`stats.drop_counters`](config.md#stats)** to `true` to list those rules here with their packet and byte counts. Geoblock **SRC** cells on **Logs** offer a break-glass add control when that IPv4 is not already covered by **`geo.break_glass_cidrs`**.
 

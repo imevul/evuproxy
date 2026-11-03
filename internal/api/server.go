@@ -44,6 +44,12 @@ type Server struct {
 	// CORSOrigins is a comma-separated list of allowed browser Origin values, or "*" for any.
 	// Used when the web UI is served from a different host than the API.
 	CORSOrigins string
+	// MTLSListen is an optional extra listener that requires a client certificate signed by
+	// MTLSClientCAFile as well as the API token. The four MTLS fields are set together or not at all.
+	MTLSListen       string
+	MTLSCertFile     string
+	MTLSKeyFile      string
+	MTLSClientCAFile string
 
 	// applyMu serializes mutating operations that touch config on disk, nftables, or WireGuard
 	// (reload, update-geo, backup, restore, PUT /config, POST /config/discard, POST /config/restore-previous-applied).
@@ -213,7 +219,7 @@ func (s *Server) Routes() http.Handler {
 	for _, route := range s.apiRoutes() {
 		mux.HandleFunc(route.pattern, s.auth(route.scope, route.handler))
 	}
-	return mux
+	return s.crossOriginGuard(mux)
 }
 
 func eventDetail(s string) string {
@@ -267,6 +273,10 @@ func (s *Server) Run() error {
 	if err := apply.RecoverConfirmSession(context.Background(), s.Config); err != nil {
 		s.Logger.Error("recover apply session", "err", err)
 	}
+	mtls, err := s.mtlsConfig()
+	if err != nil {
+		return err
+	}
 	if err := state.EnsureApplyStateFromDisk(s.Config); err != nil {
 		s.Logger.Warn("apply state bootstrap", "err", err)
 	}
@@ -290,8 +300,11 @@ func (s *Server) Run() error {
 	go s.autoPause.Run(context.Background())
 	handler := http.Handler(s.Routes())
 	if cors := parseCORSOrigins(s.CORSOrigins); cors != nil {
-		if cors.allowAll && !isLoopbackListen(s.Listen) {
+		if cors.allowAll && s.reachableBeyondLoopback(mtls) {
 			s.Logger.Warn("API listen is not loopback and --cors-origins allows any origin; use an explicit origin list when the API is reachable beyond localhost")
+		}
+		if cors.allowAll {
+			s.Logger.Warn("--cors-origins allows any origin, so cross-origin refusal of state-changing requests is off")
 		}
 		handler = cors.wrap(handler)
 	}
@@ -299,15 +312,16 @@ func (s *Server) Run() error {
 	// request body (e.g. PUT /config up to 2 MiB). WriteTimeout must cover the slowest
 	// handler including POST /reload and /update-geo under the apply mutex and GET /logs
 	// (~12s subprocess). IdleTimeout limits idle keep-alive connections.
-	srv := &http.Server{
-		Addr:              s.Listen,
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      6 * time.Minute,
-		IdleTimeout:       120 * time.Second,
+	newHTTPServer := func(addr string) *http.Server {
+		return &http.Server{
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      6 * time.Minute,
+			IdleTimeout:       120 * time.Second,
+		}
 	}
-	s.Logger.Info("evuproxy API listening", "addr", s.Listen)
 	if ml := strings.TrimSpace(s.MetricsListen); ml != "" {
 		if err := observability.ValidateMetricsListen(ml); err != nil {
 			if !s.MetricsListenInsecure {
@@ -321,7 +335,24 @@ func (s *Server) Run() error {
 			}
 		}()
 	}
-	return srv.ListenAndServe()
+	// The first listener to fail ends the process: staying up without the mTLS listener would
+	// hide the failure from systemd while clients that depend on it get refused.
+	errc := make(chan error, 2)
+	if !s.plainListenDisabled(mtls) {
+		s.Logger.Info("evuproxy API listening", "addr", s.Listen)
+		if mtls != nil && !isLoopbackListen(s.Listen) {
+			s.Logger.Warn("API listen is not loopback and accepts the token without a client certificate; bind it to loopback or disable it with --listen \"\" when using mTLS")
+		}
+		srv := newHTTPServer(s.Listen)
+		go func() { errc <- srv.ListenAndServe() }()
+	}
+	if mtls != nil {
+		s.Logger.Info("evuproxy API listening with client certificates required", "addr", s.MTLSListen)
+		srv := newHTTPServer(strings.TrimSpace(s.MTLSListen))
+		srv.TLSConfig = mtls
+		go func() { errc <- srv.ListenAndServeTLS("", "") }()
+	}
+	return <-errc
 }
 
 func isLoopbackListen(addr string) bool {

@@ -3,8 +3,9 @@
  * run against the mock, which refuses the same routes as the server. `dev-read` is its
  * default read token.
  */
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
+import { expect, test } from "./fixtures";
 import { gotoRoute, seed, token } from "./helpers";
 
 const origin = process.env.PW_BASE_URL?.trim() || "http://127.0.0.1:9080";

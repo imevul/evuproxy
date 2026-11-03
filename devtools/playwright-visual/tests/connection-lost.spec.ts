@@ -2,7 +2,7 @@
  * An API outage has to say what's wrong, leave what was loaded on screen, and end by
  * itself. The API is stopped with route interception, and restored by removing the route.
  */
-import { expect, test, type Page, type Route as PwRoute } from "@playwright/test";
+import { expect, test, type Page, type Route as PwRoute } from "./fixtures";
 
 import { gotoRoute, seed } from "./helpers";
 

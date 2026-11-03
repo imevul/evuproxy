@@ -5,7 +5,7 @@
  * /pending is stubbed to report a chosen applied config, so a test can set up any
  * difference without a reload moving the mock's baseline under the other specs.
  */
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "./fixtures";
 
 import { gotoRoute, seed, token } from "./helpers";
 

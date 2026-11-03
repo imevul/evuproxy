@@ -210,7 +210,8 @@ func wgDumpPeers(iface string) ([]WGPeerDump, error) {
 }
 
 func nftCounterLines(family, table string) []NFTCounterLine {
-	out, err := runCmdCombined(context.Background(), "nft", "-a", "list", "table", family, table)
+	// -t leaves out set contents: no counter line needs them, and printing geo sets is costly.
+	out, err := runCmdCombined(context.Background(), "nft", "-a", "-t", "list", "table", family, table)
 	if err != nil {
 		return nil
 	}
