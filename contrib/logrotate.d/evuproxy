@@ -1,6 +1,8 @@
 # Example logrotate snippet for EvuProxy JSONL file logging (EVUPROXY_LOG_DIR=/var/log/evuproxy).
-# Prefer copytruncate-free rotation: use `create` + reload, or rotate by renaming and sending
-# SIGHUP if a future evuproxy version supports log reopen.
+# logrotate renames the file and creates a new one, then SIGHUP makes `evuproxy serve` reopen it.
+# Only install this for a build with SIGHUP log reopen and EVUPROXY_LOG_DIR set: otherwise SIGHUP
+# stops the API, and systemd's Restart=on-failure treats that as a clean exit and won't restart it.
+# --kill-who=main signals only the API process, not any nft or journalctl child it is running.
 /var/log/evuproxy/*.jsonl {
     weekly
     rotate 8
@@ -8,5 +10,9 @@
     delaycompress
     missingok
     notifempty
-    copytruncate
+    create 0600 root root
+    sharedscripts
+    postrotate
+        systemctl kill -s HUP --kill-who=main evuproxy-api.service || true
+    endscript
 }
