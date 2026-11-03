@@ -14,7 +14,7 @@ Turnkey **TCP/UDP exposure** on a Linux VPS using **WireGuard** and **nftables**
 | **VPS (`install.sh`)**      | **Linux** host with **root** (or sudo) for install. The script installs **WireGuard**, **nftables**, **curl**, and **iproute2** via **apt**, **dnf**, or **pacman**. Other distros need those packages installed manually before using `evuproxy`. |
 | **Go (optional)**           | **[Go 1.25+](https://go.dev/dl/)** on your **PATH** if you want `scripts/install.sh` to compile `evuproxy` from this repo. Without Go, place a prebuilt **`evuproxy`** binary at `/usr/local/bin/evuproxy` (or set `PREFIX`) after install.        |
 | **Build from source (dev)** | Go **1.25+** and this repository; run `go build` from the repo root (see [Building from source](#building-from-source)).                                                                                                                           |
-| **Web UI**                  | **[Docker](https://docs.docker.com/engine/install/)** and **Docker Compose** (v2 plugin: `docker compose`) to build and run the admin UI container.                                                                                                |
+| **Web UI**                  | **[Docker](https://docs.docker.com/engine/install/)** and **Docker Compose** (v2 plugin: `docker compose`) to run the admin UI container, from a [published image](docs/web-ui.md#published-image) or built locally.                                |
 | **Geo / IP lists**          | Outbound **HTTPS** to [ipdeny.com](https://www.ipdeny.com/ipblocks/data/countries/) (default zone source) for `update-geo` and first-time zone fetch on `reload`. See [docs/third-party-data.md](docs/third-party-data.md) for attribution and limits.                                                                                  |
 
 
@@ -108,7 +108,7 @@ Overrides must use **`https://`** URLs; **`install-peer-tool`** and **`evuproxy-
 
 - **Config reference** (`config.yaml` schema, all keys): [docs/config.md](docs/config.md)
 - **HTTP API** (bind address, auth, CORS, endpoints, backup paths): [docs/http-api.md](docs/http-api.md)
-- **Web UI** (Docker compose, mock dev stack): [docs/web-ui.md](docs/web-ui.md)
+- **Web UI** (Docker compose, mock dev stack): [docs/web-ui.md](docs/web-ui.md). To skip building it, set `EVUPROXY_UI_IMAGE=ghcr.io/imevul/evuproxy-ui:<version>` in `.env`, then run `docker compose pull && docker compose up -d --no-build` ([details](docs/web-ui.md#published-image)).
 - **Security and privacy** (telemetry, token storage, operational notes): [docs/security-and-privacy.md](docs/security-and-privacy.md)
 - **Third-party / IPDeny** (attribution, usage): [docs/third-party-data.md](docs/third-party-data.md)
 
@@ -121,7 +121,7 @@ cd /path/to/evuproxy   # repository root
 ./scripts/update.sh
 ```
 
-The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.25+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/` (`rebuild.sh --install` also replaces an unmodified `evuproxy.service` with the current one, and warns and leaves yours alone if you changed it), restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file.
+The script runs **`git pull`**, builds with [scripts/rebuild.sh](scripts/rebuild.sh) (needs **Go 1.25+** on `PATH`), installs to **`PREFIX`** (default `/usr/local`) when EvuProxy **systemd units** exist under `/etc/systemd/system/` (`rebuild.sh --install` also replaces an unmodified `evuproxy.service` with the current one, and warns and leaves yours alone if you changed it), restarts **active** `evuproxy.service` / `evuproxy-api.service`, and if the repo’s **Docker Compose** UI stack is already running it runs **`docker compose up --build -d`** for that file. With **`EVUPROXY_UI_IMAGE`** set, it runs **`docker compose pull`** and **`up -d --no-build`** instead, and the version stays what `.env` says until you change it.
 
 **Limitations**
 
@@ -163,7 +163,7 @@ go build -ldflags "-X main.version=$(git describe --tags --always 2>/dev/null ||
 
 EvuProxy uses **SemVer** **`0.MINOR.PATCH`** while in beta (`0.x`). **Patch** releases cover fixes and small tweaks; **minor** releases cover new features or larger behavior changes. Breaking changes on the `0.x` line are shipped as a **minor** bump (common practice for unstable `0.x` series).
 
-[Release Please](https://github.com/googleapis/release-please) drives releases from [Conventional Commits](https://www.conventionalcommits.org/) on `main` (for example `feat:` for features, `fix:` for fixes, and `feat!:` or a `BREAKING CHANGE:` footer for breaking changes). It opens a **release pull request** that bumps the version in [.release-please-manifest.json](.release-please-manifest.json), updates [CHANGELOG.md](CHANGELOG.md), and updates the embedded version in [cmd/evuproxy/main.go](cmd/evuproxy/main.go). Merging that PR creates the Git tag and **GitHub Release**. Another workflow then builds **Linux** binaries (`amd64`, `arm64`), [`.deb` and RPM packages](#install-from-a-package), a **`git archive`** source ZIP, and **SHA256SUMS**, and uploads them to the release.
+[Release Please](https://github.com/googleapis/release-please) drives releases from [Conventional Commits](https://www.conventionalcommits.org/) on `main` (for example `feat:` for features, `fix:` for fixes, and `feat!:` or a `BREAKING CHANGE:` footer for breaking changes). It opens a **release pull request** that bumps the version in [.release-please-manifest.json](.release-please-manifest.json), updates [CHANGELOG.md](CHANGELOG.md), and updates the embedded version in [cmd/evuproxy/main.go](cmd/evuproxy/main.go). Merging that PR creates the Git tag and **GitHub Release**. Another workflow then builds **Linux** binaries (`amd64`, `arm64`), [`.deb` and RPM packages](#install-from-a-package), a **`git archive`** source ZIP, and **SHA256SUMS**, uploads them to the release, and publishes the UI image to [`ghcr.io/imevul/evuproxy-ui`](docs/web-ui.md#published-image) tagged with the release version.
 
 The running binary exposes its version via `evuproxy version`, `GET /api/v1/about`, and the admin UI sidebar.
 

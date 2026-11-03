@@ -25,7 +25,7 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   # Release Please uses GITHUB_TOKEN, so `release: published` does not trigger other workflows.
-  # Upload binaries in this workflow when a release is created.
+  # Upload binaries and publish the UI image in this workflow when a release is created.
   upload-release-assets:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
@@ -76,3 +76,13 @@ jobs:
             evuproxy-*-source.zip \
             SHA256SUMS \
             --clobber
+
+  publish-ui-image:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/ui-image.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
