@@ -17,6 +17,7 @@ type Config struct {
 	Forwarding  Forwarding  `yaml:"forwarding" json:"forwarding"`
 	Geo         Geo         `yaml:"geo" json:"geo"`
 	CrowdSec    CrowdSec    `yaml:"crowdsec,omitempty" json:"crowdsec,omitempty"`
+	Stats       StatsConfig `yaml:"stats,omitempty" json:"stats,omitempty"`
 	InputAllows []AllowRule `yaml:"input_allows" json:"input_allows"`
 	Peers       []Peer      `yaml:"peers" json:"peers"`
 	// Apply is left out of existing configs, which keeps Apply one-way until it is turned on.
@@ -123,6 +124,12 @@ func (g Geo) EffectiveSetName() string {
 		return s
 	}
 	return DefaultGeoSetName
+}
+
+// StatsConfig controls optional observability additions to the generated ruleset.
+type StatsConfig struct {
+	// DropCounters adds an nft counter to generated drop rules so GET /stats reports them (off by default).
+	DropCounters bool `yaml:"drop_counters,omitempty" json:"drop_counters,omitempty"`
 }
 
 type AllowRule struct {

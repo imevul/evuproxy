@@ -1139,9 +1139,89 @@ func TestNFTables_configMatrix_nftCheck(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := baseNFTConfig()
-			tc.mut(c)
-			nftCheck(t, c)
+			off := baseNFTConfig()
+			tc.mut(off)
+			on := baseNFTConfig()
+			tc.mut(on)
+			on.Stats.DropCounters = true
+
+			assertDropCounters(t, off, on)
+			t.Run("drop_counters_off", func(t *testing.T) { nftCheck(t, off) })
+			t.Run("drop_counters_on", func(t *testing.T) { nftCheck(t, on) })
 		})
+	}
+}
+
+// assertDropCounters checks that stats.drop_counters only ever adds `counter` to
+// explicit drop rules: off renders none, and removing them from on gives off.
+func assertDropCounters(t *testing.T, off, on *config.Config) {
+	t.Helper()
+	offOut, err := NFTables(off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onOut, err := NFTables(on)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(offOut, "counter") {
+		t.Fatalf("drop_counters off must not render counters:\n%s", offOut)
+	}
+	if got := strings.ReplaceAll(onOut, "counter ", ""); got != offOut {
+		t.Fatalf("drop_counters on must differ only by counter statements:\n--- on, counters removed\n%s\n--- off\n%s", got, offOut)
+	}
+	for _, line := range strings.Split(onOut, "\n") {
+		isDrop := strings.HasSuffix(line, " drop")
+		hasCounter := strings.Contains(line, " counter ")
+		if isDrop != hasCounter {
+			t.Errorf("drop rule and counter must go together: %q", line)
+		}
+	}
+}
+
+func TestNFTables_dropCounters_placement(t *testing.T) {
+	c := baseNFTConfig()
+	c.Stats.DropCounters = true
+	c.Geo = config.Geo{Enabled: true, Mode: "block", SetName: "geo_v4", Countries: []string{"ru"}, ZoneDir: "/z", ApplyToInputAllows: true}
+	c.InputAllows = []config.AllowRule{{Proto: "tcp", DPort: "22"}}
+	c.CrowdSec = config.CrowdSec{Enabled: true}
+	c.Forwarding.SourceDenyCIDRs = []string{"192.0.2.0/24"}
+	c.Forwarding.RateLimit = config.RateLimit{MaxConnPerIP: 8, TCPSynPerSecond: 40}
+	c.Forwarding.Routes = []config.ForwardRoute{
+		{Proto: "tcp", Ports: []string{"25565"}, TargetIP: "10.100.0.2"},
+	}
+	s, err := NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`counter limit rate 3/minute burst 5 packets log prefix "evuproxy-forward-drop: " drop`,
+		`ip saddr @crowdsec_block_v4 tcp dport { 25565 } counter log prefix "evuproxy-crowdsec: " drop`,
+		`ct state new add @ratelimit_conn_r0_tcp { ip saddr ct count over 8 } counter log prefix "evuproxy-ratelimit: " drop`,
+		`update @ratelimit_syn_v4 { ip saddr limit rate over 40/second burst 80 packets } counter log prefix "evuproxy-ratelimit: " drop`,
+		// The geo log rule is rate limited, so the counter belongs on the drop rule after it.
+		`ip saddr @geo_v4 tcp dport { 25565 } counter drop`,
+		`ip saddr @geo_v4 tcp dport 22 counter drop`,
+		// Prerouting sees these first, so without a counter here geo block and deny drops stay invisible.
+		`ip saddr @geo_v4 tcp dport 25565 counter drop`,
+		`ip saddr @global_src_deny_v4 tcp dport 25565 counter drop`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+
+	c.Geo.Mode = "allow"
+	s, err = NFTables(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`tcp dport { 25565 } ip saddr != @geo_v4 counter drop`,
+		`tcp dport 22 ip saddr != @geo_v4 counter drop`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
 	}
 }

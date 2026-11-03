@@ -129,17 +129,17 @@ func rateLimitConnSet(i int, proto string) string {
 }
 
 // writePolicyRateLimit emits per-source limits on published ports (INPUT and forward).
-func writePolicyRateLimit(b *strings.Builder, routeIndex int, global, route config.RateLimit, proto, portExpr, breakGlass string) {
-	writePolicyRateLimitScoped(b, "", routeIndex, global, route, proto, portExpr, breakGlass)
+func writePolicyRateLimit(b *strings.Builder, routeIndex int, global, route config.RateLimit, proto, portExpr, breakGlass, counter string) {
+	writePolicyRateLimitScoped(b, "", routeIndex, global, route, proto, portExpr, breakGlass, counter)
 }
 
 // writePolicyForwardRateLimit emits per-source limits on WAN→tunnel forwarded flows.
-func writePolicyForwardRateLimit(b *strings.Builder, pub, wg string, routeIndex int, global, route config.RateLimit, proto, portExpr, breakGlass string) {
+func writePolicyForwardRateLimit(b *strings.Builder, pub, wg string, routeIndex int, global, route config.RateLimit, proto, portExpr, breakGlass, counter string) {
 	scope := fmt.Sprintf("iifname %q oifname %q ", pub, wg)
-	writePolicyRateLimitScoped(b, scope, routeIndex, global, route, proto, portExpr, breakGlass)
+	writePolicyRateLimitScoped(b, scope, routeIndex, global, route, proto, portExpr, breakGlass, counter)
 }
 
-func writePolicyRateLimitScoped(b *strings.Builder, scope string, routeIndex int, global, route config.RateLimit, proto, portExpr, breakGlass string) {
+func writePolicyRateLimitScoped(b *strings.Builder, scope string, routeIndex int, global, route config.RateLimit, proto, portExpr, breakGlass, counter string) {
 	rl := rateLimitBindingForRoute(routeIndex, global, route)
 	if rl.connN == 0 && rl.synSet == "" && rl.udpSet == "" {
 		return
@@ -150,27 +150,27 @@ func writePolicyRateLimitScoped(b *strings.Builder, scope string, routeIndex int
 		// whole rule. The new connection is already in the count, so "over N" lets N through.
 		// Not a sticky ban, because the count falls as connections close.
 		connSet := rateLimitConnSet(routeIndex, proto)
-		fmt.Fprintf(b, "        %s%s%s dport %s ct state established,related add @%s { ip saddr ct count over %d } log prefix %q drop\n",
-			scope, exempt, proto, portExpr, connSet, rl.connN, logPrefixRateLimit)
+		fmt.Fprintf(b, "        %s%s%s dport %s ct state established,related add @%s { ip saddr ct count over %d } %slog prefix %q drop\n",
+			scope, exempt, proto, portExpr, connSet, rl.connN, counter, logPrefixRateLimit)
 		// Also on new UDP flows: one let through here would stay in the count and push the
 		// source's working flows over the limit too.
-		fmt.Fprintf(b, "        %s%s%s dport %s ct state new add @%s { ip saddr ct count over %d } log prefix %q drop\n",
-			scope, exempt, proto, portExpr, connSet, rl.connN, logPrefixRateLimit)
+		fmt.Fprintf(b, "        %s%s%s dport %s ct state new add @%s { ip saddr ct count over %d } %slog prefix %q drop\n",
+			scope, exempt, proto, portExpr, connSet, rl.connN, counter, logPrefixRateLimit)
 	}
 	// "over" is what makes these drop the excess: a bare "limit rate" matches traffic under the
 	// rate. "update" restarts the 2s timeout on every packet, because "add" lets the element
 	// expire under load and hands the source a fresh burst each time.
 	if proto == "tcp" && rl.synSet != "" && rl.synN > 0 {
 		burst := rateLimitBurst(rl.synN)
-		fmt.Fprintf(b, "        %s%s%s dport %s tcp flags syn ct state new update @%s { ip saddr limit rate over %d/second burst %d packets } log prefix %q drop\n",
-			scope, exempt, proto, portExpr, rl.synSet, rl.synN, burst, logPrefixRateLimit)
+		fmt.Fprintf(b, "        %s%s%s dport %s tcp flags syn ct state new update @%s { ip saddr limit rate over %d/second burst %d packets } %slog prefix %q drop\n",
+			scope, exempt, proto, portExpr, rl.synSet, rl.synN, burst, counter, logPrefixRateLimit)
 	}
 	if proto == "udp" && rl.udpSet != "" && rl.udpN > 0 {
 		burst := rateLimitBurst(rl.udpN)
 		// Meter every UDP datagram — ct state new only matches the first packet of a flow;
 		// established UDP would skip this rule and hit blanket established,related accept.
-		fmt.Fprintf(b, "        %s%s%s dport %s update @%s { ip saddr limit rate over %d/second burst %d packets } log prefix %q drop\n",
-			scope, exempt, proto, portExpr, rl.udpSet, rl.udpN, burst, logPrefixRateLimit)
+		fmt.Fprintf(b, "        %s%s%s dport %s update @%s { ip saddr limit rate over %d/second burst %d packets } %slog prefix %q drop\n",
+			scope, exempt, proto, portExpr, rl.udpSet, rl.udpN, burst, counter, logPrefixRateLimit)
 	}
 }
 
@@ -188,13 +188,13 @@ func writePolicyForwardDrops(b *strings.Builder, pub, wg string, r routePolicy) 
 		return
 	}
 	if r.globalDeny != "" {
-		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, r.globalDeny, r.proto, r.forwardPorts)
+		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s %sdrop\n", pub, wg, r.globalDeny, r.proto, r.forwardPorts, r.counter)
 	}
 	if r.srcDeny != "" {
-		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s drop\n", pub, wg, r.srcDeny, r.proto, r.forwardPorts)
+		fmt.Fprintf(b, "        iifname %q oifname %q ip saddr @%s %s dport %s %sdrop\n", pub, wg, r.srcDeny, r.proto, r.forwardPorts, r.counter)
 	}
 	if r.crowdsecSet != "" {
-		writePolicyCrowdsecForwardDrop(b, pub, wg, r.crowdsecSet, r.breakGlass, r.proto, r.forwardPorts)
+		writePolicyCrowdsecForwardDrop(b, pub, wg, r.crowdsecSet, r.breakGlass, r.proto, r.forwardPorts, r.counter)
 	}
-	writePolicyForwardRateLimit(b, pub, wg, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.forwardPorts, r.breakGlass)
+	writePolicyForwardRateLimit(b, pub, wg, r.routeIndex, r.globalRL, r.routeRL, r.proto, r.forwardPorts, r.breakGlass, r.counter)
 }

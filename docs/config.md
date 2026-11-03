@@ -152,7 +152,7 @@ Forwarding is expressed as one or more **routes**. Each route publishes a set of
 | `max_conn_per_ip` | int (optional) | Drop when a **source IP** exceeds **N** concurrent flows to the route, counted separately for TCP and UDP (`ct count over N` in a per-source set; 1–65535). Not a sticky ban — when connections close, new ones are allowed again. |
 | `udp_per_second` | int (optional) | Drop excess UDP packets per **source IP** (1–100000); meters **every datagram**, not only the first packet of a flow; can affect bursty game traffic. |
 
-Drops are logged with prefix `evuproxy-ratelimit` and appear in **Logs** when enabled (not in **Stats** nftables counters — see [Web UI — Stats page](web-ui.md#stats-page)).
+Drops are logged with prefix `evuproxy-ratelimit` and appear in **Logs** when enabled, and in **Stats** nftables counters when [`stats.drop_counters`](#stats) is on.
 
 Limits apply on **INPUT** (host-destined) and **forward** (WAN→tunnel path), not in nat prerouting. **`geo.break_glass_cidrs` exempts rate limits** (same as CrowdSec/geo bypass).
 
@@ -202,11 +202,33 @@ Top-level key (a sibling of `forwarding` and `geo`, **not** nested under `forwar
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Drops are logged with prefix **`evuproxy-crowdsec`** (visible in the admin **Logs** view; not **Stats** nftables counters — see [Web UI — Stats page](web-ui.md#stats-page)). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
+| `enabled` | bool (optional) | Default `false`. When `true`, generated rules drop sources in nft set **`crowdsec_block_v4`** on published ports (after break-glass). Drops are logged with prefix **`evuproxy-crowdsec`** (visible in the admin **Logs** view, and in **Stats** nftables counters when [`stats.drop_counters`](#stats) is on). Requires the [CrowdSec nftables bouncer](../contrib/crowdsec/README.md) on the same host. |
 
 CrowdSec drops apply on **inet** INPUT/forward only (not **`ip` prerouting** before DNAT). Banned sources are still DNAT’d, then dropped in forward — functionally blocked. Early drop in prerouting is deferred (v2) if needed.
 
 Ban set contents are preserved across `evuproxy reload` (elements, including timeouts, are snapshotted and re-added after the tables are replaced).
+
+---
+
+## `stats`
+
+Top-level key. Optional additions to the generated ruleset for the admin **Stats** page.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `drop_counters` | bool (optional) | Default `false`, which leaves generated rules unchanged. When `true`, every explicit `drop` rule gets an nft **`counter`**: global and per-route deny lists, geo, CrowdSec, rate limits (on **inet** input/forward and **ip** prerouting where they exist) and the forward catch-all. **Stats** and `GET /api/v1/stats` (`nftables_counters`) then list each rule with its packet and byte counts. |
+
+```yaml
+stats:
+  drop_counters: true
+```
+
+How to read the counts:
+
+- **Counters reset on apply.** `evuproxy reload` replaces the tables, so the counts start from zero after each apply. `evuproxy update-geo` only reloads the geo sets and keeps them.
+- **Packets, not log lines.** Geo and forward catch-all rules limit how often they log, but their counters include every packet they drop, so the counts will usually be higher than the matching lines in **Logs**.
+- **Chain policy drops are not counted.** Traffic that matches no rule and falls through to the **input** or **forward** chain `policy drop` has no rule to count on. Unsolicited traffic to closed ports on the host is the usual example. The forward catch-all does count most of what would otherwise reach the forward policy.
+- **Where a drop shows up depends on the path.** Deny lists and geo `block` mode drop forwarded ports in **ip** prerouting first, so those rows usually carry the counts and the matching **inet** rows stay near zero.
 
 ---
 
