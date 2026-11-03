@@ -1,7 +1,7 @@
 .PHONY: all up down dev dev-fresh playwright-deps playwright-visual a11y ui-behavior \
 	visual-check visual-baseline \
 	crowdsec-install crowdsec-up crowdsec-status crowdsec-down crowdsec-logs \
-	check fmt vet test test-race deadcode e2e e2e-stress e2e-stats-cost package-test
+	check fmt vet test test-race deadcode e2e e2e-stress e2e-stats-cost package-test upgrade-test
 
 # Run from the repository root. Requires Go 1.25+, Docker, and `docker compose` (v2).
 
@@ -51,6 +51,11 @@ e2e-stats-cost:
 # See devtools/package-test/README.md.
 package-test:
 	./devtools/package-test/run.sh
+
+# scripts/upgrade-binary.sh under real systemd in a throwaway container, including failed
+# downloads. See devtools/upgrade-test/README.md.
+upgrade-test:
+	./devtools/upgrade-test/run.sh
 
 CROWDSEC_DIR := contrib/crowdsec
 
