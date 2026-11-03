@@ -28,9 +28,11 @@ import (
 
 type Server struct {
 	Listen                string
-	MetricsListen         string // optional loopback-only Prometheus scrape (GET /metrics), no auth
+	MetricsListen         string // optional loopback-only Prometheus scrape (GET /metrics)
 	MetricsListenInsecure bool   // allow non-loopback MetricsListen (explicit opt-in)
-	Token                 string
+	// MetricsToken is required on GET /metrics when set, and opens nothing else.
+	MetricsToken string
+	Token        string
 	// ReadToken is an optional second token, limited to the read routes in apiRoutes.
 	ReadToken string
 	Config    string
@@ -284,6 +286,12 @@ func (s *Server) Run() error {
 	if s.ReadToken != "" && s.ReadToken == s.Token {
 		s.Logger.Warn("the read token is the same as the write token, so it has full access; give it its own value")
 	}
+	if s.MetricsToken != "" && s.MetricsToken == s.Token {
+		s.Logger.Warn("the metrics token is the same as the write token, so a Prometheus config holds full API access; give it its own value")
+	}
+	if s.MetricsToken != "" && s.MetricsToken == s.ReadToken {
+		s.Logger.Warn("the metrics token is the same as the read token, so a Prometheus config can read logs, events and stats; give it its own value")
+	}
 	if el, err := eventlog.New(filepath.Dir(s.Config), eventlog.MaxBytesFromEnv()); err != nil {
 		s.Logger.Warn("event log disabled", "err", err)
 	} else {
@@ -329,9 +337,12 @@ func (s *Server) Run() error {
 				return fmt.Errorf("metrics listen: %w (use --metrics-listen-insecure to bind anyway)", err)
 			}
 			s.Logger.Warn("metrics listen address (insecure override)", "err", err)
+			if s.MetricsToken == "" {
+				s.Logger.Warn("no metrics token is set, so anything that can reach the metrics port can read /metrics; set --metrics-token-file")
+			}
 		}
 		go func() {
-			if err := RunPrometheusServer(ml, s.Config, s.Logger); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := RunPrometheusServer(ml, s.Config, s.MetricsToken, s.Logger); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				s.Logger.Error("prometheus metrics server", "err", err)
 			}
 		}()

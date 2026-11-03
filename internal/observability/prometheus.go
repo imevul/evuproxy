@@ -138,7 +138,7 @@ func ValidateMetricsListen(listen string) error {
 		return err
 	}
 	if host != "127.0.0.1" && host != "::1" && host != "localhost" {
-		return fmt.Errorf("metrics listen address %q is not loopback — bind 127.0.0.1 only unless you accept unauthenticated scrape exposure", listen)
+		return fmt.Errorf("metrics listen address %q is not loopback — bind 127.0.0.1 only unless you accept exposing the scrape over plain HTTP, where metrics and any metrics token are sent in clear text", listen)
 	}
 	return nil
 }
